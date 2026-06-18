@@ -12,7 +12,7 @@ const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/wow_gatewa
 
 // Allow CORS from typical local frontend ports
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173','https://wow-getway.netlify.app'],
   credentials: true
 }));
 

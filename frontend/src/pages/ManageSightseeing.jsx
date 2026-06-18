@@ -50,7 +50,7 @@ import {
 
 import MetricCard from '../components/widgets/MetricCard.jsx';
 
-const API_BASE_URL = 'http://localhost:5005/api/dashboard/tour-packages';
+const API_BASE_URL = 'https://wow-getway-api.onrender.com/api/dashboard/tour-packages';
 
 const destinationsList = [
   'Gangtok', 'Darjeeling', 'Kalimpong', 'Lachen', 'Lachung', 

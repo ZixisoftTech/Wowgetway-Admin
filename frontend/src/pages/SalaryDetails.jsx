@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { ArrowLeft, Printer, FileText, Send, IndianRupee, HelpCircle, History, Check, ShieldAlert } from 'lucide-react';
 
-const API_SALARIES_URL = 'http://localhost:5005/api/dashboard/salaries';
+const API_SALARIES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/salaries';
 
 export default function SalaryDetails({ onCancel, selectedSalaryId }) {
   const [activeSubTab, setActiveSubTab] = useState('slip'); // 'slip' | 'history'

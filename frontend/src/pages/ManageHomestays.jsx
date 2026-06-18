@@ -35,8 +35,8 @@ import {
 } from 'lucide-react';
 import MetricCard from '../components/widgets/MetricCard.jsx';
 
-const API_HOMESTAYS_URL = 'http://localhost:5005/api/dashboard/homestays-list';
-const API_OWNERS_URL = 'http://localhost:5005/api/dashboard/owners';
+const API_HOMESTAYS_URL = 'https://wow-getway-api.onrender.com/api/dashboard/homestays-list';
+const API_OWNERS_URL = 'https://wow-getway-api.onrender.com/api/dashboard/owners';
 
 export default function ManageHomestays() {
   const queryClient = useQueryClient();

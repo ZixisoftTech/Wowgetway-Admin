@@ -23,9 +23,9 @@ import {
   ShieldAlert
 } from 'lucide-react';
 
-const API_ROLES_URL = 'http://localhost:5005/api/dashboard/roles';
-const API_EMPLOYEES_URL = 'http://localhost:5005/api/dashboard/employees-list';
-const API_ASSIGN_URL = 'http://localhost:5005/api/dashboard/employees-assign-role';
+const API_ROLES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/roles';
+const API_EMPLOYEES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/employees-list';
+const API_ASSIGN_URL = 'https://wow-getway-api.onrender.com/api/dashboard/employees-assign-role';
 
 // Fetch lists helpers
 const fetchRolesList = async () => {

@@ -41,7 +41,7 @@ import {
 
 import MetricCard from '../components/widgets/MetricCard.jsx';
 
-const API_BASE_URL = 'http://localhost:5005/api/dashboard/users';
+const API_BASE_URL = 'https://wow-getway-api.onrender.com/api/dashboard/users';
 
 export default function UserManagement() {
   const queryClient = useQueryClient();

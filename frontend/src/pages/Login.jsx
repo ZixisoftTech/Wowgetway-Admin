@@ -27,7 +27,7 @@ import {
   LockKeyhole
 } from 'lucide-react';
 
-const API_AUTH_URL = 'http://localhost:5005/api/auth';
+const API_AUTH_URL = 'https://wow-getway-api.onrender.com/api/auth';
 
 const mockSystemLogs = [
   { time: '00:09:15', event: 'Database connection established.', type: 'info' },

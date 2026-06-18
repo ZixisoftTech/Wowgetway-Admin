@@ -18,7 +18,7 @@ import {
   Building
 } from 'lucide-react';
 
-const API_BASE_URL = 'http://localhost:5005/api/dashboard/employees-list';
+const API_BASE_URL = 'https://wow-getway-api.onrender.com/api/dashboard/employees-list';
 
 // Fetch staff helper
 const fetchStaffList = async () => {

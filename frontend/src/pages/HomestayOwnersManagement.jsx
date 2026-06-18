@@ -18,7 +18,7 @@ import MetricCard from '../components/widgets/MetricCard.jsx';
 import AddEditHomestayOwner from './AddEditHomestayOwner.jsx';
 import HomestayOwnerDetails from './HomestayOwnerDetails.jsx';
 
-const API_BASE_URL = 'http://localhost:5005/api/dashboard/owners';
+const API_BASE_URL = 'https://wow-getway-api.onrender.com/api/dashboard/owners';
 
 export default function HomestayOwnersManagement() {
   const queryClient = useQueryClient();

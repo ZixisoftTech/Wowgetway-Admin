@@ -26,8 +26,8 @@ import {
 import ProcessSalary from './ProcessSalary.jsx';
 import SalaryDetails from './SalaryDetails.jsx';
 
-const API_SALARIES_URL = 'http://localhost:5005/api/dashboard/salaries';
-const API_EMPLOYEES_URL = 'http://localhost:5005/api/dashboard/employees-list';
+const API_SALARIES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/salaries';
+const API_EMPLOYEES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/employees-list';
 
 export default function SalaryManagement() {
   const queryClient = useQueryClient();

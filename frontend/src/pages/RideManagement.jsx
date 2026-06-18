@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 import MetricCard from '../components/widgets/MetricCard.jsx';
 
-const API_RIDES_URL = 'http://localhost:5005/api/dashboard/rides';
+const API_RIDES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/rides';
 
 export default function RideManagement() {
   const queryClient = useQueryClient();

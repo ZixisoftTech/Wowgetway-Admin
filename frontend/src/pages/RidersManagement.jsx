@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import MetricCard from '../components/widgets/MetricCard.jsx';
 
-const API_RIDERS_URL = 'http://localhost:5005/api/dashboard/riders';
+const API_RIDERS_URL = 'https://wow-getway-api.onrender.com/api/dashboard/riders';
 
 const safeFormatDate = (dateStr, options = { day: 'numeric', month: 'short', year: 'numeric' }) => {
   if (!dateStr) return 'N/A';

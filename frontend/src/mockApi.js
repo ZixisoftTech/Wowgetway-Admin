@@ -1462,8 +1462,14 @@ const mockAdapter = (config) => {
   return new Promise((resolve, reject) => {
     const method = config.method.toUpperCase();
     
-    // Parse the pathname from config.url
-    let path = config.url;
+    // Parse the pathname from config.url, combining with baseURL if relative
+    let path = config.url || '';
+    if (config.baseURL && !path.startsWith('http://') && !path.startsWith('https://')) {
+      const base = config.baseURL.replace(/\/+$/, '');
+      const relative = path.replace(/^\/+/, '');
+      path = `${base}/${relative}`;
+    }
+    
     if (path.startsWith('http://') || path.startsWith('https://')) {
       try {
         path = new URL(path).pathname;

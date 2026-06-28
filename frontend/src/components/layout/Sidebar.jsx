@@ -60,17 +60,7 @@ export default function Sidebar() {
       {/* Brand Header */}
       <div className="flex items-center justify-between mb-6 px-2">
         <div className="flex items-center gap-2.5">
-          <div className="p-2.5 bg-blue-600 text-white rounded-xl shadow-md shadow-blue-200">
-            <Home size={20} className="stroke-[2.5]" />
-          </div>
-          <div>
-            <h1 className="text-[15px] font-bold text-slate-800 tracking-tight leading-none">
-              Zixisoft-Wow.Gateways
-            </h1>
-            <span className="text-[11px] font-semibold text-slate-400 mt-1 block">
-              Dashboard
-            </span>
-          </div>
+          <img src="/logo.png" alt="WOW Gateways Logo" className="h-10 object-contain" />
         </div>
         {/* Mobile close button */}
         <button 

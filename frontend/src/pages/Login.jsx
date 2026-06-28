@@ -256,13 +256,7 @@ export default function Login() {
           
           {/* Logo Header */}
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-slate-900 border border-slate-800 text-blue-500 rounded-xl shadow-lg">
-              <Compass className="w-6 h-6 stroke-[2.2]" />
-            </div>
-            <div>
-              <h2 className="text-base font-extrabold tracking-tight text-white leading-none">WOW Gateways</h2>
-              <span className="text-[10px] font-bold text-slate-500 tracking-wider uppercase mt-1 block">Enterprise Control Center</span>
-            </div>
+            <img src="/logo.png" alt="WOW Gateways Logo" className="h-10 object-contain" />
           </div>
 
           {/* Slogans & Dashboard widgets mock preview */}
@@ -376,10 +370,7 @@ export default function Login() {
         
         {/* Top brand header for Mobile/Tablet */}
         <div className="flex lg:hidden items-center justify-center gap-2.5 mb-6">
-          <div className="p-2 bg-slate-900 text-blue-500 border border-slate-850 rounded-xl">
-            <Compass size={18} className="stroke-[2.5]" />
-          </div>
-          <span className="font-extrabold text-slate-800 text-sm tracking-tight">WOW Gateways</span>
+          <img src="/logo.png" alt="WOW Gateways Logo" className="h-9 object-contain" />
         </div>
 
         <motion.div 

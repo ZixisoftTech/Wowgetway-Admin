@@ -36,7 +36,9 @@ import {
   ChevronRight,
   Info,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  Bed,
+  Users
 } from 'lucide-react';
 import MetricCard from '../components/widgets/MetricCard.jsx';
 
@@ -48,6 +50,18 @@ export default function ManageBookings() {
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'add' | 'edit' | 'details'
   const [selectedId, setSelectedId] = useState(null);
   
+  // Wizard Redesign state variables
+  const [wizardStep, setWizardStep] = useState(1);
+  const [roomsList, setRoomsList] = useState([
+    { id: 1, adults: 2, child5_9: 0, child0_4: 0 }
+  ]);
+  const [itineraryList, setItineraryList] = useState([
+    { id: 1, destination: '', checkInDate: '', checkOutDate: '' }
+  ]);
+  const [phoneCountryCode, setPhoneCountryCode] = useState('+91');
+  const [whatsappCountryCode, setWhatsappCountryCode] = useState('+91');
+  const [sameAsPhone, setSameAsPhone] = useState(false);
+
   // Advanced Filter parameters
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -342,6 +356,21 @@ export default function ManageBookings() {
         guideAssigned: booking.sightseeingDetails?.guideAssigned || ''
       }
     });
+
+    // Initialize Redesigned Wizard states
+    setRoomsList([
+      { id: 1, adults: booking.guests?.adults || 2, child5_9: booking.guests?.children || 0, child0_4: 0 }
+    ]);
+    setItineraryList([
+      {
+        id: 1,
+        destination: booking.propertyDetails?.location || booking.sightseeingDetails?.destination || '',
+        checkInDate: booking.checkInDate ? new Date(booking.checkInDate).toISOString().split('T')[0] : '',
+        checkOutDate: booking.checkOutDate ? new Date(booking.checkOutDate).toISOString().split('T')[0] : ''
+      }
+    ]);
+    setSameAsPhone(booking.customer?.mobile === booking.customer?.whatsApp);
+    setWizardStep(1);
     setViewMode('edit');
   };
 
@@ -612,6 +641,147 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
     }
   };
 
+  // Redesigned Wizard Helper states & functions
+  useEffect(() => {
+    const totalAdults = roomsList.reduce((sum, r) => sum + r.adults, 0);
+    const totalChildren = roomsList.reduce((sum, r) => sum + (r.child5_9 || 0) + (r.child0_4 || 0), 0);
+    const totalGuests = totalAdults + totalChildren;
+    
+    setFormData(prev => ({
+      ...prev,
+      guests: {
+        total: totalGuests,
+        adults: totalAdults,
+        children: totalChildren
+      }
+    }));
+  }, [roomsList]);
+
+  useEffect(() => {
+    if (itineraryList && itineraryList.length > 0) {
+      const first = itineraryList[0];
+      setFormData(prev => ({
+        ...prev,
+        checkInDate: first.checkInDate || prev.checkInDate,
+        checkOutDate: first.checkOutDate || prev.checkOutDate,
+        propertyDetails: {
+          ...prev.propertyDetails,
+          location: first.destination || prev.propertyDetails.location
+        },
+        sightseeingDetails: {
+          ...prev.sightseeingDetails,
+          destination: first.destination || prev.sightseeingDetails.destination
+        }
+      }));
+    }
+  }, [itineraryList]);
+
+  useEffect(() => {
+    if (sameAsPhone && formData.customer?.mobile) {
+      setFormData(prev => ({
+        ...prev,
+        customer: {
+          ...prev.customer,
+          whatsApp: prev.customer.mobile
+        }
+      }));
+    }
+  }, [sameAsPhone, formData.customer?.mobile]);
+
+  const updateRoomCount = (roomId, field, direction) => {
+    setRoomsList(prev => prev.map(r => {
+      if (r.id === roomId) {
+        const val = r[field] || 0;
+        const newVal = direction === 'add' ? val + 1 : Math.max(0, val - 1);
+        if (field === 'adults' && r.id === 1) {
+          return { ...r, [field]: Math.max(1, newVal) };
+        }
+        return { ...r, [field]: newVal };
+      }
+      return r;
+    }));
+  };
+
+  const addAnotherRoom = () => {
+    setRoomsList(prev => [
+      ...prev,
+      { id: Date.now(), adults: 2, child5_9: 0, child0_4: 0 }
+    ]);
+  };
+
+  const deleteRoom = (roomId) => {
+    if (roomsList.length > 1) {
+      setRoomsList(prev => prev.filter(r => r.id !== roomId));
+    }
+  };
+
+  const updateItineraryItem = (id, field, value) => {
+    setItineraryList(prev => prev.map(item => {
+      if (item.id === id) {
+        return { ...item, [field]: value };
+      }
+      return item;
+    }));
+  };
+
+  const addAnotherItineraryItem = () => {
+    setItineraryList(prev => [
+      ...prev,
+      { id: Date.now(), destination: '', checkInDate: '', checkOutDate: '' }
+    ]);
+  };
+
+  const deleteItineraryItem = (id) => {
+    if (itineraryList.length > 1) {
+      setItineraryList(prev => prev.filter(item => item.id !== id));
+    }
+  };
+
+  const validateStep = (step) => {
+    if (step === 1) {
+      if (!formData.customer?.name?.trim()) {
+        alert('Guest Full Name is required.');
+        return false;
+      }
+      if (!formData.customer?.mobile?.trim()) {
+        alert('Contact Number is required.');
+        return false;
+      }
+      return true;
+    }
+    if (step === 2) {
+      if (formData.bookingType === 'Homestay Booking' || formData.bookingType === 'Hotel Booking') {
+        if (!formData.propertyDetails?.propertyId) {
+          alert('Please select a property allocation.');
+          return false;
+        }
+      } else if (formData.bookingType === 'Ride Booking') {
+        if (!formData.rideDetails?.pickup?.trim()) {
+          alert('Pickup location is required.');
+          return false;
+        }
+        if (!formData.rideDetails?.drop?.trim()) {
+          alert('Drop location is required.');
+          return false;
+        }
+      } else {
+        if (!formData.sightseeingDetails?.packageName?.trim()) {
+          alert('Package Name is required.');
+          return false;
+        }
+      }
+      return true;
+    }
+    if (step === 4) {
+      if (formData.pricing?.bookingAmount <= 0) {
+        alert('Please enter base booking amount.');
+        return false;
+      }
+      return true;
+    }
+    return true;
+  };
+
   return (
     <div className="space-y-6 sm:space-y-8 max-w-7xl mx-auto px-1">
       {/* 1. LIST VIEW */}
@@ -642,6 +812,10 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                 onClick={() => {
                   setFormData(initialFormState);
                   setSelectedId(null);
+                  setRoomsList([{ id: 1, adults: 2, child5_9: 0, child0_4: 0 }]);
+                  setItineraryList([{ id: 1, destination: '', checkInDate: '', checkOutDate: '' }]);
+                  setSameAsPhone(false);
+                  setWizardStep(1);
                   setViewMode('add');
                 }}
                 className="flex items-center gap-1.5 px-4.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-200 transition-all cursor-pointer"
@@ -1027,14 +1201,14 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
 
         </motion.div>
       )}
-
       {/* 2. FORM VIEW (ADD / EDIT BOOKING) */}
       {(viewMode === 'add' || viewMode === 'edit') && (
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-[1400px] mx-auto pb-32">
           
           <div className="flex items-center justify-between pb-4 border-b border-slate-100">
             <div className="flex items-center gap-3">
               <button
+                type="button"
                 onClick={() => {
                   if (window.confirm('Discard form entries and go back?')) {
                     setViewMode('list');
@@ -1047,7 +1221,7 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
               </button>
               <div>
                 <h2 className="text-lg font-black text-slate-800">
-                  {viewMode === 'add' ? 'Generate New Booking' : `Modify Booking: ${formData.bookingId}`}
+                  {viewMode === 'add' ? 'Create New Booking' : `Modify Booking: ${formData.bookingId}`}
                 </h2>
                 <p className="text-xs text-slate-400 font-semibold">
                   Register customer and service parameters to catalog transactions.
@@ -1056,531 +1230,1155 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
             </div>
           </div>
 
-          <form onSubmit={handleFormSubmit} className="space-y-6 pb-20">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Progress Journey */}
+          <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm mb-6">
+            <div className="flex items-center justify-between px-2 max-w-3xl mx-auto">
+              {[
+                { step: 1, label: 'Requirements' },
+                { step: 2, label: 'Selection' },
+                { step: 3, label: 'Add-ons' },
+                { step: 4, label: 'Payment' },
+                { step: 5, label: 'Confirm' }
+              ].map((s) => (
+                <React.Fragment key={s.step}>
+                  <div className="flex flex-col items-center gap-2 relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Allow navigating directly to completed steps
+                        if (s.step < wizardStep || (s.step === 2 && validateStep(1)) || (s.step === 3 && validateStep(1) && validateStep(2)) || (s.step === 4 && validateStep(1) && validateStep(2) && validateStep(3)) || (s.step === 5 && validateStep(1) && validateStep(2) && validateStep(3) && validateStep(4))) {
+                          setWizardStep(s.step);
+                        }
+                      }}
+                      className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all cursor-pointer ${
+                        wizardStep === s.step
+                          ? 'wizard-step-active'
+                          : wizardStep > s.step
+                          ? 'bg-emerald-500 text-white shadow-md shadow-emerald-100'
+                          : 'bg-slate-50 border border-slate-200 text-slate-450 hover:bg-slate-100'
+                      }`}
+                    >
+                      {wizardStep > s.step ? <Check size={16} className="stroke-[3]" /> : s.step}
+                    </button>
+                    <span className={`text-[10px] font-bold uppercase tracking-wide transition-colors ${
+                      wizardStep === s.step ? 'text-blue-600 font-black' : 'text-slate-400'
+                    }`}>
+                      {s.label}
+                    </span>
+                  </div>
+                  {s.step < 5 && (
+                    <div className={`h-0.5 flex-1 mx-2 transition-colors duration-300 ${
+                      wizardStep > s.step ? 'bg-emerald-500' : 'bg-slate-200'
+                    }`} />
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+
+          <form onSubmit={handleFormSubmit} className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               
-              {/* Column 1 & 2: General Form Data */}
-              <div className="lg:col-span-2 space-y-6">
+              {/* Left Column: Form Fields (Step based) */}
+              <div className="lg:col-span-8 space-y-6">
                 
-                {/* Guest Details */}
-                <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
-                    <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
-                    Section 1: Customer Details
-                  </h3>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Customer Full Name *</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.customer?.name}
-                        onChange={(e) => setFormData(prev => ({
-                          ...prev,
-                          customer: { ...prev.customer, name: e.target.value }
-                        }))}
-                        placeholder="e.g. Rahul Sharma"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Email Address</label>
-                      <input
-                        type="email"
-                        value={formData.customer?.email}
-                        onChange={(e) => setFormData(prev => ({
-                          ...prev,
-                          customer: { ...prev.customer, email: e.target.value }
-                        }))}
-                        placeholder="customer@domain.com"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Mobile Contact *</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.customer?.mobile}
-                        onChange={(e) => setFormData(prev => ({
-                          ...prev,
-                          customer: { ...prev.customer, mobile: e.target.value, whatsApp: e.target.value }
-                        }))}
-                        placeholder="+91 98765 43210"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">WhatsApp Number</label>
-                      <input
-                        type="text"
-                        value={formData.customer?.whatsApp}
-                        onChange={(e) => setFormData(prev => ({
-                          ...prev,
-                          customer: { ...prev.customer, whatsApp: e.target.value }
-                        }))}
-                        placeholder="+91 98765 43210"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Customer Postal Address</label>
-                      <textarea
-                        value={formData.customer?.address}
-                        onChange={(e) => setFormData(prev => ({
-                          ...prev,
-                          customer: { ...prev.customer, address: e.target.value }
-                        }))}
-                        rows="2"
-                        placeholder="Street, City, State..."
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Booking & Service Type details */}
-                <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
-                    <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
-                    Section 2: Booking Type & Service Details
-                  </h3>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Booking Type Class *</label>
-                      <select
-                        value={formData.bookingType}
-                        onChange={(e) => setFormData(prev => ({ ...prev, bookingType: e.target.value }))}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
-                      >
-                        <option value="Homestay Booking">Homestay Booking</option>
-                        <option value="Hotel Booking">Hotel Booking</option>
-                        <option value="Ride Booking">Ride Booking</option>
-                        <option value="Sightseeing Booking">Sightseeing Booking</option>
-                        <option value="Tour Package Booking">Tour Package Booking</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Scheduled Date *</label>
-                      <input
-                        type="date"
-                        required
-                        value={formData.checkInDate}
-                        onChange={(e) => setFormData(prev => ({ ...prev, checkInDate: e.target.value }))}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">End / Checkout Date</label>
-                      <input
-                        type="date"
-                        required
-                        value={formData.checkOutDate}
-                        onChange={(e) => setFormData(prev => ({ ...prev, checkOutDate: e.target.value }))}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Dynamic sections based on booking type selection */}
-                  <div className="p-4 bg-slate-50 border border-slate-150 rounded-2xl mt-4">
-                    
-                    {/* Stay (Homestay/Hotel) details */}
-                    {(formData.bookingType === 'Homestay Booking' || formData.bookingType === 'Hotel Booking') && (
+                {/* STEP 1: REQUIREMENTS */}
+                {wizardStep === 1 && (
+                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+                    {/* Guest Details */}
+                    <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
+                      <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
+                        <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
+                        Guest Details
+                      </h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="sm:col-span-2">
-                          <label className="text-[10px] font-extrabold text-slate-450 uppercase block mb-1">Select Property Allocation *</label>
-                          <select
-                            value={formData.propertyDetails?.propertyId}
-                            onChange={(e) => {
-                              const match = homestaysList.find(h => h._id === e.target.value);
-                              if (match) {
+                        <div>
+                          <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Guest Name *</label>
+                          <div className="relative">
+                            <User size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                              type="text"
+                              required
+                              value={formData.customer?.name}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                customer: { ...prev.customer, name: e.target.value }
+                              }))}
+                              placeholder="Enter full name"
+                              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Contact Number *</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={phoneCountryCode}
+                              onChange={(e) => setPhoneCountryCode(e.target.value)}
+                              className="w-24 px-2 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                            >
+                              <option value="+91">+91 (IN)</option>
+                              <option value="+1">+1 (US)</option>
+                              <option value="+44">+44 (UK)</option>
+                            </select>
+                            <input
+                              type="tel"
+                              required
+                              value={formData.customer?.mobile}
+                              onChange={(e) => {
+                                const val = e.target.value;
                                 setFormData(prev => ({
                                   ...prev,
-                                  propertyDetails: {
-                                    ...prev.propertyDetails,
-                                    propertyId: match._id,
-                                    propertyName: match.name,
-                                    ownerName: match.ownerName,
-                                    location: `${match.city}, ${match.region}`
+                                  customer: { 
+                                    ...prev.customer, 
+                                    mobile: val, 
+                                    whatsApp: sameAsPhone ? val : prev.customer.whatsApp 
                                   }
                                 }));
-                              }
-                            }}
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
-                          >
-                            <option value="">-- Choose Property --</option>
-                            {homestaysList.map(h => (
-                              <option key={h._id} value={h._id}>{h.name} ({h.city})</option>
-                            ))}
-                          </select>
+                              }}
+                              placeholder="98765 43210"
+                              className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
+                            />
+                          </div>
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-extrabold text-slate-450 uppercase block mb-1">Room Category</label>
-                          <select
-                            value={formData.propertyDetails?.roomCategory}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              propertyDetails: { ...prev.propertyDetails, roomCategory: e.target.value }
-                            }))}
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
-                          >
-                            <option value="Standard">Standard</option>
-                            <option value="Deluxe">Deluxe</option>
-                            <option value="Super Deluxe">Super Deluxe</option>
-                            <option value="Premium">Premium</option>
-                            <option value="Family Suite">Family Suite</option>
-                          </select>
+                          <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Email ID *</label>
+                          <div className="relative">
+                            <Mail size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                              type="email"
+                              required
+                              value={formData.customer?.email}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                customer: { ...prev.customer, email: e.target.value }
+                              }))}
+                              placeholder="example@email.com"
+                              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
+                            />
+                          </div>
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-extrabold text-slate-450 uppercase block mb-1">Room Number Allocation</label>
-                          <input
-                            type="text"
-                            value={formData.propertyDetails?.roomNumber}
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="text-[10px] font-extrabold text-slate-400 uppercase">WhatsApp Number</label>
+                            <label className="flex items-center gap-1.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={sameAsPhone}
+                                onChange={(e) => setSameAsPhone(e.target.checked)}
+                                className="rounded text-blue-600 focus:ring-blue-500 border-slate-200 h-3.5 w-3.5"
+                              />
+                              <span className="text-[9px] font-bold text-slate-400 uppercase">Same as phone</span>
+                            </label>
+                          </div>
+                          <div className="flex gap-2">
+                            <select
+                              value={whatsappCountryCode}
+                              onChange={(e) => setWhatsappCountryCode(e.target.value)}
+                              disabled={sameAsPhone}
+                              className="w-24 px-2 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 disabled:opacity-60"
+                            >
+                              <option value="+91">+91 (IN)</option>
+                            </select>
+                            <input
+                              type="tel"
+                              disabled={sameAsPhone}
+                              value={formData.customer?.whatsApp}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                customer: { ...prev.customer, whatsApp: e.target.value }
+                              }))}
+                              placeholder="WhatsApp number"
+                              className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all disabled:opacity-60"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Communication Address *</label>
+                          <textarea
+                            required
+                            value={formData.customer?.address}
                             onChange={(e) => setFormData(prev => ({
                               ...prev,
-                              propertyDetails: { ...prev.propertyDetails, roomNumber: e.target.value }
+                              customer: { ...prev.customer, address: e.target.value }
                             }))}
-                            placeholder="e.g. Room 102"
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
+                            placeholder="Street name, landmark, city, state and zip code"
+                            rows="2"
+                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all resize-none"
                           />
                         </div>
+                      </div>
+                    </div>
 
-                        <div>
-                          <label className="text-[10px] font-extrabold text-slate-450 uppercase block mb-1">Meal Plan</label>
-                          <select
-                            value={formData.propertyDetails?.mealPlan}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              propertyDetails: { ...prev.propertyDetails, mealPlan: e.target.value }
-                            }))}
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                    {/* Booking Category Cards */}
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-black text-slate-800 flex items-center gap-2 pl-1">
+                        <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
+                        Booking Category
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {[
+                          { id: 'Homestay Booking', title: 'Homestay / Hotel', desc: 'Book luxury homestays, premium resorts, hotels and private villas.', icon: Home },
+                          { id: 'Ride Booking', title: 'Cab Booking', desc: 'Book private cabs, airport transfers, and local transport vehicles.', icon: Car },
+                          { id: 'Tour Package Booking', title: 'Tour Packages', desc: 'Curated full tour itineraries including sightseeing and activities.', icon: MapPin }
+                        ].map((cat) => {
+                          const Icon = cat.icon;
+                          const isSelected = formData.bookingType === cat.id || 
+                                             (cat.id === 'Homestay Booking' && formData.bookingType === 'Hotel Booking') ||
+                                             (cat.id === 'Tour Package Booking' && formData.bookingType === 'Sightseeing Booking');
+                          return (
+                            <div
+                              key={cat.id}
+                              onClick={() => {
+                                setFormData(prev => ({ ...prev, bookingType: cat.id }));
+                              }}
+                              className={`p-5 rounded-2xl border-2 cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'border-blue-600 bg-blue-50/30'
+                                  : 'border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex justify-between items-start mb-4">
+                                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                                  <Icon size={22} />
+                                </div>
+                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
+                                  isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300'
+                                }`}>
+                                  {isSelected && <Check size={12} className="stroke-[3.5]" />}
+                                </div>
+                              </div>
+                              <h4 className="text-xs font-black text-slate-800 mb-1">{cat.title}</h4>
+                              <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">{cat.desc}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Sub-selector for Homestay vs Hotel */}
+                      {formData.bookingType === 'Homestay Booking' || formData.bookingType === 'Hotel Booking' ? (
+                        <div className="flex gap-2 p-1.5 bg-slate-100 rounded-xl w-fit mt-2">
+                          <button
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, bookingType: 'Homestay Booking' }))}
+                            className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                              formData.bookingType === 'Homestay Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                            }`}
                           >
-                            <option value="EP">EP (Room Only)</option>
-                            <option value="CP">CP (Breakfast)</option>
-                            <option value="MAP">MAP (Half Board)</option>
-                            <option value="AP">AP (Full Board)</option>
-                          </select>
+                            🏡 Homestay Booking
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, bookingType: 'Hotel Booking' }))}
+                            className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                              formData.bookingType === 'Hotel Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            🏢 Hotel Booking
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {/* Sub-selector for Tour vs Sightseeing */}
+                      {formData.bookingType === 'Tour Package Booking' || formData.bookingType === 'Sightseeing Booking' ? (
+                        <div className="flex gap-2 p-1.5 bg-slate-100 rounded-xl w-fit mt-2">
+                          <button
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, bookingType: 'Tour Package Booking' }))}
+                            className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                              formData.bookingType === 'Tour Package Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            🗺 Tour Package
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, bookingType: 'Sightseeing Booking' }))}
+                            className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                              formData.bookingType === 'Sightseeing Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            📸 Local Sightseeing
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {/* Stay Requirements */}
+                    {(formData.bookingType === 'Homestay Booking' || formData.bookingType === 'Hotel Booking') && (
+                      <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-50 pb-3">
+                          <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                            <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
+                            Stay Requirements
+                          </h3>
+                          <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1 rounded-full uppercase tracking-wider">
+                            Total Capacity: {formData.guests?.total || 0} Pax
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {[
+                            { label: 'Total Adults', field: 'adults' },
+                            { label: 'Child (5-9y)', field: 'child5_9' },
+                            { label: 'Child (0-4y)', field: 'child0_4' },
+                            { label: 'Total Rooms', isRoomsCount: true }
+                          ].map((countItem, idx) => {
+                            let value = 0;
+                            if (countItem.isRoomsCount) {
+                              value = roomsList.length;
+                            } else {
+                              value = roomsList.reduce((sum, r) => sum + (r[countItem.field] || 0), 0);
+                            }
+                            return (
+                              <div key={idx} className="space-y-1.5">
+                                <label className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">{countItem.label}</label>
+                                <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (countItem.isRoomsCount) {
+                                        deleteRoom(roomsList[roomsList.length - 1]?.id);
+                                      } else {
+                                        updateRoomCount(roomsList[0]?.id, countItem.field, 'sub');
+                                      }
+                                    }}
+                                    className="w-8 h-8 rounded-lg bg-white border border-slate-150 hover:bg-slate-50 text-slate-600 flex items-center justify-center font-bold text-sm cursor-pointer"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="font-extrabold text-slate-800 text-sm">{value}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (countItem.isRoomsCount) {
+                                        addAnotherRoom();
+                                      } else {
+                                        updateRoomCount(roomsList[0]?.id, countItem.field, 'add');
+                                      }
+                                    }}
+                                    className="w-8 h-8 rounded-lg bg-white border border-slate-150 hover:bg-slate-50 text-slate-600 flex items-center justify-center font-bold text-sm cursor-pointer"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
 
+                        {/* Room Allocation breakdown */}
+                        <div className="pt-2">
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="h-px bg-slate-100 flex-1"></div>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest px-2">Room Assignments</span>
+                            <div className="h-px bg-slate-100 flex-1"></div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                            {roomsList.map((room, roomIdx) => (
+                              <div key={room.id} className="p-4 rounded-2xl border border-slate-150 bg-slate-50/50 space-y-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                                    <Bed size={14} className="text-blue-600" />
+                                    Room {roomIdx + 1}
+                                  </span>
+                                  {roomsList.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteRoom(room.id)}
+                                      className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 text-center">
+                                  <div className="bg-white p-2 rounded-xl border border-slate-100">
+                                    <span className="block text-[8px] font-bold text-slate-400 uppercase mb-0.5">Adults</span>
+                                    <div className="flex justify-between items-center gap-1 mt-1">
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'adults', 'sub')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">-</button>
+                                      <span className="text-xs font-black text-slate-800">{room.adults}</span>
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'adults', 'add')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">+</button>
+                                    </div>
+                                  </div>
+                                  <div className="bg-white p-2 rounded-xl border border-slate-100">
+                                    <span className="block text-[8px] font-bold text-slate-400 uppercase mb-0.5">C (5-9)</span>
+                                    <div className="flex justify-between items-center gap-1 mt-1">
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child5_9', 'sub')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">-</button>
+                                      <span className="text-xs font-black text-slate-800">{room.child5_9}</span>
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child5_9', 'add')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">+</button>
+                                    </div>
+                                  </div>
+                                  <div className="bg-white p-2 rounded-xl border border-slate-100">
+                                    <span className="block text-[8px] font-bold text-slate-400 uppercase mb-0.5">C (0-4)</span>
+                                    <div className="flex justify-between items-center gap-1 mt-1">
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child0_4', 'sub')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">-</button>
+                                      <span className="text-xs font-black text-slate-800">{room.child0_4}</span>
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child0_4', 'add')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">+</button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={addAnotherRoom}
+                            className="w-full py-3 rounded-2xl border-2 border-dashed border-slate-200 text-slate-500 font-bold hover:bg-blue-50/20 hover:border-blue-600 hover:text-blue-600 transition-all flex items-center justify-center gap-2 text-xs cursor-pointer"
+                          >
+                            <Plus size={14} className="stroke-[3]" />
+                            <span>Add Another Room</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Stay Locations & Dates */}
+                    <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
+                      <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                        <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
+                        Itinerary & Destinations
+                      </h3>
+
+                      <div className="space-y-4 relative">
+                        {itineraryList.length > 1 && (
+                          <div className="absolute left-6 top-8 bottom-8 w-0.5 bg-dashed border-l border-slate-200 z-0"></div>
+                        )}
+
+                        {itineraryList.map((item, index) => (
+                          <div key={item.id} className="relative z-10 bg-slate-50/50 p-4.5 rounded-2xl border border-slate-150 flex flex-col md:flex-row gap-4 items-start">
+                            <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-md shadow-blue-100">
+                              {index + 1}
+                            </div>
+                            <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+                              <div>
+                                <label className="text-[9px] font-extrabold text-slate-455 uppercase block mb-1">Destination Location</label>
+                                <div className="relative">
+                                  <MapPin size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                  <input
+                                    type="text"
+                                    required
+                                    value={item.destination}
+                                    onChange={(e) => updateItineraryItem(item.id, 'destination', e.target.value)}
+                                    placeholder="e.g. Manali, Himachal"
+                                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                                  />
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="text-[9px] font-extrabold text-slate-455 uppercase block mb-1">Check-in Date</label>
+                                <input
+                                  type="date"
+                                  required
+                                  value={item.checkInDate}
+                                  onChange={(e) => updateItineraryItem(item.id, 'checkInDate', e.target.value)}
+                                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="text-[9px] font-extrabold text-slate-455 uppercase block mb-1">Check-out Date</label>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="date"
+                                    required
+                                    value={item.checkOutDate}
+                                    onChange={(e) => updateItineraryItem(item.id, 'checkOutDate', e.target.value)}
+                                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                                  />
+                                  {itineraryList.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteItineraryItem(item.id)}
+                                      className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer shrink-0 border border-slate-150"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+
+                        <button
+                          type="button"
+                          onClick={addAnotherItineraryItem}
+                          className="w-full py-3 rounded-2xl border-2 border-dashed border-slate-200 text-slate-500 font-bold hover:bg-blue-50/20 hover:border-blue-600 hover:text-blue-600 transition-all flex items-center justify-center gap-2 text-xs cursor-pointer"
+                        >
+                          <MapPin size={14} />
+                          <span>Add Another Location</span>
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* STEP 2: SELECTION */}
+                {wizardStep === 2 && (
+                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+                    <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
+                      <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
+                        <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
+                        Select Item Allocation
+                      </h3>
+
+                      {/* Homestay/Hotel allocation */}
+                      {(formData.bookingType === 'Homestay Booking' || formData.bookingType === 'Hotel Booking') && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Select Property Allocation *</label>
+                            <select
+                              required
+                              value={formData.propertyDetails?.propertyId}
+                              onChange={(e) => {
+                                const match = homestaysList.find(h => h._id === e.target.value);
+                                if (match) {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    propertyDetails: {
+                                      ...prev.propertyDetails,
+                                      propertyId: match._id,
+                                      propertyName: match.name,
+                                      ownerName: match.ownerName,
+                                      location: `${match.city}, ${match.region}`
+                                    }
+                                  }));
+                                }
+                              }}
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                            >
+                              <option value="">-- Choose Property --</option>
+                              {homestaysList.map(h => (
+                                <option key={h._id} value={h._id}>{h.name} ({h.city})</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Room Category</label>
+                            <select
+                              value={formData.propertyDetails?.roomCategory}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                propertyDetails: { ...prev.propertyDetails, roomCategory: e.target.value }
+                              }))}
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                            >
+                              <option value="Standard">Standard Class</option>
+                              <option value="Premium">Premium Class</option>
+                              <option value="Deluxe">Deluxe Class</option>
+                              <option value="Super Deluxe">Super Deluxe Class</option>
+                              <option value="Suite">Suite Luxury</option>
+                              <option value="Penthouse">Penthouse Suite</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Room Allocation Number</label>
+                            <input
+                              type="text"
+                              value={formData.propertyDetails?.roomNumber}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                propertyDetails: { ...prev.propertyDetails, roomNumber: e.target.value }
+                              }))}
+                              placeholder="e.g. 201, Cabin 4"
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Ride Allocation */}
+                      {formData.bookingType === 'Ride Booking' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Assigned Driver Name</label>
+                            <input
+                              type="text"
+                              value={formData.rideDetails?.driverName}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                rideDetails: { ...prev.rideDetails, driverName: e.target.value }
+                              }))}
+                              placeholder="Driver Full Name"
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Cab Model & Plate Number</label>
+                            <input
+                              type="text"
+                              value={formData.rideDetails?.vehicle}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                rideDetails: { ...prev.rideDetails, vehicle: e.target.value }
+                              }))}
+                              placeholder="e.g. Toyota Crysta (HP 01 A 1234)"
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Pickup Location *</label>
+                            <input
+                              type="text"
+                              required
+                              value={formData.rideDetails?.pickup}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                rideDetails: { ...prev.rideDetails, pickup: e.target.value }
+                              }))}
+                              placeholder="Pickup point"
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Drop Location *</label>
+                            <input
+                              type="text"
+                              required
+                              value={formData.rideDetails?.drop}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                rideDetails: { ...prev.rideDetails, drop: e.target.value }
+                              }))}
+                              placeholder="Destination point"
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Cab Travel Date</label>
+                            <input
+                              type="date"
+                              value={formData.rideDetails?.travelDate}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                rideDetails: { ...prev.rideDetails, travelDate: e.target.value }
+                              }))}
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Tour Package allocation */}
+                      {(formData.bookingType === 'Tour Package Booking' || formData.bookingType === 'Sightseeing Booking') && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Package / Sightseeing Name *</label>
+                            <input
+                              type="text"
+                              required
+                              value={formData.sightseeingDetails?.packageName}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                sightseeingDetails: { ...prev.sightseeingDetails, packageName: e.target.value }
+                              }))}
+                              placeholder="e.g. Manali Scenic Sightseeing Guide"
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Assigned Tour Guide</label>
+                            <input
+                              type="text"
+                              value={formData.sightseeingDetails?.guideAssigned}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                sightseeingDetails: { ...prev.sightseeingDetails, guideAssigned: e.target.value }
+                              }))}
+                              placeholder="Guide Name"
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Package Duration</label>
+                            <select
+                              value={formData.sightseeingDetails?.duration}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                sightseeingDetails: { ...prev.sightseeingDetails, duration: e.target.value }
+                              }))}
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                            >
+                              <option value="Half Day">Half Day (4 Hours)</option>
+                              <option value="Full Day">Full Day Tour</option>
+                              <option value="2 Days / 1 Night">2 Days / 1 Night</option>
+                              <option value="3 Days / 2 Nights">3 Days / 2 Nights</option>
+                            </select>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* STEP 3: ADD-ONS */}
+                {wizardStep === 3 && (
+                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+                    <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
+                      <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
+                        <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
+                        Select Special Options & Add-ons
+                      </h3>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {(formData.bookingType === 'Homestay Booking' || formData.bookingType === 'Hotel Booking') && (
+                          <div>
+                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Meal Plan Package</label>
+                            <select
+                              value={formData.propertyDetails?.mealPlan}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                propertyDetails: { ...prev.propertyDetails, mealPlan: e.target.value }
+                              }))}
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                            >
+                              <option value="EP">EP - Room Only (European Plan)</option>
+                              <option value="CP">CP - Breakfast Included (Continental Plan)</option>
+                              <option value="MAP">MAP - Breakfast & Lunch/Dinner (Modified AP)</option>
+                              <option value="AP">AP - All Meals Included (American Plan)</option>
+                            </select>
+                          </div>
+                        )}
+
                         <div>
-                          <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Season</label>
+                          <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Season Rate Class</label>
                           <select
                             value={formData.propertyDetails?.season}
                             onChange={(e) => setFormData(prev => ({
                               ...prev,
                               propertyDetails: { ...prev.propertyDetails, season: e.target.value }
                             }))}
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
                           >
-                            <option value="Peak Season">Peak Season</option>
-                            <option value="Mid Season">Mid Season</option>
-                            <option value="Off Season">Off Season</option>
+                            <option value="Off Season">Off Season (Lowest rates)</option>
+                            <option value="Mid Season">Mid Season (Medium rates)</option>
+                            <option value="Peak Season">Peak Season (Premium rates)</option>
                           </select>
                         </div>
                       </div>
-                    )}
+                    </div>
+                  </motion.div>
+                )}
 
-                    {/* Ride Details class */}
-                    {formData.bookingType === 'Ride Booking' && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-[10px] font-extrabold text-slate-450 uppercase block mb-1">Ride ID Reference</label>
-                          <input
-                            type="text"
-                            value={formData.rideDetails?.rideId}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              rideDetails: { ...prev.rideDetails, rideId: e.target.value }
-                            }))}
-                            placeholder="e.g. RD-204"
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
-                          />
-                        </div>
+                {/* STEP 4: PAYMENT */}
+                {wizardStep === 4 && (
+                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+                    <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
+                      <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
+                        <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
+                        Pricing Summary
+                      </h3>
 
-                        <div>
-                          <label className="text-[10px] font-extrabold text-slate-450 uppercase block mb-1">Driver Assigned</label>
-                          <input
-                            type="text"
-                            value={formData.rideDetails?.driverName}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              rideDetails: { ...prev.rideDetails, driverName: e.target.value }
-                            }))}
-                            placeholder="Driver Name"
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="text-[10px] font-extrabold text-slate-450 uppercase block mb-1">Vehicle Description</label>
-                          <input
-                            type="text"
-                            value={formData.rideDetails?.vehicle}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              rideDetails: { ...prev.rideDetails, vehicle: e.target.value }
-                            }))}
-                            placeholder="e.g. Toyota Innova (MH-12...)"
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="text-[10px] font-extrabold text-slate-450 uppercase block mb-1">Pickup</label>
+                            <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Base Booking Amount *</label>
                             <input
-                              type="text"
-                              value={formData.rideDetails?.pickup}
+                              type="number"
+                              required
+                              value={formData.pricing?.bookingAmount || ''}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
-                                rideDetails: { ...prev.rideDetails, pickup: e.target.value }
+                                pricing: { ...prev.pricing, bookingAmount: Number(e.target.value) || 0 }
                               }))}
-                              placeholder="Pickup location"
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
                             />
                           </div>
+
                           <div>
-                            <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Drop</label>
+                            <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Discount Coupon Deduct</label>
                             <input
-                              type="text"
-                              value={formData.rideDetails?.drop}
+                              type="number"
+                              value={formData.pricing?.discount || ''}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
-                                rideDetails: { ...prev.rideDetails, drop: e.target.value }
+                                pricing: { ...prev.pricing, discount: Number(e.target.value) || 0 }
                               }))}
-                              placeholder="Drop location"
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
                             />
                           </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 text-[10px] font-extrabold text-slate-400">
+                          <div>
+                            Tax (12% Auto)
+                            <span className="text-slate-850 font-bold block py-2.5 pl-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs mt-1">₹{formData.pricing?.tax}</span>
+                          </div>
+                          <div>
+                            Convenience Fee
+                            <input
+                              type="number"
+                              value={formData.pricing?.convenienceFee}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                pricing: { ...prev.pricing, convenienceFee: Number(e.target.value) || 0 }
+                              }))}
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 mt-1"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Paid Amount *</label>
+                            <input
+                              type="number"
+                              required
+                              value={formData.pricing?.paidAmount || ''}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                pricing: { ...prev.pricing, paidAmount: Number(e.target.value) || 0 }
+                              }))}
+                              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                            />
+                          </div>
+
+                          {viewMode === 'edit' && (
+                            <div>
+                              <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Refund Amount</label>
+                              <input
+                                type="number"
+                                value={formData.pricing?.refundAmount || ''}
+                                onChange={(e) => setFormData(prev => ({
+                                  ...prev,
+                                  pricing: { ...prev.pricing, refundAmount: Number(e.target.value) || 0 }
+                                }))}
+                                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-xs font-bold">
+                          <span className="text-slate-800">Final Calculated Price:</span>
+                          <span className="text-lg font-black text-slate-900 font-mono">₹{formData.amount?.toLocaleString()}</span>
+                        </div>
+
+                        <div className="flex justify-between items-center text-xs font-bold text-rose-500">
+                          <span>Pending Due:</span>
+                          <span className="font-mono">₹{formData.pricing?.pendingAmount?.toLocaleString()}</span>
                         </div>
                       </div>
-                    )}
+                    </div>
 
-                    {/* Sightseeing details class */}
-                    {(formData.bookingType === 'Sightseeing Booking' || formData.bookingType === 'Tour Package Booking') && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="sm:col-span-2">
-                          <label className="text-[10px] font-extrabold text-slate-455 uppercase block mb-1">Package Name</label>
-                          <input
-                            type="text"
-                            value={formData.sightseeingDetails?.packageName}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              sightseeingDetails: { ...prev.sightseeingDetails, packageName: e.target.value }
-                            }))}
-                            placeholder="e.g. Sikkim Scenic Sunrise Package"
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
-                          />
-                        </div>
+                    {/* Payment Details */}
+                    <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
+                      <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
+                        <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
+                        Payment Details
+                      </h3>
 
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
-                          <label className="text-[10px] font-extrabold text-slate-450 uppercase block mb-1">Assigned Tourist Guide</label>
-                          <input
-                            type="text"
-                            value={formData.sightseeingDetails?.guideAssigned}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              sightseeingDetails: { ...prev.sightseeingDetails, guideAssigned: e.target.value }
-                            }))}
-                            placeholder="Guide Name"
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="text-[10px] font-extrabold text-slate-450 uppercase block mb-1">Package Duration</label>
+                          <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Payment Method</label>
                           <select
-                            value={formData.sightseeingDetails?.duration}
+                            value={formData.paymentDetails?.method}
                             onChange={(e) => setFormData(prev => ({
                               ...prev,
-                              sightseeingDetails: { ...prev.sightseeingDetails, duration: e.target.value }
+                              paymentDetails: { ...prev.paymentDetails, method: e.target.value }
                             }))}
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
                           >
-                            <option value="Half Day">Half Day (4 Hours)</option>
-                            <option value="Full Day Tour">Full Day Tour</option>
-                            <option value="2 Days / 1 Night">2 Days / 1 Night</option>
-                            <option value="3 Days / 2 Nights">3 Days / 2 Nights</option>
+                            <option value="UPI">UPI / QR Transfer</option>
+                            <option value="Card">Credit / Debit Card</option>
+                            <option value="Bank Transfer">Bank Wire Transfer</option>
+                            <option value="Cash">Cash payment</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Transaction reference ID</label>
+                          <input
+                            type="text"
+                            value={formData.paymentDetails?.transactionId}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              paymentDetails: { ...prev.paymentDetails, transactionId: e.target.value }
+                            }))}
+                            placeholder="e.g. TXN1002345"
+                            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Payment Received Date</label>
+                          <input
+                            type="date"
+                            value={formData.paymentDetails?.paymentDate}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              paymentDetails: { ...prev.paymentDetails, paymentDate: e.target.value }
+                            }))}
+                            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* STEP 5: CONFIRMATION & WORKFLOW */}
+                {wizardStep === 5 && (
+                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+                    <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
+                      <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
+                        <span className="w-1.5 h-3.5 bg-emerald-500 rounded-full"></span>
+                        Review & Confirm Booking Details
+                      </h3>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs text-slate-650 bg-slate-50 p-5 rounded-2xl border border-slate-200">
+                        <div className="space-y-1.5">
+                          <p className="font-extrabold text-[9px] text-slate-400 uppercase">Customer Profile</p>
+                          <p className="font-bold text-slate-850 text-sm">{formData.customer?.name}</p>
+                          <p>{formData.customer?.email}</p>
+                          <p>Contact: {formData.customer?.mobile}</p>
+                          <p>Address: {formData.customer?.address}</p>
+                        </div>
+                        <div className="space-y-1.5">
+                          <p className="font-extrabold text-[9px] text-slate-400 uppercase">Booking Specification</p>
+                          <p className="font-bold text-slate-850">{formData.bookingType}</p>
+                          <p>Guests Count: {formData.guests?.total} Pax</p>
+                          <p>Check-in: {formData.checkInDate || 'Not selected'}</p>
+                          <p>Check-out: {formData.checkOutDate || 'Not selected'}</p>
+                        </div>
+                        <div className="space-y-1.5">
+                          <p className="font-extrabold text-[9px] text-slate-400 uppercase">Allocation details</p>
+                          {formData.bookingType === 'Homestay Booking' || formData.bookingType === 'Hotel Booking' ? (
+                            <>
+                              <p className="font-bold text-slate-800">{formData.propertyDetails?.propertyName || 'No property chosen'}</p>
+                              <p>Room Class: {formData.propertyDetails?.roomCategory} (No: {formData.propertyDetails?.roomNumber || 'N/A'})</p>
+                            </>
+                          ) : formData.bookingType === 'Ride Booking' ? (
+                            <>
+                              <p className="font-bold text-slate-800">Pickup: {formData.rideDetails?.pickup} → Drop: {formData.rideDetails?.drop}</p>
+                              <p>Driver: {formData.rideDetails?.driverName || 'Unassigned'} ({formData.rideDetails?.vehicle || 'N/A'})</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="font-bold text-slate-800">Package: {formData.sightseeingDetails?.packageName}</p>
+                              <p>Guide Assigned: {formData.sightseeingDetails?.guideAssigned || 'N/A'} (Duration: {formData.sightseeingDetails?.duration})</p>
+                            </>
+                          )}
+                        </div>
+                        <div className="space-y-1.5">
+                          <p className="font-extrabold text-[9px] text-slate-400 uppercase">Transaction Sheet</p>
+                          <p className="font-bold text-slate-850 text-sm">Total Cost: ₹{formData.amount?.toLocaleString()}</p>
+                          <p className="text-emerald-600 font-bold">Paid: ₹{formData.pricing?.paidAmount?.toLocaleString()}</p>
+                          <p className="text-rose-500 font-bold">Due Pending: ₹{formData.pricing?.pendingAmount?.toLocaleString()}</p>
+                          <p>Method: {formData.paymentDetails?.method} (Txn: {formData.paymentDetails?.transactionId || 'None'})</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Workflow status boxes */}
+                    <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
+                      <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
+                        <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
+                        Workflow Statuses
+                      </h3>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Booking Status</label>
+                          <select
+                            value={formData.bookingStatus}
+                            onChange={(e) => setFormData(prev => ({ ...prev, bookingStatus: e.target.value }))}
+                            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                          >
+                            <option value="Pending">Pending</option>
+                            <option value="Confirmed">Confirmed</option>
+                            <option value="Upcoming">Upcoming</option>
+                            <option value="Checked In">Checked In</option>
+                            <option value="Checked Out">Checked Out</option>
+                            <option value="Completed">Completed</option>
+                            <option value="Cancelled">Cancelled</option>
+                            <option value="No Show">No Show</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Payment Status</label>
+                          <select
+                            value={formData.paymentStatus}
+                            onChange={(e) => setFormData(prev => ({ 
+                              ...prev, 
+                              paymentStatus: e.target.value,
+                              paymentDetails: { ...prev.paymentDetails, paymentStatus: e.target.value } 
+                            }))}
+                            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                          >
+                            <option value="Pending">Pending</option>
+                            <option value="Partial">Partial</option>
+                            <option value="Paid">Paid</option>
+                            <option value="Refunded">Refunded</option>
                           </select>
                         </div>
                       </div>
-                    )}
-                  </div>
-                </div>
+                    </div>
+                  </motion.div>
+                )}
+
               </div>
 
-              {/* Column 3: Pricing Summary & Statuses */}
-              <div className="space-y-6">
+              {/* Right Column: Summary & Property Highlights */}
+              <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-24">
                 
-                {/* Cost summary sheet */}
-                <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
-                    <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
-                    Pricing Summary
-                  </h3>
-
-                  <div className="space-y-3 text-xs">
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Base booking Amount *</label>
-                      <input
-                        type="number"
-                        value={formData.pricing?.bookingAmount || ''}
-                        onChange={(e) => setFormData(prev => ({
-                          ...prev,
-                          pricing: { ...prev.pricing, bookingAmount: Number(e.target.value) || 0 }
-                        }))}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Discount Coupon Deduct</label>
-                      <input
-                        type="number"
-                        value={formData.pricing?.discount || ''}
-                        onChange={(e) => setFormData(prev => ({
-                          ...prev,
-                          pricing: { ...prev.pricing, discount: Number(e.target.value) || 0 }
-                        }))}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-[10px] font-extrabold text-slate-400">
-                      <div>
-                        Tax (12% Auto)
-                        <span className="text-slate-850 font-bold block py-2 pl-3 bg-slate-50 border border-slate-150 rounded-xl text-xs mt-1">₹{formData.pricing?.tax}</span>
+                {/* Booking Summary Card */}
+                <div className="bg-blue-600 rounded-3xl p-6 text-white shadow-lg shadow-blue-200 relative overflow-hidden">
+                  <div className="absolute -right-8 -bottom-8 opacity-10">
+                    <Compass size={160} />
+                  </div>
+                  <h4 className="text-sm font-black mb-6 flex items-center justify-between">
+                    Booking Summary
+                    <Info size={16} className="opacity-60" />
+                  </h4>
+                  <div className="space-y-4 relative z-10 text-xs">
+                    <div className="flex justify-between items-center p-3 bg-white/10 rounded-xl backdrop-blur-sm">
+                      <div className="flex items-center gap-2.5">
+                        <Users size={14} className="text-white/80" />
+                        <span className="font-semibold">Total Guests</span>
                       </div>
-                      <div>
-                        Convenience Fee
-                        <input
-                          type="number"
-                          value={formData.pricing?.convenienceFee}
-                          onChange={(e) => setFormData(prev => ({
-                            ...prev,
-                            pricing: { ...prev.pricing, convenienceFee: Number(e.target.value) || 0 }
-                          }))}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 mt-1"
-                        />
+                      <span className="font-bold">{formData.guests?.total || 0} Pax</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 bg-white/10 rounded-xl backdrop-blur-sm">
+                        <p className="text-[9px] uppercase opacity-70 font-bold mb-0.5">Adults</p>
+                        <p className="text-base font-bold">{formData.guests?.adults || 0}</p>
+                      </div>
+                      <div className="p-3 bg-white/10 rounded-xl backdrop-blur-sm">
+                        <p className="text-[9px] uppercase opacity-70 font-bold mb-0.5">Children</p>
+                        <p className="text-base font-bold">{formData.guests?.children || 0}</p>
                       </div>
                     </div>
 
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Paid Amount *</label>
-                      <input
-                        type="number"
-                        value={formData.pricing?.paidAmount || ''}
-                        onChange={(e) => setFormData(prev => ({
-                          ...prev,
-                          pricing: { ...prev.pricing, paidAmount: Number(e.target.value) || 0 }
-                        }))}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
-                      />
-                    </div>
-
-                    {viewMode === 'edit' && (
-                      <div>
-                        <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Refund Amount</label>
-                        <input
-                          type="number"
-                          value={formData.pricing?.refundAmount || ''}
-                          onChange={(e) => setFormData(prev => ({
-                            ...prev,
-                            pricing: { ...prev.pricing, refundAmount: Number(e.target.value) || 0 }
-                          }))}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
-                        />
+                    <div className="flex justify-between items-center p-3 bg-white/10 rounded-xl backdrop-blur-sm">
+                      <div className="flex items-center gap-2.5">
+                        <Bed size={14} className="text-white/80" />
+                        <span className="font-semibold">Rooms Booked</span>
                       </div>
-                    )}
-
-                    <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-xs font-bold">
-                      <span className="text-slate-800">Final Calculated Price:</span>
-                      <span className="text-lg font-black text-slate-900 font-mono">₹{formData.amount?.toLocaleString()}</span>
+                      <span className="font-bold">{roomsList.length} Units</span>
                     </div>
 
-                    <div className="flex justify-between items-center text-xs font-bold text-rose-500">
-                      <span>Pending Due:</span>
-                      <span className="font-mono">₹{formData.pricing?.pendingAmount?.toLocaleString()}</span>
+                    <div className="flex justify-between items-center p-3 bg-white/10 rounded-xl backdrop-blur-sm">
+                      <div className="flex items-center gap-2.5">
+                        <MapPin size={14} className="text-white/80" />
+                        <span className="font-semibold">Destinations</span>
+                      </div>
+                      <span className="font-bold truncate max-w-[120px] text-right">
+                        {itineraryList.map(i => i.destination).filter(Boolean).join(', ') || '0 Cities'}
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Workflow States Box */}
-                <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
-                    <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
-                    Workflow Statuses
-                  </h3>
-
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Booking Status</label>
-                      <select
-                        value={formData.bookingStatus}
-                        onChange={(e) => setFormData(prev => ({ ...prev, bookingStatus: e.target.value }))}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
-                      >
-                        <option value="Pending">Pending</option>
-                        <option value="Confirmed">Confirmed</option>
-                        <option value="Upcoming">Upcoming</option>
-                        <option value="Checked In">Checked In</option>
-                        <option value="Checked Out">Checked Out</option>
-                        <option value="Completed">Completed</option>
-                        <option value="Cancelled">Cancelled</option>
-                        <option value="No Show">No Show</option>
-                      </select>
+                {/* Property Highlights */}
+                <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm space-y-4">
+                  <h5 className="text-[10px] font-black text-slate-800 uppercase tracking-wider">Property Highlights</h5>
+                  
+                  {formData.propertyDetails?.propertyId ? (
+                    <div className="space-y-3">
+                      <div className="flex gap-3">
+                        <div className="w-16 h-16 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 font-black text-lg">
+                          🏡
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-slate-850">{formData.propertyDetails?.propertyName}</p>
+                          <p className="text-[10px] text-slate-400 font-semibold">{formData.propertyDetails?.location}</p>
+                          <p className="text-[10px] text-blue-600 font-bold mt-1">₹{formData.pricing?.bookingAmount?.toLocaleString()} Base Cost</p>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-450 leading-relaxed italic bg-slate-50 p-2.5 rounded-xl border border-slate-150">
+                        "Selected standard rate package. Automatic 12% GST invoice will generate on final checkout receipt."
+                      </p>
                     </div>
-
-                    <div>
-                      <label className="text-[10px] font-extrabold text-slate-400 block mb-1">Payment Status</label>
-                      <select
-                        value={formData.paymentStatus}
-                        onChange={(e) => setFormData(prev => ({ 
-                          ...prev, 
-                          paymentStatus: e.target.value,
-                          paymentDetails: { ...prev.paymentDetails, paymentStatus: e.target.value } 
-                        }))}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
-                      >
-                        <option value="Pending">Pending</option>
-                        <option value="Partial">Partial</option>
-                        <option value="Paid">Paid</option>
-                        <option value="Refunded">Refunded</option>
-                      </select>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex gap-3">
+                        <img 
+                          className="w-16 h-16 rounded-xl object-cover shrink-0" 
+                          src="https://lh3.googleusercontent.com/aida-public/AB6AXuDqP4nUGqIAjXJothJVyEsiekA_F1pu9ggEWxNbK0WjZn3Q5W-N4U-873jYB7EMNk-hfEMT_IdyJ5JEJubS2oMrNsQ8YsSotMLFSAGyooVu6w_ZRHe00zAhNWx-5EKK4SlYRj4EKImNmmf4bJNwB5LJ_04M-GdeK3x6eMXHQAlbL6Yh67xt956-WZDRO3M-aBLXx0b0od-pdLrBMlZlpQ4C6hd5gD1VgLloNBwHJaLf2sTO9Bmtcs8jEhqfwsZB-JO4T6-17087JXE"
+                          alt="Luxury Mountain Villa"
+                        />
+                        <div>
+                          <p className="text-xs font-black text-slate-850 font-sans">Luxury Mountain Villa</p>
+                          <p className="text-[10px] text-slate-400 font-semibold">4.8 ★ Premium Selection</p>
+                          <p className="text-[10px] text-blue-600 font-bold mt-1">₹12,500 / night</p>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-450 leading-relaxed italic bg-slate-50 p-2.5 rounded-xl border border-slate-150">
+                        "Perfect for large families, includes breakfast and guided trekking tours."
+                      </p>
                     </div>
-                  </div>
+                  )}
                 </div>
 
               </div>
+
             </div>
 
             {/* Sticky Actions Footer */}
-            <div className="fixed bottom-0 left-0 right-0 bg-slate-50 border-t border-slate-200 px-6 py-4.5 flex items-center justify-end gap-3 z-20 shadow-md">
-              <button
-                type="button"
-                onClick={() => { setViewMode('list'); setSelectedId(null); }}
-                className="px-4.5 py-2.5 bg-white border border-slate-250 text-slate-650 hover:bg-slate-50 font-bold rounded-xl text-xs cursor-pointer shadow-sm"
-              >
-                Discard Entries
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs cursor-pointer shadow-md shadow-emerald-200"
-              >
-                <Check size={14} className="stroke-[3.5] inline mr-1" />
-                <span>{viewMode === 'add' ? 'Register Booking' : 'Modify Record'}</span>
-              </button>
+            <div className="fixed bottom-0 left-0 lg:left-[280px] right-0 bg-white border-t border-slate-150 px-6 py-4.5 flex items-center justify-between z-20 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
+              <div className="hidden sm:flex items-center gap-2 text-slate-400 text-xs font-medium">
+                <Info size={14} className="text-slate-455" />
+                <span>Please ensure all mandatory fields (*) are filled before proceeding.</span>
+              </div>
+              <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (wizardStep > 1) {
+                      setWizardStep(prev => prev - 1);
+                    } else {
+                      if (window.confirm('Discard form entries and go back?')) {
+                        setViewMode('list');
+                        setSelectedId(null);
+                      }
+                    }
+                  }}
+                  className="px-5 py-2.5 bg-white border border-slate-200 text-slate-650 hover:bg-slate-50 font-bold rounded-xl text-xs cursor-pointer transition-colors shadow-sm"
+                >
+                  {wizardStep > 1 ? 'Back' : 'Cancel'}
+                </button>
+
+                {wizardStep < 5 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (validateStep(wizardStep)) {
+                        setWizardStep(prev => prev + 1);
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs cursor-pointer shadow-md shadow-blue-200 transition-colors"
+                  >
+                    <span>Proceed to Next Step</span>
+                    <ChevronRight size={13} className="stroke-[3.5]" />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    className="flex items-center gap-1.5 px-7 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs cursor-pointer shadow-md shadow-emerald-100 transition-colors"
+                  >
+                    <Check size={14} className="stroke-[3.5]" />
+                    <span>{viewMode === 'add' ? 'Register Booking' : 'Modify Record'}</span>
+                  </button>
+                )}
+              </div>
             </div>
           </form>
 

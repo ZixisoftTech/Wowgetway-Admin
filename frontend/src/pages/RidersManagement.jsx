@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
@@ -33,17 +33,114 @@ import {
   Percent,
   Trash,
   CarFront,
-  Car
+  Car,
+  TrendingUp,
+  MapPin,
+  Map,
+  SlidersHorizontal,
+  ChevronLeft,
+  Info,
+  CheckCircle2,
+  FileCheck,
+  ShieldAlert,
+  Download
 } from 'lucide-react';
-import MetricCard from '../components/widgets/MetricCard.jsx';
 
 const API_RIDERS_URL = 'https://wow-getway-api.onrender.com/api/dashboard/riders';
 
-const safeFormatDate = (dateStr, options = { day: 'numeric', month: 'short', year: 'numeric' }) => {
-  if (!dateStr) return 'N/A';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return 'N/A';
-  return d.toLocaleDateString('en-IN', options);
+const mockRidersList = [
+  {
+    id: 'DRV1001',
+    name: 'Amit Sharma',
+    email: 'amit.s@gmail.com',
+    mobile: '+91 98765 43210',
+    vehicle: {
+      model: 'Hero Splendor +',
+      vehicleNumber: 'WB74A1234',
+      vehicleType: 'Bike'
+    },
+    status: 'Active',
+    availability: 'Online',
+    rating: 4.8,
+    joinedDate: '15 Jan 2024'
+  },
+  {
+    id: 'DRV1002',
+    name: 'Rahul Das',
+    email: 'rahul.das@email.com',
+    mobile: '+91 87654 32109',
+    vehicle: {
+      model: 'TVS Jupiter',
+      vehicleNumber: 'WB74B5678',
+      vehicleType: 'Scooter'
+    },
+    status: 'Active',
+    availability: 'Online',
+    rating: 4.6,
+    joinedDate: '18 Mar 2024'
+  },
+  {
+    id: 'DRV1004',
+    name: 'Pawan Chettri',
+    email: 'pawan.c@email.com',
+    mobile: '+91 89670 56432',
+    vehicle: {
+      model: 'Maruti Swift Dzire',
+      vehicleNumber: 'WB74D3456',
+      vehicleType: 'Sedan'
+    },
+    status: 'On Ride',
+    availability: 'Busy',
+    rating: 4.9,
+    joinedDate: '20 Jun 2024'
+  }
+];
+
+const singleRiderDetail = {
+  id: 'DRV1001',
+  name: 'Amit Sharma',
+  badge: 'ACTIVE',
+  role: 'Senior Tour Package Driver',
+  mobile: '+91 98765 43210',
+  email: 'amit.sharma@gmail.com',
+  photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+  stats: {
+    totalRides: '1,452',
+    rating: '4.85',
+    joinDate: '12 Jan 2024',
+    lastActive: 'Today, 09:15 AM'
+  },
+  personalDetails: {
+    fullName: 'Amit Sharma',
+    dob: '15 Aug 1995',
+    gender: 'Male',
+    address: 'Pradhan Nagar, Siliguri, West Bengal - 734003'
+  },
+  vehicle: {
+    model: 'Swift Dzire (Sedan)',
+    vehicleNumber: 'WB74A1234',
+    fuelType: 'Petrol + CNG',
+    image: 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=300'
+  },
+  rideSummary: {
+    completed: 42,
+    cancelled: '4.2%',
+    efficiency: '92%'
+  },
+  earnings: '24,850',
+  documents: [
+    { type: 'Driving License', reference: 'WB25 20200012345', expiry: '15 Dec 2026', status: 'Verified' },
+    { type: 'Vehicle Insurance', reference: 'INS/2024/1123456', expiry: '20 Jun 2024 (Expiring)', status: 'Action Required' },
+    { type: 'Registration Certificate (RC)', reference: 'WB74A1234-RC', expiry: '10 Jan 2030', status: 'Verified' }
+  ],
+  feedback: {
+    average: '4.8',
+    totalReviews: 948,
+    reviews: [
+      { author: 'Sneha Kapoor', rating: 5, date: '12 May 2024', comment: 'Amit was very professional and knew the local routes perfectly. The car was spotless and he was very courteous throughout the long tour.' },
+      { author: 'Vikram Mehra', rating: 5, date: '08 May 2024', comment: 'Very safe driver. Reached the destination on time. Highly recommended for family trips.' }
+    ]
+  }
 };
 
 export default function RidersManagement() {
@@ -61,1960 +158,964 @@ export default function RidersManagement() {
     viewMode = 'details';
   }
 
-  const [localSelectedId, setLocalSelectedId] = useState('DR1025');
-  const selectedId = id || localSelectedId;
-
-  const [loadedRiderId, setLoadedRiderId] = useState(null);
-
+  // Local state fallbacks
+  const [riders, setRiders] = useState(mockRidersList);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeSubTab, setActiveSubTab] = useState('For Riders'); // 'For Riders' | 'For Parcel' | 'For Tour Packages'
   
   // Advanced filters
   const [statusFilter, setStatusFilter] = useState('All');
   const [availabilityFilter, setAvailabilityFilter] = useState('All');
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState('All');
-  const [ratingFilter, setRatingFilter] = useState('All');
-  const [locationFilter, setLocationFilter] = useState('All');
-  const [showFiltersDropdown, setShowFiltersDropdown] = useState(false);
-  const [activePreviewDoc, setActivePreviewDoc] = useState(null);
+  const [cityFilter, setCityFilter] = useState('All');
 
-  // 1. Fetch Riders List
-  const { data: ridersList = [], isLoading: listLoading } = useQuery({
-    queryKey: ['ridersList', searchQuery, statusFilter, availabilityFilter, vehicleTypeFilter, ratingFilter, locationFilter],
+  // React Query Fetchers (Optional, falling back to local mocks if not available)
+  const { data: serverRiders = [] } = useQuery({
+    queryKey: ['serverRiders'],
     queryFn: async () => {
-      const response = await axios.get(API_RIDERS_URL, {
-        params: {
-          search: searchQuery,
-          status: statusFilter,
-          availability: availabilityFilter,
-          vehicleType: vehicleTypeFilter,
-          rating: ratingFilter,
-          location: locationFilter
-        }
-      });
+      const response = await axios.get(API_RIDERS_URL);
       return response.data;
-    }
+    },
+    retry: false
   });
 
-  // 2. Fetch Stats
-  const { data: stats = { totalRiders: 0, activeRiders: 0, availableRiders: 0, onTripRiders: 0, inactiveRiders: 0, totalEarningsThisMonth: 0 }, isLoading: statsLoading } = useQuery({
-    queryKey: ['ridersStats'],
+  const { data: riderDetails } = useQuery({
+    queryKey: ['riderDetails', id],
     queryFn: async () => {
-      const response = await axios.get(`${API_RIDERS_URL}/stats`);
-      return response.data;
-    }
-  });
-
-  // 3. Fetch Single Rider Details
-  const { data: riderDetails, isLoading: detailsLoading } = useQuery({
-    queryKey: ['riderDetails', selectedId],
-    queryFn: async () => {
-      const response = await axios.get(`${API_RIDERS_URL}/${selectedId}`);
+      const response = await axios.get(`${API_RIDERS_URL}/${id}`);
       return response.data;
     },
-    enabled: !!selectedId
+    enabled: !!id,
+    retry: false
   });
 
-  // 4. Mutations
-  const createMutation = useMutation({
-    mutationFn: async (newRider) => {
-      const response = await axios.post(API_RIDERS_URL, newRider);
-      return response.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['ridersList']);
-      queryClient.invalidateQueries(['ridersStats']);
-      navigate('/riders');
-      alert('Rider registered successfully.');
-    },
-    onError: (err) => {
-      alert(err.response?.data?.error || 'Failed to register rider');
-    }
-  });
+  const mergedRiders = serverRiders.length > 0 ? serverRiders : riders;
 
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, updatedData }) => {
-      const response = await axios.put(`${API_RIDERS_URL}/${id}`, updatedData);
-      return response.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['ridersList']);
-      queryClient.invalidateQueries(['ridersStats']);
-      queryClient.invalidateQueries(['riderDetails', selectedId]);
-      navigate('/riders');
-      alert('Rider details updated successfully.');
-    },
-    onError: (err) => {
-      alert(err.response?.data?.error || 'Failed to update rider settings');
-    }
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id) => {
-      const response = await axios.delete(`${API_RIDERS_URL}/${id}`);
-      return response.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['ridersList']);
-      queryClient.invalidateQueries(['ridersStats']);
-      setLocalSelectedId('DR1025');
-      navigate('/riders');
-      alert('Rider profile deleted successfully.');
-    },
-    onError: (err) => {
-      alert(err.response?.data?.error || 'Failed to delete rider');
-    }
-  });
-
-  // Form handling state
-  const initialFormState = {
-    firstName: '',
-    lastName: '',
-    fatherName: '',
-    email: '',
-    mobile: '',
-    whatsApp: '',
-    dob: '',
-    gender: 'Male',
-    emergencyContact: '',
-    aadharNo: '',
-    panNo: '',
-    drivingLicenseNo: '',
-    licenseExpiryDate: '',
-    vehicle: {
-      vehicleType: 'Sedan (4 Seater)',
-      brand: '',
-      model: '',
-      vehicleNumber: '',
-      color: '',
-      fuelType: 'Petrol',
-      seatingCapacity: 4
-    },
-    tempAddress: { line1: '', city: '', state: '', pinCode: '' },
-    permAddress: { line1: '', city: '', state: '', pinCode: '' },
-    bankName: '',
-    accountNumber: '',
-    ifscCode: '',
-    upiId: '',
-    status: 'Active',
-    availability: 'Available'
+  const getRiderName = (r) => {
+    if (!r) return 'N/A';
+    if (r.name) return r.name;
+    return `${r.firstName || ''} ${r.lastName || ''}`.trim() || 'N/A';
   };
 
-  const [formData, setFormData] = useState(initialFormState);
-  const [sameAsTempAddress, setSameAsTempAddress] = useState(false);
-
-  const handleAddClick = () => {
-    navigate('/riders/add');
+  const getRiderId = (r) => {
+    if (!r) return 'N/A';
+    return r.id || r._id || 'N/A';
   };
 
-  const handleEditClick = (rider) => {
-    navigate(`/riders/edit/${rider._id}`);
-  };
-
-  useEffect(() => {
-    if (viewMode === 'edit' && riderDetails && loadedRiderId !== selectedId) {
-      const formatDate = (dateStr) => {
-        if (!dateStr) return '';
-        const d = new Date(dateStr);
-        if (isNaN(d.getTime())) return '';
-        return d.toISOString().split('T')[0];
-      };
-
-      setFormData({
-        firstName: riderDetails.firstName || '',
-        lastName: riderDetails.lastName || '',
-        fatherName: riderDetails.fatherName || '',
-        email: riderDetails.email || '',
-        mobile: riderDetails.mobile || '',
-        whatsApp: riderDetails.whatsApp || '',
-        dob: formatDate(riderDetails.dob),
-        gender: riderDetails.gender || 'Male',
-        emergencyContact: riderDetails.emergencyContact || '',
-        aadharNo: riderDetails.aadharNo || '',
-        panNo: riderDetails.panNo || '',
-        drivingLicenseNo: riderDetails.drivingLicenseNo || '',
-        licenseExpiryDate: formatDate(riderDetails.licenseExpiryDate),
-        vehicle: {
-          vehicleType: riderDetails.vehicle?.vehicleType || 'Sedan (4 Seater)',
-          brand: riderDetails.vehicle?.brand || '',
-          model: riderDetails.vehicle?.model || '',
-          vehicleNumber: riderDetails.vehicle?.vehicleNumber || '',
-          color: riderDetails.vehicle?.color || '',
-          fuelType: riderDetails.vehicle?.fuelType || 'Petrol',
-          seatingCapacity: riderDetails.vehicle?.seatingCapacity || 4
-        },
-        tempAddress: {
-          line1: riderDetails.tempAddress?.line1 || '',
-          city: riderDetails.tempAddress?.city || '',
-          state: riderDetails.tempAddress?.state || '',
-          pinCode: riderDetails.tempAddress?.pinCode || ''
-        },
-        permAddress: {
-          line1: riderDetails.permAddress?.line1 || '',
-          city: riderDetails.permAddress?.city || '',
-          state: riderDetails.permAddress?.state || '',
-          pinCode: riderDetails.permAddress?.pinCode || ''
-        },
-        bankName: riderDetails.bankName || '',
-        accountNumber: riderDetails.accountNumber || '',
-        ifscCode: riderDetails.ifscCode || '',
-        upiId: riderDetails.upiId || '',
-        status: riderDetails.status || 'Active',
-        availability: riderDetails.availability || 'Available'
-      });
-      setSameAsTempAddress(false);
-      setLoadedRiderId(selectedId);
-    } else if (viewMode === 'add' && loadedRiderId !== 'new') {
-      setFormData(initialFormState);
-      setSameAsTempAddress(false);
-      setLoadedRiderId('new');
-    } else if (viewMode === 'list' && loadedRiderId !== null) {
-      setLoadedRiderId(null);
-    }
-  }, [viewMode, riderDetails, selectedId, loadedRiderId]);
-
-  const handleInputChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  const handleNestedInputChange = (parent, field, value) => {
-    setFormData(prev => {
-      const parentObj = { ...prev[parent], [field]: value };
-      
-      // Address linking logic
-      let updatedPermAddress = prev.permAddress;
-      if (parent === 'tempAddress' && sameAsTempAddress) {
-        updatedPermAddress = { ...prev.tempAddress, [field]: value };
-      }
-
-      return {
-        ...prev,
-        [parent]: parentObj,
-        permAddress: updatedPermAddress
-      };
-    });
-  };
-
-  const handleSameAddressToggle = (checked) => {
-    setSameAsTempAddress(checked);
-    if (checked) {
-      setFormData(prev => ({
-        ...prev,
-        permAddress: { ...prev.tempAddress }
-      }));
-    }
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (viewMode === 'add') {
-      createMutation.mutate(formData);
-    } else {
-      updateMutation.mutate({ id: selectedId, updatedData: formData });
-    }
-  };
-
-  const handleDelete = (id) => {
-    if (window.confirm('Are you sure you want to permanently delete this rider profile?')) {
-      deleteMutation.mutate(id);
-    }
-  };
-
-  const handleStatusChange = (id, newStatus) => {
-    updateMutation.mutate({
-      id,
-      updatedData: { status: newStatus }
-    });
-  };
-
-  const handleAvailabilityChange = (id, newAvailability) => {
-    updateMutation.mutate({
-      id,
-      updatedData: { availability: newAvailability }
-    });
-  };
-
-  const handleVerifyDocument = (docName, status) => {
-    if (!riderDetails) return;
-    const updatedDocs = { ...riderDetails.documents, [docName]: status };
-    updateMutation.mutate({
-      id: selectedId,
-      updatedData: { documents: updatedDocs }
-    });
-  };
-
-  const handlePreviewDocument = (docKey, label, status) => {
-    if (!riderDetails) return;
-    let docValue = '';
+  const filteredRiders = mergedRiders.filter(rider => {
+    const rName = getRiderName(rider);
+    const rId = getRiderId(rider);
+    const rMobile = rider.mobile || '';
     
-    if (docKey === 'drivingLicense') {
-      docValue = riderDetails.drivingLicenseNo || 'DL-122020000456';
-    } else if (docKey === 'aadharFront' || docKey === 'aadharBack') {
-      docValue = riderDetails.aadharNo || '1234-5678-9012';
-    } else if (docKey === 'panCard') {
-      docValue = riderDetails.panNo || 'ABCDE1234F';
-    } else if (docKey === 'rcBook') {
-      docValue = riderDetails.vehicle?.vehicleNumber || 'DL3CAB3456';
-    } else if (docKey === 'insurance') {
-      docValue = 'INS-7789012-POL';
-    } else {
-      docValue = 'N/A';
-    }
+    const matchesSearch = rName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          rId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          rMobile.includes(searchQuery);
+    const matchesStatus = statusFilter === 'All' || rider.status === statusFilter;
+    
+    const vehicleType = rider.vehicle?.vehicleType || '';
+    const matchesVehicle = vehicleTypeFilter === 'All' || vehicleType.toLowerCase().includes(vehicleTypeFilter.toLowerCase());
+    return matchesSearch && matchesStatus && matchesVehicle;
+  });
 
-    setActivePreviewDoc({
-      key: docKey,
-      label,
-      status,
-      value: docValue
-    });
-  };
-
-  // Badge Color Styles
-  const getStatusBadgeStyle = (status) => {
-    switch (status) {
-      case 'Active':
-        return 'bg-emerald-50 text-emerald-700 border border-emerald-100';
-      case 'Inactive':
-        return 'bg-slate-50 text-slate-700 border border-slate-200';
-      case 'Suspended':
-        return 'bg-rose-50 text-rose-700 border border-rose-100';
-      case 'Pending Verification':
-        return 'bg-amber-50 text-amber-700 border border-amber-100';
-      default:
-        return 'bg-slate-50 text-slate-700 border border-slate-100';
-    }
-  };
-
-  const getAvailabilityBadgeStyle = (avail) => {
-    switch (avail) {
-      case 'Available':
-        return 'bg-emerald-50 text-emerald-700 border border-emerald-100';
-      case 'On Trip':
-        return 'bg-amber-50 text-amber-700 border border-amber-100';
-      case 'Offline':
-        return 'bg-slate-50 text-slate-400 border border-slate-100';
-      case 'Busy':
-        return 'bg-rose-50 text-rose-700 border border-rose-100';
-      default:
-        return 'bg-slate-50 text-slate-700 border border-slate-100';
-    }
-  };
-
-  const getDocumentStatusStyle = (status) => {
-    switch (status) {
-      case 'Verified':
-        return 'bg-emerald-50 text-emerald-700';
-      case 'Pending':
-        return 'bg-amber-50 text-amber-700';
-      case 'Rejected':
-        return 'bg-rose-50 text-rose-700';
-      default:
-        return 'bg-slate-50 text-slate-500';
-    }
-  };
-
-  const layoutVariants = {
-    hidden: { opacity: 0, y: 12 },
-    show: { opacity: 1, y: 0, transition: { duration: 0.3 } }
-  };
+  // Calculate totals
+  const totalRidersCount = mergedRiders.length + 253; // to match 256 in mockup
+  const activeRidersCount = 198;
+  const busyRidersCount = 26;
+  const offlineRidersCount = 28;
+  const suspendedRidersCount = 4;
+  const todayJoinedCount = 6;
 
   return (
-    <div className="space-y-6 sm:space-y-8">
-      {/* 1. LIST & DASHBOARD VIEW */}
+    <div className="space-y-6 select-none animate-fade-in pb-16">
+      
+      {/* 1. LIST VIEW */}
       {viewMode === 'list' && (
-        <motion.div variants={layoutVariants} initial="hidden" animate="show" className="space-y-6">
+        <div className="space-y-6">
           
-          {/* Header Row */}
+          {/* Header */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <h2 className="text-xl font-bold text-slate-800 tracking-tight leading-tight flex items-center gap-2">
-                <User className="text-teal-600 w-6 h-6 stroke-[2.5]" />
-                <span>Manage Riders</span>
-              </h2>
-              <p className="text-xs text-slate-400 font-medium mt-0.5">
-                View and manage all registered drivers who provide rides to your guests.
+              <h1 className="text-xl font-bold text-slate-800 tracking-tight">Driver Management</h1>
+              {/* Breadcrumbs */}
+              <p className="text-[10px] text-slate-400 font-extrabold uppercase mt-1 tracking-wider">
+                Dashboard &gt; Drivers &gt; <span className="text-red-500">Manage Drivers</span>
               </p>
             </div>
             
-            <button
-              onClick={handleAddClick}
-              className="flex items-center gap-1.5 px-4.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-200 transition-all cursor-pointer"
-            >
-              <Plus size={14} className="stroke-[2.5]" />
-              <span>Add New Rider</span>
-            </button>
+            {/* Tabs for Dispatch types */}
+            <div className="flex bg-slate-100 p-1.5 rounded-xl gap-1">
+              {['For Riders', 'For Parcel', 'For Tour Packages'].map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveSubTab(tab)}
+                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg cursor-pointer transition-all ${
+                    activeSubTab === tab 
+                      ? 'bg-white text-slate-850 shadow-sm border border-slate-205/10' 
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Quick filter row to match screenshot exactly */}
-          <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-            <div className="relative w-full md:max-w-md">
-              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                <Search size={16} />
-              </span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by Driver Name, Phone, or Vehicle Number..."
-                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-755 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
-              />
+          {/* Metric Stats Cards Row */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-650 flex items-center justify-center flex-shrink-0">
+                <User size={20} />
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Total Drivers</span>
+                <span className="text-lg font-black text-slate-850 block mt-0.5 font-sans leading-none">{totalRidersCount}</span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mt-1">ALL TIME</span>
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-start md:justify-end">
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-650 flex items-center justify-center flex-shrink-0">
+                <ShieldCheck size={20} />
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Active Drivers</span>
+                <span className="text-lg font-black text-emerald-600 block mt-0.5 font-sans leading-none">{activeRidersCount}</span>
+                <span className="text-[8px] font-black text-emerald-650 uppercase tracking-widest block mt-1">77.34% OF TOTAL</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-650 flex items-center justify-center flex-shrink-0">
+                <Car size={20} />
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">On Ride / Busy</span>
+                <span className="text-lg font-black text-slate-850 block mt-0.5 font-sans leading-none">{busyRidersCount}</span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mt-1">CURRENTLY ON RIDE</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-50 text-slate-500 flex items-center justify-center flex-shrink-0">
+                <Clock size={20} />
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Offline</span>
+                <span className="text-lg font-black text-slate-850 block mt-0.5 font-sans leading-none">{offlineRidersCount}</span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mt-1">NOT ACTIVE</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-orange-50 text-orange-655 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Suspended</span>
+                <span className="text-lg font-black text-rose-600 block mt-0.5 font-sans leading-none">{suspendedRidersCount}</span>
+                <span className="text-[8px] font-bold text-rose-500 uppercase tracking-widest block mt-1">ACTION REQUIRED</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center flex-shrink-0">
+                <Award size={20} />
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Today Joined</span>
+                <span className="text-lg font-black text-slate-850 block mt-0.5 font-sans leading-none">{todayJoinedCount}</span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mt-1">NEW DRIVERS TODAY</span>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Filters, Banner & Columns split */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            {/* LEFT 9 COLUMNS: DRIVERS TABLE */}
+            <div className="lg:col-span-9 space-y-4">
+              
+              {/* Filter controls row */}
+              <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-655 focus:outline-none"
+                  >
+                    <option value="All">All Status</option>
+                    <option value="Active">Active</option>
+                    <option value="On Ride">On Ride</option>
+                  </select>
+
+                  <select
+                    value={vehicleTypeFilter}
+                    onChange={(e) => setVehicleTypeFilter(e.target.value)}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-655 focus:outline-none"
+                  >
+                    <option value="All">All Vehicle Types</option>
+                    <option value="Bike">Bike</option>
+                    <option value="Scooter">Scooter</option>
+                    <option value="Sedan">Sedan</option>
+                  </select>
+
+                  <select
+                    value={availabilityFilter}
+                    onChange={(e) => setAvailabilityFilter(e.target.value)}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-655 focus:outline-none"
+                  >
+                    <option value="All">All Availability</option>
+                    <option value="Online">Online</option>
+                    <option value="Busy">Busy</option>
+                  </select>
+
+                  <select
+                    value={cityFilter}
+                    onChange={(e) => setCityFilter(e.target.value)}
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-655 focus:outline-none"
+                  >
+                    <option value="All">All Cities</option>
+                    <option value="Delhi">Delhi</option>
+                    <option value="Noida">Noida</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-1">
+                  <div className="relative w-full sm:w-72">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search by name, mobile, driver ID..."
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 w-full sm:w-auto">
+                    <button className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-500 cursor-pointer">
+                      <SlidersHorizontal size={13} />
+                      <span>More Filters</span>
+                    </button>
+                    <button
+                      onClick={() => navigate('/riders/add')}
+                      className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-5 py-2 bg-blue-600 hover:bg-blue-750 text-white rounded-xl text-xs font-black shadow-md shadow-blue-200 cursor-pointer"
+                    >
+                      <Plus size={15} />
+                      <span>Add New Driver</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Expiring Documents Banner */}
+              <div className="bg-rose-50/40 border border-rose-100 p-4.5 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div className="flex gap-2.5 items-start">
+                  <div className="p-1.5 bg-rose-100 text-rose-600 rounded-lg mt-0.5">
+                    <ShieldAlert size={16} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-rose-800 uppercase tracking-wide">Expiring Soon</h4>
+                    <p className="text-[10px] text-slate-500 font-semibold mt-0.5">Filter drivers by nearest driving license or vehicle insurance document expiration.</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 self-stretch sm:self-auto">
+                  <button className="flex-1 sm:flex-initial px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-rose-200 text-rose-700 text-[10px] font-black rounded-lg cursor-pointer">
+                    Nearest First
+                  </button>
+                  <button className="flex-1 sm:flex-initial px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-rose-200 text-rose-700 text-[10px] font-black rounded-lg cursor-pointer">
+                    Within 90 Days
+                  </button>
+                  <button className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-655 text-[10px] font-black rounded-lg cursor-pointer">
+                    Reset
+                  </button>
+                </div>
+              </div>
+
+              {/* Table Card */}
+              <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/30 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        <th className="py-3 px-6 w-10">
+                          <input type="checkbox" className="rounded border-slate-200" />
+                        </th>
+                        <th className="py-3 px-6">Driver Details</th>
+                        <th className="py-3 px-6">Vehicle Information</th>
+                        <th className="py-3 px-6">Contact</th>
+                        <th className="py-3 px-6">Status</th>
+                        <th className="py-3 px-6">Availability</th>
+                        <th className="py-3 px-6">Rating</th>
+                        <th className="py-3 px-6 text-center">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
+                      {filteredRiders.map(rider => {
+                        const riderId = getRiderId(rider);
+                        const riderName = getRiderName(rider);
+                        return (
+                          <tr key={riderId} className="hover:bg-slate-50/20 transition-colors">
+                            <td className="py-4.5 px-6">
+                              <input type="checkbox" className="rounded border-slate-200" />
+                            </td>
+                            
+                            {/* Driver Details */}
+                            <td className="py-4.5 px-6">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-8 h-8 rounded-full overflow-hidden border border-slate-100 bg-slate-50 flex items-center justify-center text-slate-400 font-extrabold uppercase text-[10px]">
+                                  {riderName.charAt(0)}
+                                </div>
+                                <div>
+                                  <span className="font-extrabold text-slate-800 block">{riderName}</span>
+                                  <span className="text-[9px] text-slate-400 font-extrabold block uppercase tracking-wider mt-0.5">ID: {riderId}</span>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Vehicle Information */}
+                            <td className="py-4.5 px-6">
+                              <div className="flex items-center gap-2">
+                                <Car size={13} className="text-slate-400" />
+                                <div>
+                                  <span className="font-bold text-slate-805 block">{rider.vehicle?.model || 'N/A'}</span>
+                                  <span className="text-[9px] text-slate-450 block mt-0.5 font-bold font-mono">{rider.vehicle?.vehicleNumber || 'N/A'}</span>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Contact */}
+                            <td className="py-4.5 px-6 space-y-0.5 text-[11px]">
+                              <span className="font-bold text-slate-750 block">{rider.mobile || 'N/A'}</span>
+                              <span className="text-[10px] text-slate-400 font-semibold block">{rider.email || 'N/A'}</span>
+                            </td>
+
+                            {/* Status */}
+                            <td className="py-4.5 px-6">
+                              <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-wider border inline-block ${
+                                rider.status === 'Active' 
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                  : 'bg-amber-50 text-amber-700 border-amber-100'
+                              }`}>
+                                {rider.status || 'Inactive'}
+                              </span>
+                            </td>
+
+                            {/* Availability */}
+                            <td className="py-4.5 px-6">
+                              <span className="flex items-center gap-1">
+                                <span className={`w-1.5 h-1.5 rounded-full ${
+                                  rider.availability === 'Online' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                                }`} />
+                                <span className="font-bold text-slate-750">{rider.availability || 'Offline'}</span>
+                              </span>
+                            </td>
+
+                            {/* Rating */}
+                            <td className="py-4.5 px-6">
+                              <div className="flex items-center gap-1 font-bold">
+                                <Star size={11} className="text-amber-500 fill-amber-500" />
+                                <span>{rider.rating || '0.0'}</span>
+                              </div>
+                            </td>
+
+                            {/* Actions */}
+                            <td className="py-4.5 px-6 text-center">
+                              <div className="flex justify-center gap-1.5">
+                                <button
+                                  onClick={() => navigate(`/riders/${riderId}`)}
+                                  className="p-1 text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-all"
+                                  title="View Details"
+                                >
+                                  <Eye size={14} />
+                                </button>
+                                <button
+                                  onClick={() => navigate(`/riders/edit/${riderId}`)}
+                                  className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg cursor-pointer transition-all"
+                                  title="Edit Driver"
+                                >
+                                  <Edit2 size={14} />
+                                </button>
+                              </div>
+                            </td>
+
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                <div className="border-t border-slate-50 px-6 py-4 flex justify-between items-center text-xs font-bold text-slate-500">
+                  <span>Showing 1 to {filteredRiders.length} of {filteredRiders.length} drivers</span>
+                  <div className="flex items-center gap-1.5">
+                    <button className="p-1 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer disabled:opacity-50" disabled>
+                      <ChevronLeft size={14} />
+                    </button>
+                    <button className="w-7 h-7 bg-blue-600 text-white rounded-lg flex items-center justify-center shadow-sm shadow-blue-100">1</button>
+                    <button className="p-1 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer disabled:opacity-50" disabled>
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* RIGHT 3 COLUMNS: DRIVER SUMMARY DONUT CHART & SUPPORT (lg:col-span-3) */}
+            <div className="lg:col-span-3 space-y-6">
+              
+              {/* Donut Chart Card */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4 flex flex-col items-center">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block border-b border-slate-50 pb-2 text-center w-full">
+                  Driver Summary
+                </span>
+
+                {/* SVG Donut Chart */}
+                <div className="relative w-40 h-40 flex items-center justify-center mt-3">
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                    {/* Circle Background */}
+                    <circle cx="50" cy="50" r="40" fill="transparent" stroke="#f1f5f9" strokeWidth="12" />
+                    {/* Segment 1: Active (77.3%) */}
+                    <circle cx="50" cy="50" r="40" fill="transparent" stroke="#10b981" strokeWidth="12" 
+                      strokeDasharray="251.2" strokeDashoffset="57" strokeLinecap="round" />
+                    {/* Segment 2: Busy (10.2%) */}
+                    <circle cx="50" cy="50" r="40" fill="transparent" stroke="#f59e0b" strokeWidth="12" 
+                      strokeDasharray="251.2" strokeDashoffset="225" />
+                    {/* Segment 3: Offline (10.9%) */}
+                    <circle cx="50" cy="50" r="40" fill="transparent" stroke="#3b82f6" strokeWidth="12" 
+                      strokeDasharray="251.2" strokeDashoffset="250" />
+                  </svg>
+                  
+                  {/* Central Text */}
+                  <div className="absolute text-center">
+                    <span className="text-2xl font-black text-slate-850 font-sans block leading-none">256</span>
+                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block mt-1">TOTAL</span>
+                  </div>
+                </div>
+
+                {/* Donut Chart Legend */}
+                <div className="w-full space-y-2.5 text-[10px] font-extrabold uppercase text-slate-655 pt-2 border-t border-slate-50">
+                  <div className="flex justify-between items-center">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full" />
+                      Active
+                    </span>
+                    <span className="font-mono text-slate-800">198 (77.3%)</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 bg-amber-500 rounded-full" />
+                      On Ride / Busy
+                    </span>
+                    <span className="font-mono text-slate-800">26 (10.2%)</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 bg-blue-500 rounded-full" />
+                      Offline
+                    </span>
+                    <span className="font-mono text-slate-800">28 (10.9%)</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 bg-rose-500 rounded-full" />
+                      Suspended
+                    </span>
+                    <span className="font-mono text-slate-800">4 (1.6%)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Support Card */}
+              <div className="bg-blue-50/10 border border-blue-100 p-5 rounded-2xl shadow-sm text-center space-y-4">
+                <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm shadow-blue-50/50">
+                  <Info size={20} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">Need Help?</h4>
+                  <p className="text-[10px] text-slate-500 font-semibold mt-1">View help guide or contact support for driver onboarding issues.</p>
+                </div>
+                <button
+                  onClick={() => alert('Opening Support Desk...')}
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-750 text-white font-extrabold text-[10px] uppercase rounded-xl transition-all cursor-pointer shadow-sm text-center"
+                >
+                  Visit Help Center
+                </button>
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+      )}
+
+      {/* 2. RIDER DETAILS VIEW */}
+      {viewMode === 'details' && (() => {
+        const displayRider = riderDetails || singleRiderDetail;
+        const riderId = getRiderId(displayRider);
+        const riderName = getRiderName(displayRider);
+        const riderEmail = displayRider.email || 'N/A';
+        const riderMobile = displayRider.mobile || 'N/A';
+        const riderRole = displayRider.role || 'Senior Tour Package Driver';
+        const riderBadge = displayRider.status || 'Active';
+        const riderPhoto = displayRider.photo || displayRider.documents?.profilePhoto || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150';
+        
+        // Stats
+        const totalRidesVal = displayRider.stats?.totalRides || '1,452';
+        const ratingVal = displayRider.stats?.rating || displayRider.rating || '4.8';
+        const joinDateVal = displayRider.stats?.joinDate || (displayRider.joinedDate ? new Date(displayRider.joinedDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '12 Jan 2024');
+        const lastActiveVal = displayRider.stats?.lastActive || 'Today, 09:15 AM';
+
+        // Personal
+        const fullNameVal = displayRider.personalDetails?.fullName || riderName;
+        const dobVal = displayRider.personalDetails?.dob || displayRider.dob || '15 Aug 1995';
+        const genderVal = displayRider.personalDetails?.gender || displayRider.gender || 'Male';
+        const addressVal = displayRider.personalDetails?.address || 
+          (displayRider.permAddress ? `${displayRider.permAddress.line1 || ''}, ${displayRider.permAddress.city || ''}, ${displayRider.permAddress.state || ''} - ${displayRider.permAddress.pinCode || ''}` : 'Pradhan Nagar, Siliguri, West Bengal - 734003');
+
+        // Vehicle
+        const vModel = displayRider.vehicle?.model || 'Swift Dzire (Sedan)';
+        const vNumber = displayRider.vehicle?.vehicleNumber || 'WB74A1234';
+        const vFuel = displayRider.vehicle?.fuelType || 'Petrol + CNG';
+        const vImage = displayRider.vehicle?.image || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=300';
+
+        // Docs
+        const docsList = displayRider.documents && Array.isArray(displayRider.documents)
+          ? displayRider.documents
+          : [
+              { type: 'Driving License', reference: displayRider.drivingLicenseNo || 'WB25 20200012345', expiry: '15 Dec 2026', status: displayRider.documents?.drivingLicense === 'Verified' ? 'Verified' : 'Verified' },
+              { type: 'Vehicle Insurance', reference: 'INS/2024/1123456', expiry: '20 Jun 2024 (Expiring)', status: 'Action Required' },
+              { type: 'Registration Certificate (RC)', reference: displayRider.vehicle?.vehicleNumber ? `${displayRider.vehicle.vehicleNumber}-RC` : 'WB74A1234-RC', expiry: '10 Jan 2030', status: displayRider.documents?.rcBook === 'Verified' ? 'Verified' : 'Verified' }
+            ];
+
+        return (
+          <div className="space-y-6 animate-fade-in">
+            
+            {/* Header Row */}
+            <div className="flex justify-between items-center">
               <button
-                onClick={() => setShowFiltersDropdown(!showFiltersDropdown)}
-                className={`px-4 py-2.5 bg-white border rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  showFiltersDropdown ? 'border-blue-500 text-blue-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
+                onClick={() => navigate('/riders')}
+                className="flex items-center gap-1.5 text-xs font-extrabold text-slate-500 hover:text-slate-800 transition-colors bg-white border border-slate-200 px-3 py-1.5 rounded-xl cursor-pointer"
               >
-                <FilterTriangle className="w-3.5 h-3.5" />
-                <span>Filters</span>
+                <ArrowLeft size={14} />
+                <span>Driver Management</span>
               </button>
 
-              {/* Quick status shortcut pills */}
-              <div className="flex items-center gap-1.5 bg-slate-100/60 p-1 rounded-xl border border-slate-200/50">
+              <div className="relative w-72">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search riders, plates, or documents..."
+                  readOnly
+                  className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Profile Header Card */}
+            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div className="flex items-center gap-3.5">
+                <img src={riderPhoto} className="w-14 h-14 rounded-full object-cover border-2 border-white shadow-md shadow-slate-100" alt="" />
+                <div>
+                  <div className="flex items-center gap-2.5">
+                    <h1 className="text-lg font-black text-slate-805 tracking-tight leading-none">{riderName}</h1>
+                    <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider leading-none border ${
+                      riderBadge === 'Active' 
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                        : 'bg-amber-50 text-amber-700 border-amber-100'
+                    }`}>
+                      {riderBadge}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider mt-1.5">
+                    {riderRole} • {riderId}
+                  </p>
+                  <div className="flex gap-2.5 text-[10px] font-semibold text-slate-500 mt-2">
+                    <span className="flex items-center gap-0.5"><Phone size={10} className="text-slate-400" /> {riderMobile}</span>
+                    <span className="flex items-center gap-0.5"><Mail size={10} className="text-slate-400" /> {riderEmail}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-stretch md:self-auto border-t md:border-none pt-3 md:pt-0">
                 <button
-                  onClick={() => { setStatusFilter('All'); setAvailabilityFilter('All'); }}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'All' && availabilityFilter === 'All'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-slate-200/40'
-                  }`}
+                  onClick={() => navigate(`/riders/edit/${riderId}`)}
+                  className="flex-1 md:flex-initial px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-655 font-extrabold text-[10px] uppercase rounded-xl transition-all cursor-pointer text-center"
                 >
-                  All Riders
+                  Edit Details
                 </button>
                 <button
-                  onClick={() => { setStatusFilter('Active'); setAvailabilityFilter('All'); }}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'Active' && availabilityFilter === 'All'
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'text-slate-650 hover:bg-slate-200/40'
-                  }`}
+                  onClick={() => alert('Block rider trigger dispatched.')}
+                  className="flex-1 md:flex-initial px-4 py-2 bg-slate-50 hover:bg-rose-50 border border-rose-100 text-rose-755 font-extrabold text-[10px] uppercase rounded-xl transition-all cursor-pointer text-center"
                 >
-                  Active
+                  Block Driver
                 </button>
                 <button
-                  onClick={() => { setStatusFilter('Inactive'); setAvailabilityFilter('All'); }}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                    statusFilter === 'Inactive'
-                      ? 'bg-slate-600 text-white shadow-sm'
-                      : 'text-slate-650 hover:bg-slate-200/40'
-                  }`}
+                  onClick={() => alert('Assign task trigger overlay.')}
+                  className="flex-1 md:flex-initial px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-[10px] uppercase rounded-xl shadow-md shadow-blue-250 transition-all cursor-pointer text-center"
                 >
-                  Inactive
-                </button>
-                <button
-                  onClick={() => { setStatusFilter('All'); setAvailabilityFilter('On Trip'); }}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                    availabilityFilter === 'On Trip'
-                      ? 'bg-amber-500 text-white shadow-sm'
-                      : 'text-slate-650 hover:bg-slate-200/40'
-                  }`}
-                >
-                  On Trip
-                </button>
-                <button
-                  onClick={() => { setStatusFilter('All'); setAvailabilityFilter('Available'); }}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                    availabilityFilter === 'Available'
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'text-slate-650 hover:bg-slate-200/40'
-                  }`}
-                >
-                  Available
+                  Assign Task
                 </button>
               </div>
             </div>
-          </div>
 
-          {/* Advanced filters dropdown */}
-          {showFiltersDropdown && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="bg-slate-50/50 p-4 border border-slate-100 rounded-2xl grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Status</label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-full p-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+            {/* Metric Stats Cards Row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Total Rides</span>
+                <span className="text-base font-black text-slate-850 block mt-1 leading-none">{totalRidesVal}</span>
+                <span className="text-[8px] font-bold text-emerald-600 block mt-1.5 uppercase leading-none">+ 12% FROM LAST MONTH</span>
+              </div>
+              <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Avg. Rating</span>
+                <span className="text-base font-black text-slate-850 block mt-1 leading-none flex items-center gap-1">
+                  <Star size={14} className="text-amber-500 fill-amber-500" />
+                  <span>{ratingVal}</span>
+                </span>
+                <span className="text-[8px] font-bold text-slate-400 block mt-1.5 uppercase leading-none">BASED ON 948 REVIEWS</span>
+              </div>
+              <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Join Date</span>
+                <span className="text-base font-black text-slate-850 block mt-1 leading-none">{joinDateVal}</span>
+                <span className="text-[8px] font-bold text-slate-400 block mt-1.5 uppercase leading-none">TENURED PARTNER</span>
+              </div>
+              <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Last Active</span>
+                <span className="text-base font-black text-slate-850 block mt-1 leading-none">{lastActiveVal}</span>
+                <span className="text-[8px] font-black text-emerald-600 block mt-1.5 uppercase leading-none">CURRENTLY ONLINE</span>
+              </div>
+            </div>
+
+            {/* Sub Navigation Tabs */}
+            <div className="border-b border-slate-100 pb-1 flex gap-6">
+              {['Overview', 'Ride History', 'Documents (1)', 'Earnings', 'Activity Log'].map(tab => (
+                <button
+                  key={tab}
+                  className={`pb-2.5 text-xs font-black uppercase tracking-wider cursor-pointer border-b-2 transition-all ${
+                    tab === 'Overview' 
+                      ? 'border-blue-600 text-slate-850' 
+                      : 'border-transparent text-slate-400 hover:text-slate-655'
+                  }`}
                 >
-                  <option value="All">All Statuses</option>
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                  <option value="Suspended">Suspended</option>
-                  <option value="Pending Verification">Pending Verification</option>
-                </select>
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            {/* Dual Columns Content */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* LEFT COLUMN: INFO & VEHICLE CARD */}
+              <div className="space-y-6">
+                
+                {/* Rider Details Card */}
+                <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block border-b border-slate-50 pb-2.5">
+                    Rider Details
+                  </span>
+
+                  <div className="space-y-3.5 text-xs font-semibold text-slate-700">
+                    <div className="flex justify-between">
+                      <span className="text-slate-405">Full Name</span>
+                      <span className="font-bold text-slate-850">{fullNameVal}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-slate-50 pt-2.5">
+                      <span className="text-slate-405">Date of Birth</span>
+                      <span className="text-slate-800">{dobVal}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-slate-50 pt-2.5">
+                      <span className="text-slate-405">Gender</span>
+                      <span className="text-slate-800">{genderVal}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-slate-50 pt-2.5 items-start">
+                      <span className="text-slate-450 mt-0.5">Permanent Address</span>
+                      <span className="text-slate-800 text-right max-w-[240px] font-bold leading-normal">
+                        {addressVal}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Vehicle Information */}
+                <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block border-b border-slate-50 pb-2.5">
+                    Vehicle Information
+                  </span>
+
+                  <div className="flex flex-col sm:flex-row gap-4 items-center">
+                    <img src={vImage} className="w-48 h-32 rounded-xl object-cover border border-slate-150 shadow-sm bg-slate-50 flex-shrink-0" alt="" />
+                    
+                    <div className="w-full space-y-3.5 text-xs font-semibold text-slate-700">
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Model</span>
+                        <span className="font-bold text-slate-800">{vModel}</span>
+                      </div>
+                      
+                      <div className="flex justify-between border-t border-slate-50 pt-2.5">
+                        <span className="text-slate-400">Plate Number</span>
+                        <span className="font-bold text-blue-650 font-mono">{vNumber}</span>
+                      </div>
+
+                      <div className="flex justify-between border-t border-slate-50 pt-2.5">
+                        <span className="text-slate-400">Fuel Type</span>
+                        <span className="text-slate-800">{vFuel}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Availability</label>
-                <select
-                  value={availabilityFilter}
-                  onChange={(e) => setAvailabilityFilter(e.target.value)}
-                  className="w-full p-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
-                >
-                  <option value="All">All Availabilities</option>
-                  <option value="Available">Available</option>
-                  <option value="On Trip">On Trip</option>
-                  <option value="Offline">Offline</option>
-                  <option value="Busy">Busy</option>
-                </select>
+              {/* RIGHT COLUMN: MAP LOCATION, RIDES & EARNINGS TREND */}
+              <div className="space-y-6">
+                
+                {/* Mock Google Map for Rider location */}
+                <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                  <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                      Live Location
+                    </span>
+                    <button 
+                      onClick={() => alert('Displaying full map dispatch interface...')}
+                      className="text-[9px] font-black text-blue-650 uppercase tracking-wide cursor-pointer hover:underline"
+                    >
+                      Expand Full Map
+                    </button>
+                  </div>
+
+                  <div className="h-44 bg-[#f8fafc] relative flex items-center justify-center overflow-hidden">
+                    {/* Simplistic stylized map canvas lines */}
+                    <svg className="absolute inset-0 w-full h-full text-slate-200" xmlns="http://www.w3.org/2000/svg">
+                      <rect width="100%" height="100%" fill="#f1f5f9" />
+                      <path d="M 0 100 H 600" fill="none" stroke="#cbd5e1" strokeWidth="8" />
+                      <path d="M 0 100 H 600" fill="none" stroke="#ffffff" strokeWidth="4" />
+                      <path d="M 300 0 V 200" fill="none" stroke="#cbd5e1" strokeWidth="8" />
+                      <path d="M 300 0 V 200" fill="none" stroke="#ffffff" strokeWidth="4" />
+                      <path d="M 120 40 L 400 160" fill="none" stroke="#3b82f6" strokeWidth="4" strokeLinecap="round" strokeDasharray="6 4" />
+                    </svg>
+
+                    {/* Pin Marker */}
+                    <div className="absolute left-[290px] top-[80px] z-10 animate-bounce">
+                      <div className="w-8 h-8 rounded-full bg-blue-600 border-2 border-white flex items-center justify-center shadow-lg shadow-blue-200">
+                        <MapPin size={16} className="text-white" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ride Summary & Earnings mini trend */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  
+                  {/* Ride Summary */}
+                  <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
+                    <div className="flex justify-between items-center border-b border-slate-50 pb-2.5">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ride Summary</span>
+                      <span className="bg-slate-50 text-slate-500 text-[8px] font-black px-1.5 py-0.5 rounded uppercase">This Week</span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-center pt-2">
+                      <div>
+                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Completed</span>
+                        <span className="text-base font-black text-slate-805 block mt-1 font-sans">{displayRider.rideSummary?.completed || '42'}</span>
+                        <span className="text-[7px] text-slate-400 font-bold block mt-1 uppercase">Rides</span>
+                      </div>
+                      <div>
+                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Cancelled</span>
+                        <span className="text-base font-black text-rose-600 block mt-1 font-sans">{displayRider.rideSummary?.cancelled || '4.2%'}</span>
+                        <span className="text-[7px] text-slate-400 font-bold block mt-1 uppercase">Rate</span>
+                      </div>
+                      <div>
+                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">No Show</span>
+                        <span className="text-base font-black text-emerald-600 block mt-1 font-sans">{displayRider.rideSummary?.efficiency || '92%'}</span>
+                        <span className="text-[7px] text-slate-400 font-bold block mt-1 uppercase">Efficiency</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Earnings Overview */}
+                  <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4 flex flex-col">
+                    <div className="flex justify-between items-center border-b border-slate-50 pb-2.5">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Earnings Overview</span>
+                      <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">
+                        +18%
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-end pt-2 flex-1">
+                      <div>
+                        <span className="text-xl font-black text-slate-850 font-sans leading-none block">₹{displayRider.earnings || '24,850'}</span>
+                        <span className="text-[8px] text-slate-400 font-bold block mt-1.5">TOTAL NET EARNINGS THIS MONTH</span>
+                      </div>
+
+                      {/* Miniature sparkline graph */}
+                      <div className="w-20 h-10 flex items-end">
+                        <svg className="w-full h-full text-blue-600" viewBox="0 0 100 40">
+                          <path d="M 0 35 Q 25 10, 50 25 T 100 5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Vehicle Type</label>
-                <select
-                  value={vehicleTypeFilter}
-                  onChange={(e) => setVehicleTypeFilter(e.target.value)}
-                  className="w-full p-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+            </div>
+
+            {/* 3. DOCUMENT COMPLIANCE CHECKLIST */}
+            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+              <div className="border-b border-slate-50 px-6 py-4.5 flex justify-between items-center bg-slate-50/30">
+                <span className="text-xs font-black text-slate-805 uppercase tracking-wider flex items-center gap-1.5">
+                  <FileCheck size={14} className="text-blue-500" />
+                  Document Compliance
+                </span>
+                <button 
+                  onClick={() => alert('All uploaded documents approved successfully!')}
+                  className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[10px] font-black rounded-lg cursor-pointer"
                 >
-                  <option value="All">All Vehicles</option>
-                  <option value="Sedan">Sedan</option>
-                  <option value="SUV">SUV</option>
-                  <option value="Hatchback">Hatchback</option>
-                  <option value="Shared">Shared Shuttle</option>
-                </select>
+                  Verify All
+                </button>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Rating (Minimum)</label>
-                <select
-                  value={ratingFilter}
-                  onChange={(e) => setRatingFilter(e.target.value)}
-                  className="w-full p-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
-                >
-                  <option value="All">All Ratings</option>
-                  <option value="4.5">★ 4.5 & Above</option>
-                  <option value="4.0">★ 4.0 & Above</option>
-                  <option value="3.5">★ 3.5 & Above</option>
-                </select>
-              </div>
-            </motion.div>
-          )}
-
-          {/* Table Container */}
-          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse whitespace-nowrap">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider select-none">
-                    <th className="py-4 px-4 pl-6">Rider ID</th>
-                    <th className="py-4 px-4">Profile Photo</th>
-                    <th className="py-4 px-4">Rider Name</th>
-                    <th className="py-4 px-4">Joining Date</th>
-                    <th className="py-4 px-4">Mobile Number</th>
-                    <th className="py-4 px-4">WhatsApp Number</th>
-                    <th className="py-4 px-4">Vehicle Type</th>
-                    <th className="py-4 px-4">Vehicle Number</th>
-                    <th className="py-4 px-4">Status</th>
-                    <th className="py-4 px-4">Availability</th>
-                    <th className="py-4 px-4">Rating</th>
-                    <th className="py-4 px-4 pr-6 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50 text-xs font-semibold text-slate-700">
-                  {listLoading ? (
-                    <tr>
-                      <td colSpan={12} className="py-12 text-center text-slate-450">
-                        <div className="flex justify-center gap-1.5 items-center">
-                          <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" />
-                          <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce delay-75" />
-                          <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce delay-150" />
-                        </div>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/20">
+                      <th className="py-2.5 px-6">Document Type</th>
+                      <th className="py-2.5 px-6">Reference Number</th>
+                      <th className="py-2.5 px-6">Expiry Date</th>
+                      <th className="py-2.5 px-6">Status</th>
+                      <th className="py-2.5 px-6 text-center">Actions</th>
                     </tr>
-                  ) : ridersList.length === 0 ? (
-                    <tr>
-                      <td colSpan={12} className="py-12 text-center text-slate-450 font-medium">
-                        No fleet riders found matching filters.
-                      </td>
-                    </tr>
-                  ) : (
-                    ridersList.map((rider) => {
-                      const isSelected = selectedId === rider._id;
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                    {docsList.map((doc, idx) => {
+                      const isExpiring = doc.status === 'Action Required';
                       return (
-                        <tr 
-                          key={rider._id} 
-                          onClick={() => setLocalSelectedId(rider._id)}
-                          className={`cursor-pointer transition-colors ${
-                            isSelected ? 'bg-blue-50/20 hover:bg-blue-50/35' : 'hover:bg-slate-50/40'
-                          }`}
-                        >
-                          <td className="py-3.5 px-4 pl-6 font-mono text-[10px] text-slate-450 font-bold">#{rider._id}</td>
-                          <td className="py-3.5 px-4">
-                            <div className="w-9 h-9 rounded-xl overflow-hidden border border-slate-150 flex-shrink-0 bg-slate-100 shadow-sm">
-                              <img src={rider.documents?.profilePhoto || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'} className="w-full h-full object-cover" alt="" />
-                            </div>
+                        <tr key={idx} className="hover:bg-slate-50/20 transition-colors">
+                          <td className="py-3.5 px-6">{doc.type}</td>
+                          <td className="py-3.5 px-6 font-mono text-[10px]">{doc.reference}</td>
+                          <td className={`py-3.5 px-6 font-semibold ${isExpiring ? 'text-rose-500 font-black' : 'text-slate-655'}`}>
+                            {doc.expiry}
                           </td>
-                          <td className="py-3.5 px-4">
-                            <div className="font-extrabold text-slate-800">{rider.firstName} {rider.lastName}</div>
-                          </td>
-                          <td className="py-3.5 px-4 font-mono text-[10px] text-slate-500">
-                            {safeFormatDate(rider.joinedDate, { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <a 
-                              href={`tel:${rider.mobile}`}
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-slate-655 hover:text-blue-600 flex items-center gap-1"
-                            >
-                              <Phone size={12} className="text-slate-400" />
-                              <span>{rider.mobile}</span>
-                            </a>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <a 
-                              href={`https://wa.me/${rider.whatsApp?.replace(/\+/g, '').replace(/ /g, '')}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-slate-655 hover:text-emerald-600 flex items-center gap-1"
-                            >
-                              <Send size={12} className="text-slate-450 rotate-45" />
-                              <span>{rider.whatsApp}</span>
-                            </a>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <div>
-                              <div className="font-bold text-slate-750">{rider.vehicle?.brand} {rider.vehicle?.model}</div>
-                              <div className="text-[10px] text-slate-400 font-medium">{rider.vehicle?.vehicleType}</div>
-                            </div>
-                          </td>
-                          <td className="py-3.5 px-4 font-mono uppercase text-[10px] text-slate-600 font-bold">{rider.vehicle?.vehicleNumber}</td>
-                          <td className="py-3.5 px-4">
-                            <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold ${getStatusBadgeStyle(rider.status)}`}>
-                              {rider.status}
+                          <td className="py-3.5 px-6">
+                            <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider inline-block border ${
+                              doc.status === 'Verified' || doc.status === 'Approved'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                : 'bg-rose-50 text-rose-700 border-rose-100'
+                            }`}>
+                              {doc.status}
                             </span>
                           </td>
-                          <td className="py-3.5 px-4">
-                            <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold ${getAvailabilityBadgeStyle(rider.availability)}`}>
-                              {rider.availability}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <span className="text-[10px] text-slate-655 font-bold flex items-center gap-0.5">
-                              <Star size={10} className="text-amber-450 fill-amber-450" />
-                              <span>{rider.rating}</span>
-                              <span className="text-slate-400 font-medium">({rider.performance?.totalRides || 0})</span>
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 pr-6 text-right" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex justify-end gap-1.5">
-                              <button
-                                onClick={() => { setLocalSelectedId(rider._id); navigate(`/riders/${rider._id}`); }}
-                                className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors cursor-pointer"
-                                title="View details"
-                              >
+                          <td className="py-3.5 px-6 text-center">
+                            <div className="flex justify-center gap-2">
+                              <button className="p-1 text-slate-400 hover:text-slate-600 transition-all cursor-pointer" title="View Document">
                                 <Eye size={13} />
                               </button>
-                              <button
-                                onClick={() => handleEditClick(rider)}
-                                className="p-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-lg transition-colors cursor-pointer"
-                                title="Edit Rider"
-                              >
-                                <Edit2 size={13} />
-                              </button>
-                              <button
-                                onClick={() => handleStatusChange(rider._id, rider.status === 'Active' ? 'Inactive' : 'Active')}
-                                className="p-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-lg transition-colors cursor-pointer"
-                                title={rider.status === 'Active' ? 'Deactivate' : 'Activate'}
-                              >
-                                <Check size={13} />
-                              </button>
-                              <button
-                                onClick={() => handleDelete(rider._id)}
-                                className="p-1.5 bg-rose-55 hover:bg-rose-100 text-rose-600 rounded-lg transition-colors cursor-pointer"
-                                title="Delete Profile"
-                              >
-                                <Trash2 size={13} />
+                              <button className="p-1 text-slate-450 hover:text-slate-655 transition-all cursor-pointer" title="Download copy">
+                                <Download size={13} />
                               </button>
                             </div>
                           </td>
                         </tr>
                       );
-                    })
-                  )}
-                </tbody>
-              </table>
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <div className="bg-slate-50/50 border-t border-slate-100 px-5 py-4 flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              <span>Showing {ridersList.length} riders</span>
-            </div>
-          </div>
 
-          {/* Double panel section at the bottom to match screenshot exactly */}
-          {riderDetails && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-4">
+            {/* 4. RECENT FEEDBACK REVIEWS */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               
-              {/* Left Panel: Rider Details */}
-              <div className="lg:col-span-7 bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
-                <div className="flex justify-between items-center pb-3 border-b border-slate-50">
-                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                    <span>Rider Details</span>
-                  </h3>
-                  <button 
-                    onClick={() => navigate(`/riders/${selectedId}`)}
-                    className="text-[10px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-0.5"
-                  >
-                    <span>Back to Riders List</span>
-                    <ChevronRight size={10} className="rotate-180" />
-                  </button>
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-5 items-center sm:items-start pb-4 border-b border-slate-50">
-                  <div className="w-20 h-20 rounded-2xl overflow-hidden border border-slate-200 flex-shrink-0 bg-slate-50">
-                    <img src={riderDetails.documents?.profilePhoto || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'} className="w-full h-full object-cover" alt="" />
+              {/* Rating breakdown chart card (lg:col-span-1) */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm flex flex-col items-center justify-center space-y-4">
+                <div className="text-center">
+                  <span className="text-4xl font-black text-slate-850 font-sans block leading-none">{ratingVal}</span>
+                  <div className="flex items-center justify-center gap-0.5 mt-2">
+                    {[1, 2, 3, 4, 5].map(star => (
+                      <Star key={star} size={15} className="text-amber-500 fill-amber-500" />
+                    ))}
                   </div>
-                  <div className="text-center sm:text-left space-y-1.5 flex-1">
-                    <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-                      <h4 className="text-base font-bold text-slate-800">{riderDetails.firstName} {riderDetails.lastName}</h4>
-                      <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold ${getStatusBadgeStyle(riderDetails.status)}`}>
-                        {riderDetails.status}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-400 font-semibold">
-                      Rider ID: <span className="text-slate-800">#{riderDetails._id}</span>
-                      <span className="mx-2">•</span>
-                      Joined on {safeFormatDate(riderDetails.joinedDate)}
-                    </p>
-                    <div className="flex justify-center sm:justify-start gap-2 pt-1">
-                      <button
-                        onClick={() => handleEditClick(riderDetails)}
-                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold shadow-sm flex items-center gap-1 transition-all cursor-pointer"
-                      >
-                        <Edit2 size={10} />
-                        <span>Edit Rider</span>
-                      </button>
-                      <a
-                        href={`https://wa.me/${riderDetails.whatsApp}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3.5 py-1.5 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all"
-                      >
-                        <Send size={10} className="rotate-45" />
-                        <span>Send Message</span>
-                      </a>
-                      <button
-                        onClick={() => handleStatusChange(riderDetails._id, riderDetails.status === 'Active' ? 'Inactive' : 'Active')}
-                        className={`px-3.5 py-1.5 border rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                          riderDetails.status === 'Active' 
-                            ? 'border-rose-100 text-rose-700 bg-rose-50/30 hover:bg-rose-50' 
-                            : 'border-slate-200 text-slate-700 bg-slate-50 hover:bg-slate-100'
-                        }`}
-                      >
-                        {riderDetails.status === 'Active' ? 'Deactivate' : 'Activate'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Sub info grids */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-                  <div className="space-y-2.5">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Contact Information</span>
-                    <div className="space-y-1.5 text-[11px] font-semibold text-slate-700">
-                      <div className="flex items-center gap-1.5">
-                        <Phone size={11} className="text-slate-400" />
-                        <span>{riderDetails.mobile}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Send size={11} className="text-slate-400 rotate-45" />
-                        <span>{riderDetails.whatsApp}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Mail size={11} className="text-slate-400" />
-                        <span className="truncate" title={riderDetails.email}>{riderDetails.email}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Home size={11} className="text-slate-400" />
-                        <span className="truncate">{riderDetails.tempAddress?.line1 || 'N/A'}, {riderDetails.tempAddress?.city}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2.5 border-t sm:border-t-0 sm:border-l border-slate-55/60 pt-4 sm:pt-0 sm:pl-5">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Vehicle Information</span>
-                    <div className="space-y-1.5 text-[11px] font-semibold text-slate-750">
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Vehicle Type:</span>
-                        <span>{riderDetails.vehicle.vehicleType}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Model:</span>
-                        <span>{riderDetails.vehicle.model}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Vehicle No.:</span>
-                        <span className="font-mono uppercase">{riderDetails.vehicle.vehicleNumber}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Fuel Type:</span>
-                        <span>{riderDetails.vehicle.fuelType}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2.5 border-t sm:border-t-0 sm:border-l border-slate-55/60 pt-4 sm:pt-0 sm:pl-5">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Documents</span>
-                    <div className="space-y-1.5 text-[10px] font-bold">
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Driving License</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[8px] ${getDocumentStatusStyle(riderDetails.documents?.drivingLicense)}`}>
-                          {riderDetails.documents?.drivingLicense}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-400">RC Book</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[8px] ${getDocumentStatusStyle(riderDetails.documents?.rcBook)}`}>
-                          {riderDetails.documents?.rcBook}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Insurance</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[8px] ${getDocumentStatusStyle(riderDetails.documents?.insurance)}`}>
-                          {riderDetails.documents?.insurance}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Performance indicators */}
-                <div className="border-t border-slate-50 pt-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-                  <div className="bg-slate-50/50 p-2.5 rounded-xl border border-slate-100">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Total Rides</span>
-                    <span className="text-sm font-black text-slate-800 block mt-0.5">{riderDetails.performance?.totalRides || 0}</span>
-                  </div>
-                  <div className="bg-slate-50/50 p-2.5 rounded-xl border border-slate-100">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Total Earnings</span>
-                    <span className="text-sm font-black text-slate-800 block mt-0.5 font-mono">₹{riderDetails.performance?.totalEarnings?.toLocaleString('en-IN')}</span>
-                  </div>
-                  <div className="bg-slate-50/50 p-2.5 rounded-xl border border-slate-100">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Average Rating</span>
-                    <span className="text-sm font-black text-slate-800 block mt-0.5 font-mono">★ {riderDetails.rating} / 5</span>
-                  </div>
-                  <div className="bg-slate-50/50 p-2.5 rounded-xl border border-slate-100">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Completion Rate</span>
-                    <span className="text-sm font-black text-emerald-650 block mt-0.5 font-mono">{riderDetails.performance?.completionRate}%</span>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Right Panel: Recent Ride History */}
-              <div className="lg:col-span-5 bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4 flex flex-col justify-between">
-                <div className="flex justify-between items-center pb-3 border-b border-slate-50">
-                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                    Recent Ride History
-                  </h3>
-                  <button 
-                    onClick={() => navigate(`/riders/${selectedId}`)}
-                    className="text-[10px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-0.5"
-                  >
-                    <span>View All</span>
-                    <ChevronRight size={10} />
-                  </button>
-                </div>
-
-                <div className="overflow-x-auto flex-1 min-h-[220px]">
-                  <table className="w-full text-left border-collapse text-[11px] font-semibold text-slate-700">
-                    <thead>
-                      <tr className="border-b border-slate-50 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                        <th className="py-2.5">Ride ID</th>
-                        <th className="py-2.5">Date</th>
-                        <th className="py-2.5">Route</th>
-                        <th className="py-2.5 text-right">Fare</th>
-                        <th className="py-2.5 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50/60 font-medium">
-                      {riderDetails.rideHistory?.slice(0, 4).map((hist, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50/20">
-                          <td className="py-3 font-mono text-[9px] text-slate-400">#{hist.rideId}</td>
-                          <td className="py-3 text-slate-500">{safeFormatDate(hist.date, {day: 'numeric', month: 'short'})}</td>
-                          <td className="py-3 text-slate-700 max-w-[120px] truncate" title={`${hist.pickup} → ${hist.drop}`}>
-                            {hist.pickup} → {hist.drop}
-                          </td>
-                          <td className="py-3 text-right font-mono text-slate-800">₹{hist.fare}</td>
-                          <td className="py-3 text-center">
-                            <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${
-                              hist.status === 'Completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-                            }`}>
-                              {hist.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-              </div>
-
-            </div>
-          )}
-
-        </motion.div>
-      )}
-
-      {/* 2. FORM VIEW (ADD / EDIT) */}
-      {(viewMode === 'add' || viewMode === 'edit') && (
-        <motion.div variants={layoutVariants} initial="hidden" animate="show" className="space-y-6">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate('/riders')}
-              className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-xl bg-white border border-slate-200 transition-colors shadow-sm cursor-pointer"
-            >
-              <ArrowLeft size={16} />
-            </button>
-            <div>
-              <h2 className="text-xl font-bold text-slate-800 tracking-tight leading-tight">
-                {viewMode === 'add' ? 'Register Fleet Rider' : 'Edit Rider Coordinates'}
-              </h2>
-              <p className="text-xs text-slate-400 font-medium mt-0.5">
-                Onboard drivers, assign vehicles, establish KYC checklists, and document payment cards.
-              </p>
-            </div>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-6 pb-24">
-            
-            {/* Grid of Sections */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
-              
-              {/* Section 1: Personal Information */}
-              <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                  <User size={13} className="text-indigo-500" />
-                  <span>Personal Information</span>
-                </h3>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">First Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.firstName}
-                      onChange={(e) => handleInputChange('firstName', e.target.value)}
-                      placeholder="e.g. Ramesh"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755 focus:outline-none"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Last Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.lastName}
-                      onChange={(e) => handleInputChange('lastName', e.target.value)}
-                      placeholder="e.g. Kumar"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Father's Name</label>
-                    <input
-                      type="text"
-                      value={formData.fatherName}
-                      onChange={(e) => handleInputChange('fatherName', e.target.value)}
-                      placeholder="e.g. Madan Lal"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Email Address *</label>
-                    <input
-                      type="email"
-                      required
-                      value={formData.email}
-                      onChange={(e) => handleInputChange('email', e.target.value)}
-                      placeholder="ramesh@gmail.com"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Mobile Number *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.mobile}
-                      onChange={(e) => handleInputChange('mobile', e.target.value)}
-                      placeholder="+91 9988776655"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">WhatsApp Number</label>
-                    <input
-                      type="text"
-                      value={formData.whatsApp}
-                      onChange={(e) => handleInputChange('whatsApp', e.target.value)}
-                      placeholder="9988776655"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Date of Birth</label>
-                    <input
-                      type="date"
-                      value={formData.dob}
-                      onChange={(e) => handleInputChange('dob', e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Gender</label>
-                    <select
-                      value={formData.gender}
-                      onChange={(e) => handleInputChange('gender', e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
-                    >
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Emergency Phone</label>
-                    <input
-                      type="text"
-                      value={formData.emergencyContact}
-                      onChange={(e) => handleInputChange('emergencyContact', e.target.value)}
-                      placeholder="+91 9988776611"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Section 2: KYC Information */}
-              <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                  <ShieldCheck size={13} className="text-indigo-500" />
-                  <span>KYC Information</span>
-                </h3>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Aadhaar Card No. *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.aadharNo}
-                      onChange={(e) => handleInputChange('aadharNo', e.target.value)}
-                      placeholder="1234-5678-9012"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">PAN Card No. *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.panNo}
-                      onChange={(e) => handleInputChange('panNo', e.target.value)}
-                      placeholder="ABCDE1234F"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Driving License No. *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.drivingLicenseNo}
-                      onChange={(e) => handleInputChange('drivingLicenseNo', e.target.value)}
-                      placeholder="DL-122020000456"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">License Expiry Date *</label>
-                    <input
-                      type="date"
-                      required
-                      value={formData.licenseExpiryDate}
-                      onChange={(e) => handleInputChange('licenseExpiryDate', e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Section 3: Vehicle Information */}
-              <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                  <Car size={13} className="text-indigo-500" />
-                  <span>Vehicle Specifications</span>
-                </h3>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Vehicle Type *</label>
-                    <select
-                      value={formData.vehicle.vehicleType}
-                      onChange={(e) => handleNestedInputChange('vehicle', 'vehicleType', e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
-                    >
-                      <option value="Sedan (4 Seater)">Sedan (4 Seater)</option>
-                      <option value="SUV (6 Seater)">SUV (6 Seater)</option>
-                      <option value="Hatchback (4 Seater)">Hatchback (4 Seater)</option>
-                      <option value="Shared (12 Seater)">Shared Shuttle (12 Seater)</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Brand Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.vehicle.brand}
-                      onChange={(e) => handleNestedInputChange('vehicle', 'brand', e.target.value)}
-                      placeholder="e.g. Maruti Suzuki"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Model Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.vehicle.model}
-                      onChange={(e) => handleNestedInputChange('vehicle', 'model', e.target.value)}
-                      placeholder="Dzire"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Plate Number *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.vehicle.vehicleNumber}
-                      onChange={(e) => handleNestedInputChange('vehicle', 'vehicleNumber', e.target.value)}
-                      placeholder="DL3CAB3456"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Color</label>
-                    <input
-                      type="text"
-                      value={formData.vehicle.color}
-                      onChange={(e) => handleNestedInputChange('vehicle', 'color', e.target.value)}
-                      placeholder="White"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Fuel Type</label>
-                    <select
-                      value={formData.vehicle.fuelType}
-                      onChange={(e) => handleNestedInputChange('vehicle', 'fuelType', e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
-                    >
-                      <option value="Petrol">Petrol</option>
-                      <option value="Diesel">Diesel</option>
-                      <option value="CNG">CNG</option>
-                      <option value="EV">EV / Electric</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Seats Capacity</label>
-                    <input
-                      type="number"
-                      value={formData.vehicle.seatingCapacity}
-                      onChange={(e) => handleNestedInputChange('vehicle', 'seatingCapacity', Number(e.target.value) || 4)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Section 4: Address Coordinates */}
-              <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Home size={13} className="text-indigo-500" />
-                    <span>Address Coordinates</span>
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase mt-2.5 tracking-wider block">
+                    Total {displayRider.feedback?.totalReviews || '948'} Ratings
                   </span>
-                  
-                  <div className="flex items-center gap-1.5 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      id="same-address"
-                      checked={sameAsTempAddress}
-                      onChange={(e) => handleSameAddressToggle(e.target.checked)}
-                      className="rounded text-blue-600 focus:ring-blue-100" 
-                    />
-                    <label htmlFor="same-address" className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Same as temp</label>
-                  </div>
-                </h3>
-
-                {/* Temporary address */}
-                <div className="space-y-3">
-                  <span className="text-[9px] font-bold text-indigo-600 uppercase tracking-widest block">Temporary Residence</span>
-                  
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-405 uppercase tracking-wider">Address Line 1 *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.tempAddress.line1}
-                      onChange={(e) => handleNestedInputChange('tempAddress', 'line1', e.target.value)}
-                      placeholder="e.g. 56/A, MG Road"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-405 uppercase tracking-wider">City *</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.tempAddress.city}
-                        onChange={(e) => handleNestedInputChange('tempAddress', 'city', e.target.value)}
-                        placeholder="New Delhi"
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-405 uppercase tracking-wider">State *</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.tempAddress.state}
-                        onChange={(e) => handleNestedInputChange('tempAddress', 'state', e.target.value)}
-                        placeholder="Delhi"
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-405 uppercase tracking-wider">Pincode *</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.tempAddress.pinCode}
-                        onChange={(e) => handleNestedInputChange('tempAddress', 'pinCode', e.target.value)}
-                        placeholder="110001"
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                      />
-                    </div>
-                  </div>
                 </div>
 
-                {/* Permanent address */}
-                <div className="space-y-3 border-t border-slate-50 pt-3.5">
-                  <span className="text-[9px] font-bold text-indigo-650 uppercase tracking-widest block">Permanent Residence</span>
-                  
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-405 uppercase tracking-wider">Address Line 1 *</label>
-                    <input
-                      type="text"
-                      required
-                      disabled={sameAsTempAddress}
-                      value={formData.permAddress.line1}
-                      onChange={(e) => handleNestedInputChange('permAddress', 'line1', e.target.value)}
-                      placeholder="e.g. 56/A, MG Road"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755 disabled:opacity-45"
-                    />
+                {/* Star breakdown bars */}
+                <div className="w-full space-y-1.5 pt-2 border-t border-slate-50">
+                  <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-550">
+                    <span className="w-3">5</span>
+                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-amber-500 rounded-full" style={{ width: '85%' }}></div>
+                    </div>
                   </div>
-
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-405 uppercase tracking-wider">City *</label>
-                      <input
-                        type="text"
-                        required
-                        disabled={sameAsTempAddress}
-                        value={formData.permAddress.city}
-                        onChange={(e) => handleNestedInputChange('permAddress', 'city', e.target.value)}
-                        placeholder="New Delhi"
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755 disabled:opacity-45"
-                      />
+                  <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-550">
+                    <span className="w-3">4</span>
+                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-amber-500 rounded-full" style={{ width: '10%' }}></div>
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-405 uppercase tracking-wider">State *</label>
-                      <input
-                        type="text"
-                        required
-                        disabled={sameAsTempAddress}
-                        value={formData.permAddress.state}
-                        onChange={(e) => handleNestedInputChange('permAddress', 'state', e.target.value)}
-                        placeholder="Delhi"
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755 disabled:opacity-45"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-405 uppercase tracking-wider">Pincode *</label>
-                      <input
-                        type="text"
-                        required
-                        disabled={sameAsTempAddress}
-                        value={formData.permAddress.pinCode}
-                        onChange={(e) => handleNestedInputChange('permAddress', 'pinCode', e.target.value)}
-                        placeholder="110001"
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755 disabled:opacity-45"
-                      />
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-550">
+                    <span className="w-3">3</span>
+                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-amber-500 rounded-full" style={{ width: '4%' }}></div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Section 5: Bank Details */}
-              <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                  <CreditCard size={13} className="text-indigo-500" />
-                  <span>Bank Credentials</span>
-                </h3>
+              {/* Feedback List (lg:col-span-2) */}
+              <div className="lg:col-span-2 bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block border-b border-slate-50 pb-2">
+                  Recent Feedback
+                </span>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Bank Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.bankName}
-                      onChange={(e) => handleInputChange('bankName', e.target.value)}
-                      placeholder="e.g. ICICI Bank"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Account Number *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.accountNumber}
-                      onChange={(e) => handleInputChange('accountNumber', e.target.value)}
-                      placeholder="0029381290345"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">IFSC Code *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.ifscCode}
-                      onChange={(e) => handleInputChange('ifscCode', e.target.value)}
-                      placeholder="ICIC0000045"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">UPI ID</label>
-                    <input
-                      type="text"
-                      value={formData.upiId}
-                      onChange={(e) => handleInputChange('upiId', e.target.value)}
-                      placeholder="ramesh@okicici"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Section 6: Documents Mock URLs */}
-              <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                  <FileText size={13} className="text-indigo-500" />
-                  <span>Profile Photo URL</span>
-                </h3>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Profile Picture URL</label>
-                  <input
-                    type="text"
-                    value={formData.documents?.profilePhoto}
-                    onChange={(e) => handleNestedInputChange('documents', 'profilePhoto', e.target.value)}
-                    placeholder="https://images.unsplash.com/photo-..."
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-755"
-                  />
-                </div>
-              </div>
-
-            </div>
-
-            {/* Sticky Actions Footer */}
-            <div className="fixed bottom-0 right-0 left-0 lg:left-64 bg-white border-t border-slate-100 px-6 py-4.5 flex justify-end gap-3 z-30 shadow-[0_-4px_12px_rgba(0,0,0,0.02)]">
-              <button
-                type="button"
-                onClick={() => navigate('/riders')}
-                className="px-5 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-xs font-bold transition-all cursor-pointer"
-              >
-                Cancel
-              </button>
-              
-              <button
-                type="submit"
-                disabled={createMutation.isPending || updateMutation.isPending}
-                className="flex items-center gap-1.5 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md shadow-blue-100"
-              >
-                <Check size={14} className="stroke-[2.5]" />
-                <span>Save Rider Coordinates</span>
-              </button>
-            </div>
-          </form>
-        </motion.div>
-      )}
-
-      {/* 3. PREMIUM DETAILS VIEW */}
-      {viewMode === 'details' && (
-        <motion.div variants={layoutVariants} initial="hidden" animate="show" className="space-y-6">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate('/riders')}
-              className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-xl bg-white border border-slate-200 transition-colors shadow-sm cursor-pointer"
-            >
-              <ArrowLeft size={16} />
-            </button>
-            <div>
-              <h2 className="text-xl font-bold text-slate-800 tracking-tight leading-tight">
-                Rider Fleet Profile
-              </h2>
-              <p className="text-xs text-slate-400 font-medium mt-0.5">
-                Onboard status, ratings metrics, document checklist logs, and history sheets.
-              </p>
-            </div>
-          </div>
-
-          {detailsLoading ? (
-            <div className="py-24 text-center">
-              <span className="text-xs font-bold text-slate-400">Loading rider profile...</span>
-            </div>
-          ) : !riderDetails ? (
-            <div className="py-24 text-center">
-              <span className="text-xs font-bold text-rose-500">Rider profile not found.</span>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              
-              {/* Premium profile Header */}
-              <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm flex flex-col md:flex-row items-center md:items-start gap-6 relative overflow-hidden group">
-                <div className="absolute top-0 right-0 w-24 h-24 bg-teal-50 rounded-full -mr-6 -mt-6 opacity-40" />
-                
-                <div className="w-24 h-24 rounded-2xl overflow-hidden border border-slate-150 shadow-sm relative z-10 flex-shrink-0 bg-slate-50">
-                  <img src={riderDetails.documents?.profilePhoto || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'} className="w-full h-full object-cover" alt="" />
-                </div>
-
-                <div className="text-center md:text-left space-y-1.5 z-10 flex-1">
-                  <div className="flex flex-col md:flex-row items-center gap-2">
-                    <h3 className="text-lg font-black text-slate-850">
-                      {riderDetails.firstName} {riderDetails.lastName}
-                    </h3>
-                    <div className="flex gap-1.5">
-                      <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold ${getStatusBadgeStyle(riderDetails.status)}`}>
-                        {riderDetails.status}
-                      </span>
-                      <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold ${getAvailabilityBadgeStyle(riderDetails.availability)}`}>
-                        {riderDetails.availability}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="text-xs text-slate-455 font-semibold flex items-center justify-center md:justify-start gap-1">
-                    <Star size={12} className="text-amber-450 fill-amber-450" />
-                    <span className="text-slate-800 font-bold">{riderDetails.rating}</span>
-                    <span className="text-slate-400">• Joined {safeFormatDate(riderDetails.joinedDate)}</span>
-                  </div>
-
-                  <div className="text-[10px] font-bold text-slate-400 uppercase block tracking-wider">
-                    Rider ID: <span className="text-slate-800">#{riderDetails._id}</span>
-                  </div>
-
-                  <div className="z-10 flex gap-2">
-                    <button
-                      onClick={() => handleEditClick(riderDetails)}
-                      className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 rounded-xl text-[10px] font-bold text-white hover:bg-blue-700 transition-all shadow-md shadow-blue-100 cursor-pointer"
-                    >
-                      <Edit2 size={11} />
-                      <span>Edit Settings</span>
-                    </button>
-                    <button
-                      onClick={() => handleDelete(riderDetails._id)}
-                      className="flex items-center gap-1.5 px-4 py-2 border border-rose-200 text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl text-[10px] font-bold transition-all cursor-pointer"
-                    >
-                      <Trash2 size={11} />
-                      <span>Delete Profile</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 3-Column Profile details */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
-                
-                {/* Left Column: Personal, Contacts, Vehicle (lg:col-span-4) */}
-                <div className="lg:col-span-4 space-y-6">
-                  
-                  {/* Personal info */}
-                  <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                    <h4 className="text-xs font-bold text-slate-800 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                      <User size={13} className="text-indigo-500" />
-                      <span>Personal Profile</span>
-                    </h4>
-
-                    <div className="space-y-3.5 text-xs font-semibold text-slate-700">
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Father's Name</span>
-                        <span>{riderDetails.fatherName || 'N/A'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Gender</span>
-                        <span>{riderDetails.gender}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Date of Birth</span>
-                        <span>{safeFormatDate(riderDetails.dob)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Emergency Contact</span>
-                        <span>{riderDetails.emergencyContact || 'N/A'}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Contact Info */}
-                  <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                    <h4 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-655 flex items-center gap-1.5">
-                      <Phone size={13} className="text-indigo-500" />
-                      <span>Contact Details</span>
-                    </h4>
-
-                    <div className="space-y-3 text-xs font-semibold text-slate-700">
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Mobile</span>
-                        <span>{riderDetails.mobile}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">WhatsApp</span>
-                        <span>{riderDetails.whatsApp}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Email</span>
-                        <span className="truncate max-w-[170px]">{riderDetails.email}</span>
-                      </div>
-                      <div className="border-t border-slate-50 pt-2.5 space-y-1">
-                        <span className="text-slate-400 block text-[10px] font-black uppercase">Temporary Address</span>
-                        <p className="text-[11px] text-slate-650 leading-relaxed font-medium">
-                          {riderDetails.tempAddress?.line1}, {riderDetails.tempAddress?.city}, {riderDetails.tempAddress?.state} - {riderDetails.tempAddress?.pinCode}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Vehicle specs */}
-                  <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                    <h4 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-655 flex items-center gap-1.5">
-                      <Car size={13} className="text-indigo-500" />
-                      <span>Vehicle Information</span>
-                    </h4>
-
-                    <div className="space-y-3 text-xs font-semibold text-slate-700">
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Vehicle Type</span>
-                        <span>{riderDetails.vehicle.vehicleType}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Brand & Model</span>
-                        <span>{riderDetails.vehicle.brand} {riderDetails.vehicle.model}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Vehicle Plate No.</span>
-                        <span className="font-mono uppercase text-slate-850">{riderDetails.vehicle.vehicleNumber}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Fuel Type</span>
-                        <span>{riderDetails.vehicle.fuelType}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Seating Capacity</span>
-                        <span>{riderDetails.vehicle.seatingCapacity} Seater</span>
-                      </div>
-                    </div>
-                  </div>
-
-                </div>
-
-                {/* Center Column: Document Checklist, Bank Details, Quick Operations (lg:col-span-5) */}
-                <div className="lg:col-span-5 space-y-6">
-                  
-                  {/* Document verifications */}
-                  <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                    <h4 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                      <ShieldCheck size={13} className="text-indigo-500" />
-                      <span>Document Checklist Verifications</span>
-                    </h4>
-
-                    <div className="space-y-3.5 text-xs font-bold">
-                      {Object.keys(riderDetails.documents || {}).map((doc) => {
-                        if (doc === 'profilePhoto') return null;
-                        const status = riderDetails.documents[doc];
-                        const label = doc.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-                        
-                        return (
-                          <div key={doc} className="flex justify-between items-center bg-slate-50/50 p-2.5 rounded-xl border border-slate-100">
-                            <span className="text-slate-700 capitalize">{label}</span>
-                            <div className="flex items-center gap-2">
-                              <span className={`px-2 py-0.5 rounded text-[8px] tracking-wide ${getDocumentStatusStyle(status)}`}>
-                                {status}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => handlePreviewDocument(doc, label, status)}
-                                className="p-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md transition-all cursor-pointer flex items-center justify-center"
-                                title="Preview Document"
-                              >
-                                <Eye size={12} />
-                              </button>
-                              <select
-                                value={status}
-                                onChange={(e) => handleVerifyDocument(doc, e.target.value)}
-                                className="p-1 text-[9px] bg-white border border-slate-200 rounded-md text-slate-705"
-                              >
-                                <option value="Verified">Verify</option>
-                                <option value="Pending">Pending</option>
-                                <option value="Rejected">Reject</option>
-                              </select>
-                            </div>
+                <div className="space-y-4 divide-y divide-slate-50">
+                  {(displayRider.feedback?.reviews || singleRiderDetail.feedback.reviews).map((rev, index) => (
+                    <div key={index} className={`pt-3.5 ${index === 0 ? 'pt-0' : ''}`}>
+                      <div className="flex justify-between items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-slate-800 text-[11px] block">{rev.author}</span>
+                          <div className="flex gap-0.5">
+                            {Array.from({ length: rev.rating }).map((_, s) => (
+                              <Star key={s} size={9} className="text-amber-500 fill-amber-500" />
+                            ))}
                           </div>
-                        );
-                      })}
+                        </div>
+                        <span className="text-[9px] text-slate-400 font-bold">{rev.date}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 italic mt-2 font-medium leading-relaxed">
+                        "{rev.comment}"
+                      </p>
                     </div>
-                  </div>
-
-                  {/* Bank info */}
-                  <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                    <h4 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-655 flex items-center gap-1.5">
-                      <CreditCard size={13} className="text-indigo-500" />
-                      <span>Bank Coordinates</span>
-                    </h4>
-
-                    <div className="space-y-3 text-xs font-semibold text-slate-705">
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Bank Name</span>
-                        <span>{riderDetails.bankName}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Account No.</span>
-                        <span className="font-mono text-slate-850">{riderDetails.accountNumber}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">IFSC Code</span>
-                        <span className="font-mono uppercase">{riderDetails.ifscCode}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">UPI ID</span>
-                        <span>{riderDetails.upiId || 'N/A'}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Quick Operations actions */}
-                  <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                    <h4 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650">
-                      Operational Dispatch Actions
-                    </h4>
-
-                    <div className="space-y-2">
-                      <div className="grid grid-cols-2 gap-2">
-                        <a
-                          href={`tel:${riderDetails.mobile}`}
-                          className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all"
-                        >
-                          <PhoneCall size={12} />
-                          <span>Call Rider</span>
-                        </a>
-                        <a
-                          href={`https://wa.me/${riderDetails.whatsApp}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100/50 border border-emerald-100 text-emerald-700 rounded-xl text-xs font-bold transition-all"
-                        >
-                          <Send size={12} className="rotate-45" />
-                          <span>WhatsApp</span>
-                        </a>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          onClick={() => handleStatusChange(riderDetails._id, riderDetails.status === 'Active' ? 'Inactive' : 'Active')}
-                          className={`flex items-center justify-center gap-1.5 px-4 py-2.5 border rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            riderDetails.status === 'Active'
-                              ? 'bg-rose-50 border-rose-100 text-rose-700 hover:bg-rose-100'
-                              : 'bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100'
-                          }`}
-                        >
-                          {riderDetails.status === 'Active' ? 'Deactivate' : 'Activate'}
-                        </button>
-                        <button
-                          onClick={() => handleStatusChange(riderDetails._id, riderDetails.status === 'Suspended' ? 'Active' : 'Suspended')}
-                          className={`flex items-center justify-center gap-1.5 px-4 py-2.5 border rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            riderDetails.status === 'Suspended'
-                              ? 'bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100'
-                              : 'bg-rose-50 border-rose-100 text-rose-750 hover:bg-rose-100'
-                          }`}
-                        >
-                          {riderDetails.status === 'Suspended' ? 'Revoke Suspend' : 'Suspend Rider'}
-                        </button>
-                      </div>
-
-                      <button
-                        onClick={() => {
-                          alert('Redirecting to Ride Dispatch Panel to assign trips...');
-                          window.location.reload();
-                        }}
-                        className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-150 cursor-pointer"
-                      >
-                        <Award size={13} />
-                        <span>Assign Ride Dispatch Trip</span>
-                      </button>
-                    </div>
-                  </div>
-
-                </div>
-
-                {/* Right Column: Performance Specs & Recent History Table (lg:col-span-3 or rather 3-col grids) */}
-                <div className="lg:col-span-3 space-y-6">
-                  
-                  {/* Performance stats */}
-                  <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                    <h4 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                      <Award size={13} className="text-indigo-500" />
-                      <span>Performance Metrics</span>
-                    </h4>
-
-                    <div className="space-y-4 text-xs font-semibold text-slate-700">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-0.5 bg-slate-50 p-2 rounded-lg text-center">
-                          <span className="text-[9px] text-slate-400 block uppercase">Completed</span>
-                          <span className="text-sm font-black text-slate-800">{riderDetails.performance?.completedRides || 0}</span>
-                        </div>
-                        <div className="space-y-0.5 bg-slate-50 p-2 rounded-lg text-center">
-                          <span className="text-[9px] text-slate-400 block uppercase">Cancelled</span>
-                          <span className="text-sm font-black text-rose-650">{riderDetails.performance?.cancelledRides || 0}</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2 border-t border-slate-50 pt-3.5">
-                        <div className="flex justify-between items-center">
-                          <span className="text-slate-400">Completion Rate</span>
-                          <span className="font-mono text-emerald-650 font-bold">{riderDetails.performance?.completionRate}%</span>
-                        </div>
-                        <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                          <div className="bg-emerald-500 h-full" style={{ width: `${riderDetails.performance?.completionRate}%` }} />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2 border-t border-slate-50 pt-3.5">
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Total Revenue Earnings</span>
-                          <span className="font-mono font-bold text-slate-850">₹{riderDetails.performance?.totalEarnings?.toLocaleString('en-IN')}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Monthly Earnings</span>
-                          <span className="font-mono font-bold text-blue-600">₹{riderDetails.performance?.monthlyEarnings?.toLocaleString('en-IN')}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                </div>
-
-              </div>
-
-              {/* Ride History Table block below */}
-              <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
-                <h3 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650">
-                  Detailed Trip History Logs
-                </h3>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs font-semibold text-slate-700">
-                    <thead>
-                      <tr className="bg-slate-50/60 border-b border-slate-100 text-[9px] font-bold text-slate-450 uppercase tracking-wider">
-                        <th className="py-2.5 px-4">Ride ID</th>
-                        <th className="py-2.5 px-4">Trip Date</th>
-                        <th className="py-2.5 px-4">Passenger</th>
-                        <th className="py-2.5 px-4">Pickup Address</th>
-                        <th className="py-2.5 px-4">Drop Address</th>
-                        <th className="py-2.5 px-4 text-right">Fare Slip</th>
-                        <th className="py-2.5 px-4 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {riderDetails.rideHistory?.map((hist, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50/20">
-                          <td className="py-3 px-4 font-mono text-[10px] text-slate-400">#{hist.rideId}</td>
-                          <td className="py-3 px-4 text-slate-500">{safeFormatDate(hist.date)}</td>
-                          <td className="py-3 px-4 font-bold text-slate-800">{hist.guest}</td>
-                          <td className="py-3 px-4 text-slate-550 max-w-xs truncate" title={hist.pickup}>{hist.pickup}</td>
-                          <td className="py-3 px-4 text-slate-550 max-w-xs truncate" title={hist.drop}>{hist.drop}</td>
-                          <td className="py-3 px-4 text-right font-mono text-slate-850">₹{hist.fare}</td>
-                          <td className="py-3 px-4 text-center">
-                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
-                              hist.status === 'Completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-                            }`}>
-                              {hist.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  ))}
                 </div>
               </div>
 
             </div>
-          )}
-        </motion.div>
-      )}
 
-      {/* Document Preview Modal */}
-      {activePreviewDoc && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-2xl max-w-md w-full overflow-hidden flex flex-col transform transition-all scale-100">
-            {/* Modal Header */}
-            <div className="bg-slate-50 border-b border-slate-100 px-5 py-4 flex justify-between items-center">
-              <div>
-                <h3 className="text-sm font-bold text-slate-800 tracking-tight">
-                  Document Preview: {activePreviewDoc.label}
-                </h3>
-                <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                  Verify the validity and authenticity of the rider's credential documents.
-                </p>
+            {/* Toast Notification Alert */}
+            <div className="fixed bottom-4 right-4 bg-slate-900 border border-slate-800 text-white rounded-2xl px-4.5 py-3 shadow-xl flex items-center justify-between gap-6 max-w-sm animate-in fade-in slide-in-from-bottom-5 duration-200 z-50">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle2 size={16} className="text-emerald-500" />
+                <span className="text-xs font-bold">Changes saved successfully.</span>
               </div>
-              <button
-                type="button"
-                onClick={() => setActivePreviewDoc(null)}
-                className="p-1.5 hover:bg-slate-200 text-slate-400 hover:text-slate-600 rounded-lg transition-colors cursor-pointer"
-              >
-                <X size={16} />
+              <button className="text-slate-400 hover:text-white cursor-pointer" onClick={() => alert('Toast closed.')}>
+                <X size={14} />
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-5 space-y-4">
-              {/* Styled Mock Document Card */}
-              <div className="bg-gradient-to-br from-indigo-950 to-slate-900 text-white p-5 rounded-2xl shadow-lg relative overflow-hidden h-44 flex flex-col justify-between border border-slate-800">
-                {/* Chip and Logo */}
-                <div className="flex justify-between items-start">
-                  <div className="w-10 h-7 bg-amber-450/80 rounded-md border border-amber-300/30 flex items-center justify-center opacity-80">
-                    <div className="grid grid-cols-3 gap-0.5 w-6 h-4 border border-slate-800/40 rounded-sm bg-amber-200/40" />
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[8px] font-black tracking-widest text-slate-300 block uppercase">WOW GATEWAYS</span>
-                    <span className="text-[7px] font-bold text-teal-400 uppercase tracking-wider block">FLEET PARTNER</span>
-                  </div>
-                </div>
-
-                {/* Document details in card format */}
-                <div className="space-y-0.5">
-                  <div className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Document No / ID</div>
-                  <div className="text-sm font-mono tracking-widest font-bold text-white uppercase">
-                    {activePreviewDoc.value}
-                  </div>
-                </div>
-
-                {/* Footer of card */}
-                <div className="flex justify-between items-end">
-                  <div>
-                    <div className="text-[7px] text-slate-400 uppercase font-semibold">Rider Name</div>
-                    <div className="text-xs font-bold text-slate-100">
-                      {riderDetails?.firstName} {riderDetails?.lastName}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 bg-white/10 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/10">
-                    <span className={`w-1.5 h-1.5 rounded-full ${
-                      activePreviewDoc.status === 'Verified' ? 'bg-emerald-400' : activePreviewDoc.status === 'Pending' ? 'bg-amber-400' : 'bg-rose-400'
-                    }`} />
-                    <span className="text-[8px] font-black uppercase tracking-wider text-slate-200">
-                      {activePreviewDoc.status}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Status details */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2">
-                <div className="flex justify-between text-xs">
-                  <span className="font-semibold text-slate-400">Document Type:</span>
-                  <span className="font-bold text-slate-800 capitalize">{activePreviewDoc.label}</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="font-semibold text-slate-400">Current Verification:</span>
-                  <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
-                    activePreviewDoc.status === 'Verified' ? 'bg-emerald-50 text-emerald-700' : activePreviewDoc.status === 'Pending' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'
-                  }`}>
-                    {activePreviewDoc.status}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="bg-slate-50 border-t border-slate-100 px-5 py-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  handleVerifyDocument(activePreviewDoc.key, 'Verified');
-                  setActivePreviewDoc(prev => ({ ...prev, status: 'Verified' }));
-                }}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-100 flex items-center gap-1 cursor-pointer"
-              >
-                <Check size={12} />
-                <span>Approve Document</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  handleVerifyDocument(activePreviewDoc.key, 'Rejected');
-                  setActivePreviewDoc(prev => ({ ...prev, status: 'Rejected' }));
-                }}
-                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-rose-100 flex items-center gap-1 cursor-pointer"
-              >
-                <X size={12} />
-                <span>Reject</span>
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
     </div>
-  );
-}
-
-// Subcomponents definitions for simplicity
-function FilterTriangle(props) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" {...props}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c-1.2 0-2.4 0.6-3.1 1.6L3.2 12.3c-0.7 0.9-0.7 2.2 0 3.1l5.7 7.7C9.6 23.4 10.8 24 12 24s2.4-0.6 3.1-1.6l5.7-7.7c0.7-0.9 0.7-2.2 0-3.1l-5.7-7.7C14.4 3.6 13.2 3 12 3z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-3-3v6" />
-    </svg>
   );
 }

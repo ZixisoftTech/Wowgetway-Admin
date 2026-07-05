@@ -98,65 +98,50 @@ export default function PaymentsManagement() {
     <div className="space-y-6 select-none animate-fade-in pb-16">
       
       {/* -------------------- 1. HEADER & CALENDAR DATEPICKER SECTION -------------------- */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      {/* -------------------- 1. HEADER & CALENDAR DATEPICKER SECTION -------------------- */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
         
-        {/* Welcome Text */}
-        <div className="lg:col-span-2 space-y-1.5 mt-2">
-          <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">
+        {/* Left Side: Welcome and Title */}
+        <div className="space-y-1">
+          <h1 className="text-base font-black text-slate-800 tracking-tight leading-tight">
             B2B Hotel / Homestay Payment
           </h1>
-          <p className="text-xs text-slate-400 font-semibold flex items-center gap-1">
-            Welcome, Karan 👋
+          <p className="text-[10px] text-slate-450 font-black uppercase tracking-wider flex items-center gap-1">
+            Welcome, Karan 👋 • Opened: 01 June, 09:00 AM
           </p>
         </div>
-
-        {/* Datepicker Picker Calendar Card */}
-        <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex flex-col gap-3.5">
-          <div className="flex justify-between items-start border-b border-slate-50 pb-3">
-            <div>
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block leading-none">TODAY'S DATE</span>
-              <span className="text-xl font-black text-blue-600 block mt-1.5 font-sans leading-none">01 June 2026</span>
-              <span className="text-[10px] text-slate-500 font-bold block mt-1">Opened on: 01 June 2026, 09:00 AM</span>
-            </div>
-            <span className="bg-blue-50 border border-blue-100 text-blue-600 text-[10px] font-black px-2.5 py-1 rounded-xl uppercase tracking-wider">
-              Monday
-            </span>
+        
+        {/* Right Side: Compact Horizontal Selector */}
+        <div className="flex items-center gap-4">
+          <div className="text-right hidden sm:block">
+            <span className="text-sm font-black text-red-600 block leading-none">01 June 2026</span>
+            <span className="text-[8px] font-black text-slate-400 uppercase block mt-1 tracking-wider">Monday</span>
           </div>
 
-          {/* Mini Calendar Slider Widget */}
-          <div className="space-y-2">
-            <div className="flex justify-between items-center text-[10px] font-bold text-slate-700 px-1">
-              <span>Change Date</span>
-              <div className="flex items-center gap-1.5 text-slate-400">
-                <ChevronLeft size={13} className="hover:text-slate-800 cursor-pointer" />
-                <span className="text-[9px] font-black uppercase text-slate-600 font-sans">June 2026</span>
-                <ChevronRight size={13} className="hover:text-slate-800 cursor-pointer" />
-              </div>
-            </div>
+          <div className="h-8 w-px bg-slate-150 hidden sm:block"></div>
 
-            {/* Calendar Days row */}
-            <div className="flex gap-2 justify-between overflow-x-auto pr-1 py-1.5 scrollbar-thin">
-              {calendarDays.map((d, index) => {
-                const isSelected = selectedDate === Number(d.day);
-                return (
-                  <div 
-                    key={index}
-                    onClick={() => setSelectedDate(Number(d.day))}
-                    className={`flex flex-col items-center gap-1.5 p-1.5 rounded-xl cursor-pointer min-w-[32px] transition-all ${
-                      isSelected 
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-200' 
-                        : 'bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-100'
-                    }`}
-                  >
-                    <span className="text-[8px] font-black uppercase tracking-wider">{d.label}</span>
-                    <span className="text-xs font-black font-sans">{d.day}</span>
-                  </div>
-                );
-              })}
-            </div>
+          {/* Days Slider */}
+          <div className="flex items-center gap-1.5 overflow-x-auto max-w-[320px] pb-1 scrollbar-thin">
+            {calendarDays.map((d, index) => {
+              const isSelected = selectedDate === Number(d.day);
+              return (
+                <button 
+                  type="button"
+                  key={index}
+                  onClick={() => setSelectedDate(Number(d.day))}
+                  className={`flex flex-col items-center justify-center w-8 h-8 rounded-xl cursor-pointer transition-all ${
+                    isSelected 
+                      ? 'bg-red-600 text-white shadow-sm shadow-red-200' 
+                      : 'bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-100'
+                  }`}
+                >
+                  <span className="text-[7px] font-black uppercase tracking-tight block leading-none mb-0.5">{d.label}</span>
+                  <span className="text-[10px] font-black block leading-none font-sans">{d.day}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
-
       </div>
 
       {/* -------------------- 2. MAIN TABLE: DUE LIST -------------------- */}

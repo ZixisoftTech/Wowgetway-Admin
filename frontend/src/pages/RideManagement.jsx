@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Search, 
   Plus, 
@@ -30,1087 +28,1069 @@ import {
   PhoneCall,
   Send,
   Share2,
-  Car
+  Car,
+  TrendingUp,
+  Activity,
+  SlidersHorizontal,
+  ChevronLeft,
+  RefreshCw,
+  Zap,
+  Map
 } from 'lucide-react';
-import MetricCard from '../components/widgets/MetricCard.jsx';
 
-const API_RIDES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/rides';
+const mockRides = [
+  {
+    id: '#RWG12548',
+    bookingTime: '10:30 AM',
+    guest: {
+      name: 'Keshav Sharma',
+      mobile: '+91 98765 43210',
+      email: 'keshav@gmail.com',
+      photo: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+      verificationStatus: 'Verified'
+    },
+    driver: {
+      name: 'Amit Kumar',
+      mobile: '+91 91234 56789',
+      email: 'amit.kumar@wow.com',
+      photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+      rating: 4.8,
+      status: 'On Ride'
+    },
+    vehicle: {
+      model: 'White Swift Dzire',
+      vehicleNumber: 'DL 12 AB 1234',
+      vehicleType: 'Sedan',
+      image: 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=200',
+      features: 'White • Petrol • AC'
+    },
+    route: {
+      pickup: 'Connaught Place, Delhi',
+      drop: 'IGI Airport, Delhi',
+      distance: '22.4 km',
+      duration: '35 mins',
+      eta: '14 mins',
+      avgSpeed: '48 km/h',
+      gpsAccuracy: 'High'
+    },
+    status: 'Ongoing',
+    statusSubtext: 'Started 10:35 AM',
+    fare: {
+      baseFare: 560,
+      extraDistance: 60,
+      tolls: 35,
+      nightCharges: 30,
+      discount: 0,
+      total: 685
+    },
+    payment: {
+      method: 'UPI',
+      status: 'Paid',
+      transactionId: 'TXN-8271A92',
+      paymentDate: 'Today, 10:35 AM'
+    },
+    extraDetails: {
+      waitingTime: '5 mins',
+      waitingCharges: 25,
+      battery: '82%',
+      sosStatus: 'Normal'
+    },
+    timeline: [
+      { event: 'Ride Created', timestamp: '10:30 AM', description: 'Created by Admin' },
+      { event: 'Driver Assigned', timestamp: '10:31 AM', description: 'Amit Kumar assigned to ride' },
+      { event: 'Driver Arrived', timestamp: '10:35 AM', description: 'Reached pickup location' },
+      { event: 'En Route', timestamp: 'LIVE', description: 'Moving towards destination' }
+    ]
+  },
+  {
+    id: '#RWG12547',
+    bookingTime: '09:15 AM',
+    guest: {
+      name: 'Neha Gupta',
+      mobile: '+91 91234 56789',
+      email: 'neha.g@gmail.com',
+      photo: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150',
+      verificationStatus: 'Verified'
+    },
+    driver: {
+      name: 'Ravi Singh',
+      mobile: '+91 98888 77777',
+      email: 'ravi.singh@wow.com',
+      photo: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150',
+      rating: 4.6,
+      status: 'Arrived'
+    },
+    vehicle: {
+      model: 'White WagonR',
+      vehicleNumber: 'DL 10 XY 4567',
+      vehicleType: 'Hatchback',
+      image: 'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=200',
+      features: 'White • CNG • AC'
+    },
+    route: {
+      pickup: 'Karol Bagh, Delhi',
+      drop: 'Noida Sector 62',
+      distance: '18.7 km',
+      duration: '45 mins',
+      eta: 'Arrived',
+      avgSpeed: '38 km/h',
+      gpsAccuracy: 'High'
+    },
+    status: 'Arrived',
+    statusSubtext: 'Arrived 09:18 AM',
+    fare: {
+      baseFare: 480,
+      extraDistance: 70,
+      tolls: 0,
+      nightCharges: 0,
+      discount: 0,
+      total: 550
+    },
+    payment: {
+      method: 'Cash',
+      status: 'Pending',
+      transactionId: '',
+      paymentDate: ''
+    },
+    extraDetails: {
+      waitingTime: '8 mins',
+      waitingCharges: 40,
+      battery: '74%',
+      sosStatus: 'Normal'
+    },
+    timeline: [
+      { event: 'Ride Created', timestamp: '09:15 AM', description: 'Created by Guest App' },
+      { event: 'Driver Assigned', timestamp: '09:16 AM', description: 'Ravi Singh assigned to ride' },
+      { event: 'Driver Arrived', timestamp: '09:18 AM', description: 'Reached pickup location' }
+    ]
+  },
+  {
+    id: '#RWG12546',
+    bookingTime: '11:00 AM',
+    guest: {
+      name: 'Rohit Verma',
+      mobile: '+91 87654 32109',
+      email: 'rohit@gmail.com',
+      photo: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150',
+      verificationStatus: 'Unverified'
+    },
+    driver: {
+      name: 'Sandeep Yadav',
+      mobile: '+91 97777 66666',
+      email: 'sandeep@wow.com',
+      photo: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
+      rating: 4.7,
+      status: 'Active'
+    },
+    vehicle: {
+      model: 'Black Honda Activa',
+      vehicleNumber: 'DL 8S CP 9876',
+      vehicleType: 'Bike',
+      image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=200',
+      features: 'Black • Petrol'
+    },
+    route: {
+      pickup: 'Lajpat Nagar, Delhi',
+      drop: 'Greater Kailash, Delhi',
+      distance: '7.2 km',
+      duration: '15 mins',
+      eta: '5 mins',
+      avgSpeed: '32 km/h',
+      gpsAccuracy: 'Medium'
+    },
+    status: 'Assigned',
+    statusSubtext: 'Assigned 10:50 AM',
+    fare: {
+      baseFare: 210,
+      extraDistance: 0,
+      tolls: 0,
+      nightCharges: 0,
+      discount: 0,
+      total: 210
+    },
+    payment: {
+      method: 'UPI',
+      status: 'Paid',
+      transactionId: 'TXN-9182B12',
+      paymentDate: 'Today, 10:50 AM'
+    },
+    extraDetails: {
+      waitingTime: '0 mins',
+      waitingCharges: 0,
+      battery: '90%',
+      sosStatus: 'Normal'
+    },
+    timeline: [
+      { event: 'Ride Created', timestamp: '10:45 AM', description: 'Created by Guest App' },
+      { event: 'Driver Assigned', timestamp: '10:50 AM', description: 'Sandeep Yadav assigned to ride' }
+    ]
+  }
+];
 
 export default function RideManagement() {
-  const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'details'
-  const [selectedId, setSelectedId] = useState(null);
+  const [rides, setRides] = useState(mockRides);
+  const [selectedRide, setSelectedRide] = useState(mockRides[0]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [rideTypeFilter, setRideTypeFilter] = useState('All');
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState('All');
+  const [activeTab, setActiveTab] = useState('Ongoing'); // 'Ongoing' | 'Upcoming' | 'Completed' | 'Cancelled'
   
-  // Modals state
-  const [assignModalOpen, setAssignModalOpen] = useState(false);
-  const [targetRideId, setTargetRideId] = useState(null);
-
-  // 1. Fetch Rides List
-  const { data: ridesList = [], isLoading: listLoading } = useQuery({
-    queryKey: ['ridesList', searchQuery, statusFilter, rideTypeFilter, paymentStatusFilter],
-    queryFn: async () => {
-      const response = await axios.get(API_RIDES_URL, {
-        params: {
-          search: searchQuery,
-          status: statusFilter,
-          rideType: rideTypeFilter,
-          paymentStatus: paymentStatusFilter
-        }
-      });
-      return response.data;
-    }
-  });
-
-  // 2. Fetch Stats
-  const { data: stats = { totalRidesToday: 0, ongoingRides: 0, upcomingRides: 0, completedRides: 0, cancelledRides: 0, totalRevenueToday: 0 }, isLoading: statsLoading } = useQuery({
-    queryKey: ['ridesStats'],
-    queryFn: async () => {
-      const response = await axios.get(`${API_RIDES_URL}/stats`);
-      return response.data;
-    }
-  });
-
-  // 3. Fetch Single Ride Details
-  const { data: rideDetails, isLoading: detailsLoading } = useQuery({
-    queryKey: ['rideDetails', selectedId],
-    queryFn: async () => {
-      const response = await axios.get(`${API_RIDES_URL}/${selectedId}`);
-      return response.data;
-    },
-    enabled: !!selectedId && viewMode === 'details'
-  });
-
-  // 4. Fetch Drivers List (for allocation modal)
-  const { data: driversList = [] } = useQuery({
-    queryKey: ['driversListSimple'],
-    queryFn: async () => {
-      const response = await axios.get(`${API_RIDES_URL}/drivers`);
-      return response.data;
-    }
-  });
-
-  // 5. Mutations
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, updatedData }) => {
-      const response = await axios.put(`${API_RIDES_URL}/${id}`, updatedData);
-      return response.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['ridesList']);
-      queryClient.invalidateQueries(['ridesStats']);
-      if (selectedId) {
-        queryClient.invalidateQueries(['rideDetails', selectedId]);
-      }
-      setAssignModalOpen(false);
-      setTargetRideId(null);
-    },
-    onError: (err) => {
-      alert(err.response?.data?.error || 'Failed to update ride operational state.');
-    }
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id) => {
-      const response = await axios.delete(`${API_RIDES_URL}/${id}`);
-      return response.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['ridesList']);
-      queryClient.invalidateQueries(['ridesStats']);
-      setViewMode('list');
-      setSelectedId(null);
-      alert('Ride removed from operational desk.');
-    },
-    onError: (err) => {
-      alert(err.response?.data?.error || 'Failed to delete ride.');
-    }
-  });
-
-  const handleAssignDriver = (rideId) => {
-    setTargetRideId(rideId);
-    setAssignModalOpen(true);
+  // Filters
+  const [vehicleType, setVehicleType] = useState('All');
+  const [paymentStatus, setPaymentStatus] = useState('All');
+  const [locationFilter, setLocationFilter] = useState('All');
+  
+  const handleViewDetails = (ride) => {
+    setSelectedRide(ride);
+    setViewMode('details');
   };
 
-  const handleConfirmDriverAllocation = (driverId) => {
-    updateMutation.mutate({
-      id: targetRideId || selectedId,
-      updatedData: { assignDriverId: driverId }
-    });
-  };
-
-  const handleCancelRide = (rideId) => {
-    if (window.confirm('Are you sure you want to cancel this ride request?')) {
-      updateMutation.mutate({
-        id: rideId,
-        updatedData: { status: 'Cancelled' }
-      });
-    }
-  };
-
-  const handleMarkCompleted = (rideId) => {
-    if (window.confirm('Are you sure you want to mark this ride as completed?')) {
-      updateMutation.mutate({
-        id: rideId,
-        updatedData: { status: 'Completed' }
-      });
-    }
-  };
-
-  const handleShareTrackingLink = (id) => {
-    const link = `https://wowgateways.resorts/tracking/ride/${id}`;
-    navigator.clipboard.writeText(link);
-    alert(`Live Uber-style tracking link copied to clipboard:\n${link}`);
-  };
-
-  const getStatusBadgeStyle = (status) => {
+  const getStatusBadge = (status) => {
     switch (status) {
       case 'Ongoing':
-        return 'bg-emerald-50 text-emerald-700 border border-emerald-100';
-      case 'Upcoming':
-        return 'bg-blue-50 text-blue-700 border border-blue-100';
+        return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+      case 'Arrived':
+        return 'bg-blue-50 text-blue-700 border-blue-100';
+      case 'Assigned':
+        return 'bg-amber-50 text-amber-700 border-amber-100';
       case 'Completed':
-        return 'bg-purple-50 text-purple-700 border border-purple-100';
-      case 'Cancelled':
-        return 'bg-rose-50 text-rose-700 border border-rose-100';
+        return 'bg-slate-50 text-slate-700 border-slate-100';
       default:
-        return 'bg-slate-50 text-slate-700 border border-slate-100';
+        return 'bg-rose-50 text-rose-700 border-rose-100';
     }
   };
 
-  const getPaymentStatusBadgeStyle = (status) => {
-    switch (status) {
-      case 'Paid':
-        return 'bg-emerald-50 text-emerald-700 border border-emerald-100';
-      case 'Pending':
-        return 'bg-amber-50 text-amber-700 border border-amber-100';
-      case 'Failed':
-        return 'bg-rose-50 text-rose-700 border border-rose-100';
-      default:
-        return 'bg-slate-50 text-slate-700 border border-slate-100';
-    }
-  };
+  // Filter rides list
+  const filteredRides = rides.filter(ride => {
+    const matchesSearch = ride.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          ride.guest.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          ride.driver.name.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesTab = activeTab === 'Ongoing' 
+      ? (ride.status === 'Ongoing' || ride.status === 'Arrived' || ride.status === 'Assigned')
+      : ride.status === activeTab;
 
-  const layoutVariants = {
-    hidden: { opacity: 0, y: 12 },
-    show: { opacity: 1, y: 0, transition: { duration: 0.3 } }
-  };
+    const matchesVehicle = vehicleType === 'All' || ride.vehicle.vehicleType === vehicleType;
+    const matchesPayment = paymentStatus === 'All' || ride.payment.status === paymentStatus;
+
+    return matchesSearch && matchesTab && matchesVehicle && matchesPayment;
+  });
 
   return (
-    <div className="space-y-6 sm:space-y-8">
-      {/* 1. LIST & DASHBOARD VIEW */}
+    <div className="space-y-6 select-none animate-fade-in pb-16">
+      
+      {/* 1. LIST VIEW */}
       {viewMode === 'list' && (
-        <motion.div variants={layoutVariants} initial="hidden" animate="show" className="space-y-6">
+        <div className="space-y-6">
           
-          {/* Header Row */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          {/* Header */}
+          <div className="flex justify-between items-center">
             <div>
-              <h2 className="text-xl font-bold text-slate-800 tracking-tight leading-tight flex items-center gap-2">
-                <Route className="text-sky-600 w-6 h-6 stroke-[2.5]" />
-                <span>Ride Management</span>
-              </h2>
-              <p className="text-xs text-slate-400 font-medium mt-0.5">
-                Dispatch operations desk: track guest transports, live vehicle routes, and driver logs.
-              </p>
+              <h1 className="text-xl font-bold text-slate-800 tracking-tight">Manage Rides</h1>
+              <p className="text-xs text-slate-400 font-semibold mt-0.5">Monitor, manage and track all rides in real-time</p>
             </div>
+            <button
+              onClick={() => alert('Feature flag: Generate Ride request trigger.')}
+              className="px-5 py-2.5 bg-red-600 hover:bg-red-750 text-white rounded-xl text-xs font-black shadow-md shadow-red-200 transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <Plus size={15} />
+              <span>Generate Ride</span>
+            </button>
           </div>
 
-          {/* Top KPI Metrics Cards Row */}
+          {/* Stats Metrics Row */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            <MetricCard
-              title="Total Rides Today"
-              value={stats.totalRidesToday}
-              icon={Route}
-              iconBgColor="bg-blue-500/10"
-              iconColor="text-blue-600"
-              bgColor="bg-[#edf4ff]"
-              loading={statsLoading}
-            />
-            <MetricCard
-              title="Ongoing Trips"
-              value={stats.ongoingRides}
-              icon={Clock}
-              iconBgColor="bg-emerald-500/10"
-              iconColor="text-emerald-650"
-              bgColor="bg-[#ecfbf3]"
-              loading={statsLoading}
-            />
-            <MetricCard
-              title="Upcoming Scheduled"
-              value={stats.upcomingRides}
-              icon={Calendar}
-              iconBgColor="bg-sky-500/10"
-              iconColor="text-sky-655"
-              bgColor="bg-[#f0f9ff]"
-              loading={statsLoading}
-            />
-            <MetricCard
-              title="Completed Rides"
-              value={stats.completedRides}
-              icon={CheckCircle}
-              iconBgColor="bg-purple-500/10"
-              iconColor="text-purple-650"
-              bgColor="bg-[#f8f0ff]"
-              loading={statsLoading}
-            />
-            <MetricCard
-              title="Cancelled Trips"
-              value={stats.cancelledRides}
-              icon={XCircle}
-              iconBgColor="bg-rose-500/10"
-              iconColor="text-rose-650"
-              bgColor="bg-[#fff5f5]"
-              loading={statsLoading}
-            />
-            <MetricCard
-              title="Total Fare Today"
-              value={`₹${stats.totalRevenueToday?.toLocaleString('en-IN')}`}
-              icon={DollarSign}
-              iconBgColor="bg-orange-500/10"
-              iconColor="text-orange-650"
-              bgColor="bg-[#fff8f0]"
-              loading={statsLoading}
-            />
-          </div>
-
-          {/* Filters card */}
-          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-4 space-y-4">
-            {/* Status tabs */}
-            <div className="flex border-b border-slate-100 overflow-x-auto whitespace-nowrap scrollbar-none gap-2">
-              {['All', 'Ongoing', 'Upcoming', 'Completed', 'Cancelled'].map(status => (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={`pb-3 px-4 text-xs font-bold border-b-2 transition-all cursor-pointer ${
-                    statusFilter === status 
-                      ? 'border-blue-600 text-blue-600' 
-                      : 'border-transparent text-slate-400 hover:text-slate-650'
-                  }`}
-                >
-                  {status}
-                </button>
-              ))}
+            
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center flex-shrink-0">
+                <Car size={20} />
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Total Rides Today</span>
+                <span className="text-lg font-black text-slate-850 block mt-0.5 font-sans leading-none">128</span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mt-1">ALL RIDES</span>
+              </div>
             </div>
 
-            {/* Inputs & Dropdowns filter row */}
-            <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-              
-              {/* Search box */}
-              <div className="relative w-full md:max-w-xs">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                  <Search size={16} />
-                </span>
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
+                <Activity size={20} className="animate-pulse" />
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Ongoing Rides</span>
+                <span className="text-lg font-black text-emerald-600 block mt-0.5 font-sans leading-none">34</span>
+                <span className="text-[8px] font-black text-emerald-600 uppercase tracking-widest block mt-1">● LIVE NOW</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                <Calendar size={20} />
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Upcoming Rides</span>
+                <span className="text-lg font-black text-blue-600 block mt-0.5 font-sans leading-none">28</span>
+                <span className="text-[8px] font-bold text-blue-550 uppercase tracking-widest block mt-1">SCHEDULED</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center flex-shrink-0">
+                <CheckCircle size={20} />
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Completed Rides</span>
+                <span className="text-lg font-black text-slate-850 block mt-0.5 font-sans leading-none">62</span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mt-1">TODAY</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center flex-shrink-0">
+                <XCircle size={20} />
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Cancelled Rides</span>
+                <span className="text-lg font-black text-slate-850 block mt-0.5 font-sans leading-none">04</span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mt-1">TODAY</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-100 p-4.5 rounded-2xl shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center flex-shrink-0 font-mono text-lg">
+                ₹
+              </div>
+              <div>
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Total Earnings Today</span>
+                <span className="text-base font-black text-slate-850 block mt-0.5 font-sans leading-none">₹62,450</span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mt-1">ALL PAYMENT</span>
+              </div>
+            </div>
+
+          </div>
+
+          {/* List Card */}
+          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden space-y-4">
+            
+            {/* Tabs & Sort Bar */}
+            <div className="border-b border-slate-50 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50/20">
+              <div className="flex gap-4">
+                {['Ongoing', 'Upcoming', 'Completed', 'Cancelled'].map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`pb-1 text-xs font-black uppercase tracking-wider cursor-pointer border-b-2 transition-all ${
+                      activeTab === tab 
+                        ? 'border-red-600 text-slate-850' 
+                        : 'border-transparent text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    {tab === 'Ongoing' ? 'Ongoing Rides' : tab === 'Upcoming' ? 'Upcoming Rides' : tab === 'Completed' ? 'Completed Rides' : 'Cancelled Rides'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-500 self-end sm:self-auto">
+                <span>Sort By:</span>
+                <select className="bg-transparent border-none text-slate-800 font-extrabold focus:outline-none cursor-pointer">
+                  <option>Latest Ride</option>
+                  <option>Distance</option>
+                  <option>Fare</option>
+                </select>
+                <button className="flex items-center gap-1 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg cursor-pointer">
+                  <SlidersHorizontal size={12} />
+                  <span>Filter</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filters Bar */}
+            <div className="px-6 grid grid-cols-1 sm:grid-cols-5 gap-3 pt-2">
+              <div className="relative col-span-1 sm:col-span-1">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search Ride ID, guest, driver, vehicle..."
-                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-755 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                  placeholder="Search by Ride ID, Guest, Driver..."
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none"
                 />
               </div>
 
-              {/* Multi selects filters */}
-              <div className="flex flex-wrap gap-2.5 w-full md:w-auto justify-start md:justify-end">
-                <div className="space-y-0.5 flex flex-col">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider pl-1">Ride Type</span>
-                  <select
-                    value={rideTypeFilter}
-                    onChange={(e) => setRideTypeFilter(e.target.value)}
-                    className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none"
-                  >
-                    <option value="All">All Types</option>
-                    <option value="Sedan">Sedan</option>
-                    <option value="SUV">SUV</option>
-                    <option value="Hatchback">Hatchback</option>
-                    <option value="Shared">Shared Shuttle</option>
-                  </select>
-                </div>
+              <select
+                value={vehicleType}
+                onChange={(e) => setVehicleType(e.target.value)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-655 focus:outline-none"
+              >
+                <option value="All">All Vehicle Types</option>
+                <option value="Sedan">Sedan</option>
+                <option value="Hatchback">Hatchback</option>
+                <option value="Bike">Bike</option>
+              </select>
 
-                <div className="space-y-0.5 flex flex-col">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider pl-1">Payment Status</span>
-                  <select
-                    value={paymentStatusFilter}
-                    onChange={(e) => setPaymentStatusFilter(e.target.value)}
-                    className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none"
-                  >
-                    <option value="All">All Payments</option>
-                    <option value="Paid">Paid</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Failed">Failed</option>
-                  </select>
-                </div>
+              <select
+                value={paymentStatus}
+                onChange={(e) => setPaymentStatus(e.target.value)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-655 focus:outline-none"
+              >
+                <option value="All">All Payment Status</option>
+                <option value="Paid">Paid</option>
+                <option value="Pending">Pending</option>
+              </select>
+
+              <select
+                value={locationFilter}
+                onChange={(e) => setLocationFilter(e.target.value)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-655 focus:outline-none"
+              >
+                <option value="All">All Locations</option>
+                <option value="Delhi">Delhi</option>
+                <option value="Noida">Noida</option>
+              </select>
+
+              <div className="relative">
+                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-450" />
+                <input
+                  type="text"
+                  placeholder="Select Date"
+                  readOnly
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-500 focus:outline-none cursor-pointer"
+                  onClick={() => alert('Calendar picker calendar trigger.')}
+                />
               </div>
-
             </div>
-          </div>
 
-          {/* Desktop Table View */}
-          <div className="hidden md:block bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+            {/* Table */}
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-slate-50/50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    <th className="py-4 px-5">Ride ID</th>
-                    <th className="py-4 px-5">Guest Profile</th>
-                    <th className="py-4 px-5">Assigned Driver</th>
-                    <th className="py-4 px-5">Vehicle Specs</th>
-                    <th className="py-4 px-5">Route Coordinates</th>
-                    <th className="py-4 px-5 text-right">Fare</th>
-                    <th className="py-4 px-5 text-center">Payment</th>
-                    <th className="py-4 px-5 text-center">Status</th>
-                    <th className="py-4 px-5 text-right">Actions</th>
+                  <tr className="bg-slate-50/30 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    <th className="py-3 px-6">Ride ID</th>
+                    <th className="py-3 px-6">Guest Details</th>
+                    <th className="py-3 px-6">Driver Details</th>
+                    <th className="py-3 px-6">Vehicle</th>
+                    <th className="py-3 px-6">Route & Distance</th>
+                    <th className="py-3 px-6">Status</th>
+                    <th className="py-3 px-6">Fare Details</th>
+                    <th className="py-3 px-6">Payment</th>
+                    <th className="py-3 px-6 text-center">Current Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50 text-xs font-semibold text-slate-700">
-                  {listLoading ? (
-                    <tr>
-                      <td colSpan="9" className="py-12 text-center text-slate-400">
-                        <div className="flex justify-center gap-1.5 items-center">
-                          <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" />
-                          <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce delay-75" />
-                          <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce delay-150" />
+                <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
+                  {filteredRides.map(ride => (
+                    <tr key={ride.id} className="hover:bg-slate-50/20 transition-colors">
+                      
+                      {/* Ride ID */}
+                      <td className="py-4 px-6">
+                        <span className="font-extrabold text-blue-600 block">{ride.id}</span>
+                        <span className="text-[10px] text-slate-400 font-bold block mt-0.5">{ride.bookingTime}</span>
+                      </td>
+
+                      {/* Guest details */}
+                      <td className="py-4 px-6">
+                        <div className="flex items-center gap-2.5">
+                          <img src={ride.guest.photo} className="w-8 h-8 rounded-full object-cover border border-slate-100" alt="" />
+                          <div>
+                            <span className="font-extrabold text-slate-800 block">{ride.guest.name}</span>
+                            <span className="text-[9px] text-slate-400 font-bold block mt-0.5">{ride.guest.mobile}</span>
+                          </div>
                         </div>
                       </td>
-                    </tr>
-                  ) : ridesList.length === 0 ? (
-                    <tr>
-                      <td colSpan="9" className="py-12 text-center text-slate-450 font-medium">
-                        No active dispatch logs found matching selected filters.
-                      </td>
-                    </tr>
-                  ) : (
-                    ridesList.map((ride) => (
-                      <tr key={ride._id} className="hover:bg-slate-50/40 transition-colors">
-                        <td className="py-4 px-5 font-mono text-[10px] text-slate-400">#{ride._id}</td>
-                        <td className="py-4 px-5">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-full overflow-hidden border border-slate-150 flex-shrink-0 bg-slate-100 flex items-center justify-center">
-                              {ride.guest.photo ? (
-                                <img src={ride.guest.photo} className="w-full h-full object-cover" alt="" />
-                              ) : (
-                                <User size={14} className="text-slate-450" />
-                              )}
-                            </div>
-                            <div>
-                              <div className="font-bold text-slate-800">{ride.guest.name}</div>
-                              <div className="text-[10px] text-slate-400 font-medium">{ride.guest.mobile}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-4 px-5">
-                          {ride.driver ? (
-                            <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 rounded-full overflow-hidden border border-slate-100 flex-shrink-0">
-                                <img src={ride.driver.photo} className="w-full h-full object-cover" alt="" />
-                              </div>
-                              <div>
-                                <span className="font-bold text-slate-700 block">{ride.driver.name}</span>
-                                <span className="text-[9px] text-slate-400 flex items-center gap-0.5">
-                                  <Star size={9} className="text-amber-450 fill-amber-450" />
-                                  <span>{ride.driver.rating}</span>
-                                </span>
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-100">
-                              Unassigned
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-4 px-5">
-                          <div className="text-slate-650">
-                            <div className="font-bold">{ride.vehicle.model}</div>
-                            <div className="text-[10px] font-mono text-slate-450 uppercase">{ride.vehicle.vehicleNumber}</div>
-                          </div>
-                        </td>
-                        <td className="py-4 px-5">
-                          <div className="text-[10px] text-slate-500 font-medium max-w-xs space-y-0.5">
-                            <div className="truncate"><span className="text-emerald-600 font-bold">Pick:</span> {ride.pickupAddress}</div>
-                            <div className="truncate"><span className="text-rose-600 font-bold">Drop:</span> {ride.dropAddress}</div>
-                          </div>
-                        </td>
-                        <td className="py-4 px-5 text-right font-mono text-slate-850">
-                          ₹{ride.fareBreakdown.finalFare?.toLocaleString('en-IN')}
-                        </td>
-                        <td className="py-4 px-5 text-center">
-                          <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold ${getPaymentStatusBadgeStyle(ride.paymentStatus)}`}>
-                            {ride.paymentStatus}
-                          </span>
-                        </td>
-                        <td className="py-4 px-5 text-center">
-                          <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold ${getStatusBadgeStyle(ride.status)}`}>
-                            {ride.status}
-                          </span>
-                        </td>
-                        <td className="py-4 px-5 text-right">
-                          <div className="flex justify-end gap-1.5">
-                            <button
-                              onClick={() => { setSelectedId(ride._id); setViewMode('details'); }}
-                              className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                              title="View Details"
-                            >
-                              <Eye size={14} />
-                            </button>
-                            
-                            {!ride.driver && ride.status === 'Upcoming' && (
-                              <button
-                                onClick={() => handleAssignDriver(ride._id)}
-                                className="p-1.5 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                                title="Assign Driver"
-                              >
-                                <Plus size={14} />
-                              </button>
-                            )}
 
-                            {(ride.status === 'Ongoing' || ride.status === 'Upcoming') && (
-                              <button
-                                onClick={() => handleCancelRide(ride._id)}
-                                className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                title="Cancel Ride"
-                              >
-                                <X size={14} />
-                              </button>
-                            )}
+                      {/* Driver details */}
+                      <td className="py-4 px-6">
+                        <div className="flex items-center gap-2.5">
+                          <img src={ride.driver.photo} className="w-8 h-8 rounded-full object-cover border border-slate-100" alt="" />
+                          <div>
+                            <span className="font-extrabold text-slate-800 block">{ride.driver.name}</span>
+                            <span className="text-[9px] text-slate-400 font-bold flex items-center gap-0.5 mt-0.5">
+                              <Star size={9} className="text-amber-500 fill-amber-500" />
+                              <span>{ride.driver.rating}</span>
+                            </span>
                           </div>
-                        </td>
-                      </tr>
-                    ))
+                        </div>
+                      </td>
+
+                      {/* Vehicle */}
+                      <td className="py-4 px-6 space-y-1">
+                        <span className="font-bold text-slate-800 block leading-none">{ride.vehicle.model}</span>
+                        <span className="text-[9px] text-slate-400 font-semibold block leading-none">{ride.vehicle.vehicleNumber}</span>
+                        <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-[7px] font-black uppercase tracking-wider inline-block">
+                          {ride.vehicle.vehicleType}
+                        </span>
+                      </td>
+
+                      {/* Route & Distance */}
+                      <td className="py-4 px-6 space-y-1">
+                        <div className="text-[10px] text-slate-700 font-bold flex flex-col gap-0.5">
+                          <span className="truncate max-w-[130px]" title={ride.route.pickup}>{ride.route.pickup.split(',')[0]}</span>
+                          <span className="text-slate-400 font-semibold">to {ride.route.drop.split(',')[0]}</span>
+                        </div>
+                        <span className="text-[10px] text-blue-600 font-black block mt-0.5">{ride.route.distance}</span>
+                      </td>
+
+                      {/* Status */}
+                      <td className="py-4 px-6">
+                        <div className="space-y-1">
+                          <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-wider border inline-block ${getStatusBadge(ride.status)}`}>
+                            {ride.status === 'Ongoing' ? '● ONGOING' : ride.status === 'Arrived' ? 'DRIVER ARRIVED' : ride.status === 'Assigned' ? 'DRIVER ASSIGNED' : ride.status}
+                          </span>
+                          <span className="text-[8px] text-slate-400 font-bold block">{ride.statusSubtext}</span>
+                        </div>
+                      </td>
+
+                      {/* Fare */}
+                      <td className="py-4 px-6 font-mono font-black text-slate-900">
+                        ₹{ride.fare.total}
+                      </td>
+
+                      {/* Payment */}
+                      <td className="py-4 px-6">
+                        <span className={`px-2 py-0.5 border rounded-lg text-[8px] font-black uppercase tracking-wider inline-block ${
+                          ride.payment.status === 'Paid' 
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                            : 'bg-amber-50 text-amber-700 border-amber-100'
+                        }`}>
+                          {ride.payment.method}
+                        </span>
+                      </td>
+
+                      {/* Current Status action */}
+                      <td className="py-4 px-6 text-center">
+                        <div className="flex flex-col items-center gap-1.5">
+                          <span className="text-[9px] font-black text-slate-700">
+                            {ride.status === 'Ongoing' ? 'En Route' : ride.status === 'Arrived' ? 'Waiting for Guest' : 'Driver Assigned'}
+                          </span>
+                          <button
+                            onClick={() => handleViewDetails(ride)}
+                            className="text-[10px] font-black text-blue-650 hover:underline cursor-pointer flex items-center gap-0.5"
+                          >
+                            Live Tracking <ChevronRight size={10} />
+                          </button>
+                        </div>
+                      </td>
+
+                    </tr>
+                  ))}
+                  {filteredRides.length === 0 && (
+                    <tr>
+                      <td colSpan="9" className="py-12 text-center text-slate-400 font-semibold">No rides found.</td>
+                    </tr>
                   )}
                 </tbody>
               </table>
             </div>
-            <div className="bg-slate-50/50 border-t border-slate-100 px-5 py-4.5 flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              <span>Showing {ridesList.length} dispatch logs</span>
+
+            {/* Pagination footer */}
+            <div className="border-t border-slate-50 px-6 py-4.5 flex justify-between items-center text-xs font-bold text-slate-500">
+              <span>Showing 1 to {filteredRides.length} of {filteredRides.length} ongoing & upcoming rides</span>
+              <div className="flex items-center gap-1.5">
+                <button className="p-1 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer disabled:opacity-50" disabled>
+                  <ChevronLeft size={14} />
+                </button>
+                <button className="w-7 h-7 bg-red-600 text-white rounded-lg flex items-center justify-center">1</button>
+                <button className="p-1 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer disabled:opacity-50" disabled>
+                  <ChevronRight size={14} />
+                </button>
+              </div>
             </div>
+
           </div>
 
-          {/* Mobile Cards View */}
-          <div className="md:hidden space-y-4">
-            {listLoading ? (
-              <div className="py-12 text-center text-slate-400">Loading mobile dispatch feed...</div>
-            ) : ridesList.length === 0 ? (
-              <div className="py-12 text-center text-slate-450 font-medium">No rides dispatch logs found matching filters.</div>
-            ) : (
-              ridesList.map((ride) => (
-                <div key={ride._id} className="bg-white border border-slate-100 rounded-2xl shadow-sm p-4 space-y-3.5">
-                  <div className="flex justify-between items-center">
-                    <span className="font-mono text-[10px] text-slate-450">#{ride._id}</span>
-                    <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold ${getStatusBadgeStyle(ride.status)}`}>
-                      {ride.status}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 border-t border-b border-slate-50 py-3">
-                    <div className="space-y-0.5">
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Guest</span>
-                      <span className="text-xs font-bold text-slate-800 block truncate">{ride.guest.name}</span>
-                    </div>
-
-                    <div className="space-y-0.5">
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Driver</span>
-                      <span className="text-xs font-bold text-slate-800 block truncate">
-                        {ride.driver ? ride.driver.name : 'Unassigned'}
-                      </span>
-                    </div>
-
-                    <div className="space-y-0.5">
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Fare sum</span>
-                      <span className="text-xs font-bold text-slate-800 block font-mono">₹{ride.fareBreakdown.finalFare}</span>
-                    </div>
-
-                    <div className="space-y-0.5">
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Vehicle</span>
-                      <span className="text-xs font-bold text-slate-800 block font-mono truncate">{ride.vehicle.vehicleNumber}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => { setSelectedId(ride._id); setViewMode('details'); }}
-                      className="flex-1 py-2 bg-blue-50 text-blue-650 hover:bg-blue-100 rounded-xl text-xs font-bold transition-all"
-                    >
-                      View Details
-                    </button>
-                    {!ride.driver && ride.status === 'Upcoming' && (
-                      <button
-                        onClick={() => handleAssignDriver(ride._id)}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all"
-                      >
-                        Assign
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-        </motion.div>
+        </div>
       )}
 
       {/* 2. RIDE DETAILS VIEW */}
-      {viewMode === 'details' && (
-        <motion.div variants={layoutVariants} initial="hidden" animate="show" className="space-y-6">
+      {viewMode === 'details' && selectedRide && (
+        <div className="space-y-6">
           
-          {/* Header section with back navigation */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => { setViewMode('list'); setSelectedId(null); }}
-                className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-xl bg-white border border-slate-200 transition-colors shadow-sm cursor-pointer"
-              >
-                <ArrowLeft size={16} />
-              </button>
-              <div>
-                <h2 className="text-lg font-bold text-slate-800 tracking-tight leading-tight flex items-center gap-2">
-                  <span>Ride Dispatch Profile</span>
-                  <span className="font-mono text-sm text-slate-400">#{rideDetails?._id}</span>
-                </h2>
-                <p className="text-xs text-slate-400 font-medium mt-0.5 flex items-center gap-2">
-                  <span>Type: {rideDetails?.rideType}</span>
-                  <span>•</span>
-                  <span>Booked: {rideDetails?.createdAt ? new Date(rideDetails.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
-                </p>
-              </div>
-            </div>
+          {/* Back button header row */}
+          <div className="flex justify-between items-center">
+            <button
+              onClick={() => setViewMode('list')}
+              className="flex items-center gap-1.5 text-xs font-extrabold text-slate-500 hover:text-slate-800 transition-colors bg-white border border-slate-200 px-3 py-1.5 rounded-xl cursor-pointer"
+            >
+              <ArrowLeft size={14} />
+              <span>TravelOps Admin</span>
+            </button>
 
-            {/* Badges and action links */}
-            {rideDetails && (
-              <div className="flex flex-wrap gap-2">
-                <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold tracking-wide uppercase flex items-center gap-1.5 ${getStatusBadgeStyle(rideDetails.status)}`}>
-                  <span className="w-1.5 h-1.5 bg-current rounded-full" />
-                  <span>{rideDetails.status}</span>
-                </span>
-                
-                {rideDetails.driver && (
-                  <>
-                    <a 
-                      href={`tel:${rideDetails.driver.mobile}`}
-                      className="px-3.5 py-2 bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-[10px] font-bold flex items-center gap-1.5 hover:bg-slate-100 transition-all"
-                    >
-                      <PhoneCall size={11} />
-                      <span>Call Driver</span>
-                    </a>
-                    <a 
-                      href={`https://wa.me/${rideDetails.driver.mobile.replace(/\+/g, '').replace(/ /g, '')}`}
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="px-3.5 py-2 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-xl text-[10px] font-bold flex items-center gap-1.5 hover:bg-emerald-100/50 transition-all"
-                    >
-                      <Send size={11} className="rotate-45" />
-                      <span>WhatsApp</span>
-                    </a>
-                  </>
-                )}
-              </div>
-            )}
+            <div className="relative w-72">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search bookings..."
+                readOnly
+                className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-500 focus:outline-none"
+              />
+            </div>
           </div>
 
-          {detailsLoading ? (
-            <div className="py-24 text-center">
-              <span className="text-xs font-bold text-slate-450">Loading ride dispatch profile files...</span>
+          {/* Header Section */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+            <div>
+              <div className="flex items-center gap-3">
+                <h1 className="text-lg font-black text-slate-800 tracking-tight leading-none">
+                  Ride Details - {selectedRide.id}
+                </h1>
+                <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-wider border flex items-center gap-1 ${getStatusBadge(selectedRide.status)}`}>
+                  <span className="w-1 h-1 bg-current rounded-full" />
+                  <span>{selectedRide.status}</span>
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 font-extrabold uppercase mt-1.5 tracking-wider">
+                Booking Time: Today, {selectedRide.bookingTime}
+              </p>
             </div>
-          ) : !rideDetails ? (
-            <div className="py-24 text-center">
-              <span className="text-xs font-bold text-rose-500">Ride profile not found.</span>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => alert(`Calling driver: ${selectedRide.driver.name} at ${selectedRide.driver.mobile}`)}
+                className="px-3.5 py-2 bg-slate-50 border border-slate-200 text-slate-655 font-extrabold text-[10px] uppercase rounded-xl flex items-center gap-1.5 hover:bg-slate-100 transition-all cursor-pointer"
+              >
+                <PhoneCall size={11} className="text-slate-550" />
+                <span>Call Driver</span>
+              </button>
+              <button
+                onClick={() => window.open(`https://wa.me/${selectedRide.driver.mobile.replace(/\+/g,'').replace(/ /g,'')}`)}
+                className="px-3.5 py-2 bg-slate-50 border border-slate-200 text-slate-655 font-extrabold text-[10px] uppercase rounded-xl flex items-center gap-1.5 hover:bg-slate-100 transition-all cursor-pointer"
+              >
+                <Send size={11} className="text-slate-550 rotate-45" />
+                <span>WhatsApp</span>
+              </button>
+              <button
+                onClick={() => alert('Edit Ride dispatcher overlay.')}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-[10px] uppercase rounded-xl shadow-md shadow-blue-200 transition-all cursor-pointer"
+              >
+                Edit Ride
+              </button>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          </div>
+
+          {/* Three Columns layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            {/* LEFT COLUMN: GUEST, DRIVER & VEHICLE (lg:col-span-3) */}
+            <div className="lg:col-span-3 space-y-6">
               
-              {/* LEFT COLUMN: Guest, Driver, and Vehicle Cards (lg:col-span-3) */}
-              <div className="lg:col-span-3 space-y-6">
-                
-                {/* Guest Profile Card */}
-                <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-xs font-bold text-slate-800 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                    <User size={13} className="text-indigo-500" />
-                    <span>Guest Information</span>
-                  </h3>
-                  
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-full overflow-hidden border border-slate-150 flex-shrink-0 bg-slate-50 flex items-center justify-center">
-                      {rideDetails.guest.photo ? (
-                        <img src={rideDetails.guest.photo} className="w-full h-full object-cover" alt="" />
-                      ) : (
-                        <User size={18} className="text-slate-400" />
-                      )}
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-slate-800 text-xs leading-none">{rideDetails.guest.name}</h4>
-                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold mt-1.5 inline-block ${
-                        rideDetails.guest.verificationStatus === 'Verified' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                      }`}>
-                        {rideDetails.guest.verificationStatus}
-                      </span>
-                    </div>
-                  </div>
+              {/* Guest Card */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-50 pb-2.5">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                    <User size={13} className="text-slate-400" />
+                    Guest Details
+                  </span>
+                  <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">
+                    Verified
+                  </span>
+                </div>
 
-                  <div className="space-y-2 text-[11px] font-semibold text-slate-600 border-t border-slate-50 pt-3">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Mobile</span>
-                      <span>{rideDetails.guest.mobile}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Email</span>
-                      <span className="truncate max-w-[140px]" title={rideDetails.guest.email}>{rideDetails.guest.email || 'N/A'}</span>
-                    </div>
+                <div className="flex items-center gap-3">
+                  <img src={selectedRide.guest.photo} className="w-12 h-12 rounded-full object-cover border border-slate-100" alt="" />
+                  <div>
+                    <h4 className="font-extrabold text-slate-800 text-xs leading-none">{selectedRide.guest.name}</h4>
+                    <span className="text-[10px] text-slate-450 block mt-1.5 font-bold">{selectedRide.guest.mobile}</span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5 font-semibold truncate max-w-[150px]">{selectedRide.guest.email}</span>
                   </div>
                 </div>
 
-                {/* Driver Profile Card */}
-                <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-xs font-bold text-slate-800 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                    <Car size={13} className="text-indigo-500" />
-                    <span>Driver Information</span>
-                  </h3>
-
-                  {rideDetails.driver ? (
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 rounded-full overflow-hidden border border-slate-150 flex-shrink-0">
-                          <img src={rideDetails.driver.photo} className="w-full h-full object-cover" alt="" />
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-slate-800 text-xs leading-none">{rideDetails.driver.name}</h4>
-                          <div className="flex items-center gap-1 mt-1.5">
-                            <span className="text-[9px] text-slate-400 font-bold flex items-center gap-0.5 bg-slate-50 border border-slate-100 px-1 py-0.5 rounded">
-                              <Star size={9} className="text-amber-450 fill-amber-450" />
-                              <span>{rideDetails.driver.rating}</span>
-                            </span>
-                            <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
-                              rideDetails.driver.status === 'On Ride' 
-                                ? 'bg-emerald-50 text-emerald-700' 
-                                : rideDetails.driver.status === 'Active'
-                                ? 'bg-blue-50 text-blue-700'
-                                : 'bg-slate-50 text-slate-450'
-                            }`}>
-                              {rideDetails.driver.status}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2 text-[11px] font-semibold text-slate-600 border-t border-slate-50 pt-3">
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Mobile</span>
-                          <span>{rideDetails.driver.mobile}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="py-4 text-center text-slate-400">
-                      <p className="text-xs font-semibold mb-3">No driver assigned to this trip.</p>
-                      <button
-                        onClick={() => handleAssignDriver(rideDetails._id)}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-bold shadow-sm transition-all cursor-pointer"
-                      >
-                        Assign Driver Now
-                      </button>
-                    </div>
-                  )}
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-50">
+                  <button className="py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-655 text-[10px] font-black rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1">
+                    <Phone size={10} /> Call
+                  </button>
+                  <button className="py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-655 text-[10px] font-black rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1">
+                    <Send size={10} className="rotate-45" /> WhatsApp
+                  </button>
                 </div>
-
-                {/* Vehicle Specs Card */}
-                <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-xs font-bold text-slate-800 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                    <Info size={13} className="text-indigo-500" />
-                    <span>Vehicle Details</span>
-                  </h3>
-
-                  <div className="flex gap-3 items-center">
-                    <div className="w-16 h-12 rounded-lg overflow-hidden border border-slate-150 bg-slate-50 flex-shrink-0 flex items-center justify-center">
-                      {rideDetails.vehicle.image ? (
-                        <img src={rideDetails.vehicle.image} className="w-full h-full object-cover" alt="" />
-                      ) : (
-                        <Car size={24} className="text-slate-400" />
-                      )}
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-slate-800 text-xs leading-none">{rideDetails.vehicle.model}</h4>
-                      <span className="text-[10px] text-slate-450 block pt-1 font-semibold">Type: {rideDetails.vehicle.vehicleType}</span>
-                    </div>
-                  </div>
-
-                  {/* Physical License Plate look */}
-                  <div className="bg-amber-450 border border-slate-700 text-slate-900 px-3 py-1.5 rounded-md font-mono font-bold text-center text-xs tracking-widest uppercase shadow-sm">
-                    {rideDetails.vehicle.vehicleNumber}
-                  </div>
-                </div>
-
               </div>
 
-              {/* CENTER COLUMN: Live Route Tracking Map, Route Summary, Timeline (lg:col-span-6) */}
-              <div className="lg:col-span-6 space-y-6">
+              {/* Driver Card */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-50 pb-2.5">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                    <User size={13} className="text-slate-400" />
+                    Driver Details
+                  </span>
+                  <span className="text-emerald-600 text-[8px] font-black uppercase tracking-wider flex items-center gap-0.5">
+                    <span className="w-1 h-1 bg-emerald-500 rounded-full animate-ping" />
+                    Online
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <img src={selectedRide.driver.photo} className="w-12 h-12 rounded-full object-cover border border-slate-100" alt="" />
+                  <div>
+                    <h4 className="font-extrabold text-slate-800 text-xs leading-none">{selectedRide.driver.name}</h4>
+                    <span className="text-[10px] text-slate-450 block mt-1.5 font-bold">{selectedRide.driver.mobile}</span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5 font-semibold flex items-center gap-0.5">
+                      <Star size={9} className="text-amber-500 fill-amber-500" />
+                      <span>{selectedRide.driver.rating} • Assigned</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-50">
+                  <button className="py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-655 text-[10px] font-black rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1">
+                    <Phone size={10} /> Call
+                  </button>
+                  <button className="py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-655 text-[10px] font-black rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1">
+                    <Send size={10} className="rotate-45" /> WhatsApp
+                  </button>
+                </div>
+              </div>
+
+              {/* Vehicle Card */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block border-b border-slate-50 pb-2.5">
+                  Vehicle Details
+                </span>
+
+                <div className="flex gap-3 items-center">
+                  <img src={selectedRide.vehicle.image} className="w-16 h-12 rounded-xl object-cover border border-slate-150 bg-slate-50" alt="" />
+                  <div>
+                    <h4 className="font-extrabold text-slate-800 text-xs leading-none">{selectedRide.vehicle.model}</h4>
+                    <span className="px-1.5 py-0.5 bg-blue-50 border border-blue-100 text-blue-700 rounded text-[7px] font-black uppercase tracking-wider inline-block mt-2">
+                      {selectedRide.vehicle.vehicleType}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-amber-450 border border-slate-700 text-slate-900 px-3 py-1.5 rounded-md font-mono font-bold text-center text-xs tracking-widest uppercase shadow-sm">
+                  {selectedRide.vehicle.vehicleNumber}
+                </div>
+
+                <span className="text-[9px] text-slate-400 font-extrabold uppercase block text-center tracking-wider">{selectedRide.vehicle.features}</span>
+              </div>
+
+              {/* Ride Information Card */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-3.5">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block border-b border-slate-50 pb-2.5">
+                  Ride Information
+                </span>
                 
-                {/* Live Route Tracking Card with Animated Map */}
-                <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-                  <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                      <MapPin size={13} className="text-indigo-500 animate-bounce" />
-                      <span>Live Route Dispatch Map</span>
-                    </h3>
-                    {rideDetails.status === 'Ongoing' && (
-                      <span className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
-                        <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-wide">Tracking Live</span>
-                      </span>
-                    )}
+                <div className="space-y-2.5 text-[11px] font-semibold text-slate-600">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Ride ID</span>
+                    <span className="font-bold text-slate-800">{selectedRide.id}</span>
                   </div>
-
-                  {/* SVG Map visualization container */}
-                  <div className="h-64 bg-[#f8fafc] border-b border-slate-50 relative flex items-center justify-center overflow-hidden">
-                    {/* Grids and roads decoration */}
-                    <svg className="absolute inset-0 w-full h-full text-slate-200/50" xmlns="http://www.w3.org/2000/svg">
-                      <defs>
-                        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeWidth="1" />
-                        </pattern>
-                      </defs>
-                      <rect width="100%" height="100%" fill="url(#grid)" />
-                      {/* Stylized simulated city roads */}
-                      <path d="M 0 80 Q 200 40 400 120 T 800 160" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" />
-                      <path d="M 100 0 V 300" fill="none" stroke="currentColor" strokeWidth="4" />
-                      <path d="M 0 180 H 800" fill="none" stroke="currentColor" strokeWidth="4" />
-                      <path d="M 320 0 V 300" fill="none" stroke="currentColor" strokeWidth="4" />
-                    </svg>
-
-                    {/* Animated SVG Route Line */}
-                    <svg className="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
-                      <path 
-                        d="M 80 180 C 150 120, 280 240, 360 80" 
-                        fill="none" 
-                        stroke="#3b82f6" 
-                        strokeWidth="3.5" 
-                        strokeLinecap="round"
-                        strokeDasharray="8 6"
-                        className="animate-[dash_20s_linear_infinite]"
-                        style={{
-                          animation: 'dash 1.5s linear infinite'
-                        }}
-                      />
-                      <style>{`
-                        @keyframes dash {
-                          to {
-                            stroke-dashoffset: -28;
-                          }
-                        }
-                        @keyframes pulse-pin {
-                          0%, 100% { transform: scale(1); opacity: 1; }
-                          50% { transform: scale(1.25); opacity: 0.5; }
-                        }
-                      `}</style>
-                    </svg>
-
-                    {/* Pickup Marker */}
-                    <div className="absolute left-[70px] top-[160px] z-10 flex flex-col items-center">
-                      <div className="relative">
-                        <span className="absolute -inset-1 bg-emerald-500 rounded-full animate-ping opacity-75" />
-                        <div className="w-5 h-5 bg-emerald-600 border-2 border-white rounded-full flex items-center justify-center text-white shadow shadow-emerald-200">
-                          <span className="text-[9px] font-bold">A</span>
-                        </div>
-                      </div>
-                      <span className="bg-slate-900/80 backdrop-blur-xs text-[8px] font-bold text-white px-1.5 py-0.5 rounded shadow mt-1">Pickup</span>
-                    </div>
-
-                    {/* Drop Marker */}
-                    <div className="absolute left-[350px] top-[60px] z-10 flex flex-col items-center">
-                      <div className="relative">
-                        <span className="absolute -inset-1 bg-rose-500 rounded-full animate-ping opacity-75" />
-                        <div className="w-5 h-5 bg-rose-600 border-2 border-white rounded-full flex items-center justify-center text-white shadow shadow-rose-200">
-                          <span className="text-[9px] font-bold">B</span>
-                        </div>
-                      </div>
-                      <span className="bg-slate-900/80 backdrop-blur-xs text-[8px] font-bold text-white px-1.5 py-0.5 rounded shadow mt-1">Drop</span>
-                    </div>
-
-                    {/* Pulsing Driver Position (Visible if assigned and not completed/cancelled) */}
-                    {rideDetails.driver && rideDetails.status === 'Ongoing' && (
-                      <div 
-                        className="absolute z-20 flex flex-col items-center transition-all duration-1000"
-                        style={{
-                          left: '210px',
-                          top: '150px'
-                        }}
-                      >
-                        <div className="w-8 h-8 rounded-full bg-blue-600 border-2 border-white flex items-center justify-center shadow-lg shadow-blue-200 animate-[bounce_2s_infinite]">
-                          <img src={rideDetails.driver.photo} className="w-full h-full rounded-full object-cover" alt="" />
-                        </div>
-                        <div className="bg-blue-600 text-[8px] font-bold text-white px-1 py-0.5 rounded shadow mt-0.5 flex items-center gap-0.5 uppercase tracking-wide">
-                          <Car size={8} />
-                          <span>Amit</span>
-                        </div>
-                      </div>
-                    )}
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Ride Type</span>
+                    <span className="font-bold text-slate-850">Private Ride (Cab)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Booking Time</span>
+                    <span className="font-bold text-slate-850">Today, {selectedRide.bookingTime}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Estimated Drop</span>
+                    <span className="font-bold text-slate-850">11:05 AM</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Total Distance</span>
+                    <span className="font-bold text-slate-850">{selectedRide.route.distance}</span>
                   </div>
                 </div>
+              </div>
 
-                {/* Route Summary Details Card */}
-                <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-xs font-bold text-slate-800 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650">
-                    Route Summary
+            </div>
+
+            {/* CENTER COLUMN: MAP & TIMELINE (lg:col-span-6) */}
+            <div className="lg:col-span-6 space-y-6">
+              
+              {/* Map Card */}
+              <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
+                  <h3 className="text-xs font-black text-slate-805 uppercase tracking-widest flex items-center gap-1.5">
+                    <MapPin size={13} className="text-blue-500 animate-bounce" />
+                    <span>Live Tracking</span>
                   </h3>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-                        <span>Pickup Point</span>
-                      </div>
-                      <p className="text-xs font-bold text-slate-750">{rideDetails.pickupAddress}</p>
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 bg-rose-500 rounded-full" />
-                        <span>Destination Drop</span>
-                      </div>
-                      <p className="text-xs font-bold text-slate-755">{rideDetails.dropAddress}</p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3 border-t border-slate-50 pt-3.5 text-center">
-                    <div>
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Est. Distance</span>
-                      <span className="text-xs font-bold text-slate-800 block mt-0.5">{rideDetails.distance} KM</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Duration</span>
-                      <span className="text-xs font-bold text-slate-800 block mt-0.5">{rideDetails.duration}</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Current ETA</span>
-                      <span className="text-xs font-bold text-blue-650 block mt-0.5">{rideDetails.eta}</span>
-                    </div>
-                  </div>
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
+                    <span className="text-[9px] font-black text-emerald-600 uppercase tracking-wide">Live</span>
+                  </span>
                 </div>
 
-                {/* Ride Timeline Card */}
+                {/* Google Map Mock SVG styling */}
+                <div className="h-96 bg-[#eef2f6] border-b border-slate-50 relative flex items-center justify-center overflow-hidden">
+                  <svg className="absolute inset-0 w-full h-full text-slate-350" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                      <pattern id="mapGrid" width="60" height="60" patternUnits="userSpaceOnUse">
+                        <rect width="60" height="60" fill="#f1f5f9" />
+                        <path d="M 60 0 L 0 0 0 60" fill="none" stroke="#e2e8f0" strokeWidth="1" />
+                      </pattern>
+                    </defs>
+                    <rect width="100%" height="100%" fill="url(#mapGrid)" />
+                    {/* Simulated Map Arteries and Rivers */}
+                    <path d="M -50 200 C 150 120, 200 450, 600 380" fill="none" stroke="#cbd5e1" strokeWidth="24" strokeLinecap="round" />
+                    <path d="M -50 200 C 150 120, 200 450, 600 380" fill="none" stroke="#ffffff" strokeWidth="16" strokeLinecap="round" />
+                    
+                    <path d="M 200 -20 Q 300 240, 100 500" fill="none" stroke="#cbd5e1" strokeWidth="18" strokeLinecap="round" />
+                    <path d="M 200 -20 Q 300 240, 100 500" fill="none" stroke="#ffffff" strokeWidth="10" strokeLinecap="round" />
+
+                    {/* Route Line */}
+                    <path 
+                      d="M 120 300 Q 250 180, 480 260" 
+                      fill="none" 
+                      stroke="#3b82f6" 
+                      strokeWidth="5" 
+                      strokeLinecap="round"
+                    />
+                    {/* Route dots */}
+                    <path 
+                      d="M 120 300 Q 250 180, 480 260" 
+                      fill="none" 
+                      stroke="#ffffff" 
+                      strokeWidth="2" 
+                      strokeLinecap="round"
+                      strokeDasharray="4 6"
+                    />
+                  </svg>
+
+                  {/* Pickup Pin */}
+                  <div className="absolute left-[105px] top-[270px] z-10 flex flex-col items-center">
+                    <div className="w-6 h-6 bg-emerald-600 border-2 border-white rounded-full flex items-center justify-center text-white font-extrabold text-[10px] shadow-md">
+                      A
+                    </div>
+                    <span className="bg-slate-900 text-[8px] font-black text-white px-1.5 py-0.5 rounded shadow mt-1 uppercase tracking-wide">Connaught Place</span>
+                  </div>
+
+                  {/* Drop Pin */}
+                  <div className="absolute left-[460px] top-[230px] z-10 flex flex-col items-center">
+                    <div className="w-6 h-6 bg-red-600 border-2 border-white rounded-full flex items-center justify-center text-white font-extrabold text-[10px] shadow-md">
+                      B
+                    </div>
+                    <span className="bg-slate-900 text-[8px] font-black text-white px-1.5 py-0.5 rounded shadow mt-1 uppercase tracking-wide">IGI Airport</span>
+                  </div>
+
+                  {/* Vehicle Marker Tooltip */}
+                  <div className="absolute left-[260px] top-[190px] z-20 flex flex-col items-center animate-bounce">
+                    <div className="bg-slate-950 text-white px-3 py-1.5 rounded-xl shadow-lg border border-slate-800 flex items-center gap-1.5 min-w-[90px]">
+                      <img src={selectedRide.driver.photo} className="w-5 h-5 rounded-full object-cover" alt="" />
+                      <div className="leading-none">
+                        <span className="text-[8px] font-black text-slate-400 block uppercase">Amit Kumar</span>
+                        <span className="text-[10px] font-extrabold text-blue-450 font-sans block mt-0.5">14 mins</span>
+                      </div>
+                    </div>
+                    {/* Tooltip triangle */}
+                    <div className="w-2.5 h-2.5 bg-slate-950 rotate-45 -mt-1.5 border-r border-b border-slate-800"></div>
+                  </div>
+
+                  {/* Live Tracking stats overlay */}
+                  <div className="absolute bottom-4 left-4 bg-white/95 backdrop-blur-xs p-3.5 rounded-2xl shadow-lg border border-slate-100 flex gap-4 text-xs font-bold text-slate-800 min-w-[240px]">
+                    <div>
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">ETA</span>
+                      <span className="text-sm font-black text-slate-850 font-sans mt-0.5 block">{selectedRide.route.eta}</span>
+                    </div>
+                    <div className="w-px bg-slate-150"></div>
+                    <div>
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Remaining</span>
+                      <span className="text-sm font-black text-slate-850 font-sans mt-0.5 block">{selectedRide.route.distance}</span>
+                    </div>
+                    <div className="w-px bg-slate-150"></div>
+                    <div>
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Speed</span>
+                      <span className="text-sm font-black text-slate-850 font-sans mt-0.5 block">{selectedRide.route.avgSpeed}</span>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Lower center side-by-side grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                
+                {/* Timeline */}
                 <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-xs font-bold text-slate-800 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650">
-                    Dispatch Timeline Logs
+                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider border-b border-slate-50 pb-2.5">
+                    Activity Timeline
                   </h3>
 
-                  <div className="relative border-l border-slate-100 pl-5.5 space-y-4 ml-1.5">
-                    {rideDetails.timeline.map((step, idx) => (
+                  <div className="relative border-l border-slate-150 pl-5.5 space-y-4 ml-1.5">
+                    {selectedRide.timeline.map((step, idx) => (
                       <div key={idx} className="relative">
-                        <span className="absolute -left-[27.5px] top-1 w-2.5 h-2.5 bg-blue-500 rounded-full ring-4 ring-white" />
-                        <div className="flex justify-between items-start gap-2">
-                          <div className="text-[10px] font-bold text-slate-800">{step.event}</div>
-                          <span className="text-[9px] text-slate-400 font-mono">
-                            {new Date(step.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                        <span className={`absolute -left-[27.5px] top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white ${
+                          step.timestamp === 'LIVE' ? 'bg-emerald-500 animate-ping' : 'bg-blue-500'
+                        }`} />
+                        <span className={`absolute -left-[27.5px] top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white ${
+                          step.timestamp === 'LIVE' ? 'bg-emerald-500' : 'bg-blue-500'
+                        }`} />
+                        
+                        <div className="flex justify-between items-start gap-1">
+                          <div className="text-[10px] font-black text-slate-800">{step.event}</div>
+                          <span className={`text-[9px] font-mono font-black uppercase ${
+                            step.timestamp === 'LIVE' ? 'text-emerald-600' : 'text-slate-400'
+                          }`}>
+                            {step.timestamp}
                           </span>
                         </div>
-                        <p className="text-[9px] text-slate-400 font-medium pt-0.5">{step.description}</p>
+                        <p className="text-[9px] text-slate-450 font-medium pt-0.5">{step.description}</p>
                       </div>
                     ))}
                   </div>
                 </div>
 
-              </div>
-
-              {/* RIGHT COLUMN: Fare Breakdown, Payment Info, and Quick Actions (lg:col-span-3) */}
-              <div className="lg:col-span-3 space-y-6">
-                
-                {/* Fare Breakdown Card */}
+                {/* Route Summary */}
                 <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-xs font-bold text-slate-800 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                    <FileText size={13} className="text-indigo-500" />
-                    <span>Fare Summary Slip</span>
+                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider border-b border-slate-50 pb-2.5">
+                    Route Summary
                   </h3>
 
-                  <div className="space-y-2.5 text-xs font-semibold text-slate-600">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Base Fare</span>
-                      <span>₹{rideDetails.fareBreakdown.baseFare}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Distance Fare</span>
-                      <span>₹{rideDetails.fareBreakdown.distanceFare}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Extra/Toll Charges</span>
-                      <span>₹{rideDetails.fareBreakdown.extraCharges}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Waiting Charges</span>
-                      <span>₹{rideDetails.fareBreakdown.waitingCharges}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Taxes</span>
-                      <span>₹{rideDetails.fareBreakdown.tax}</span>
-                    </div>
-                    <div className="flex justify-between text-rose-600">
-                      <span>Discount Coupon</span>
-                      <span>-₹{rideDetails.fareBreakdown.discount}</span>
-                    </div>
-
-                    <div className="flex justify-between border-t border-slate-100 pt-3.5 font-bold text-slate-800 text-sm">
-                      <span>Total Fare</span>
-                      <span className="font-mono text-blue-600">₹{rideDetails.fareBreakdown.finalFare}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Payment Information Card */}
-                <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-xs font-bold text-slate-800 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-650 flex items-center gap-1.5">
-                    <CreditCard size={13} className="text-indigo-500" />
-                    <span>Payment Coordinates</span>
-                  </h3>
-
-                  <div className="space-y-3.5 text-xs font-semibold text-slate-655">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Method</span>
-                      <span className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />
-                        <span>{rideDetails.paymentMode}</span>
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between border-t border-slate-50 pt-2.5">
-                      <span className="text-slate-400">Payment Status</span>
-                      <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold ${getPaymentStatusBadgeStyle(rideDetails.paymentStatus)}`}>
-                        {rideDetails.paymentStatus}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between border-t border-slate-50 pt-2.5">
-                      <span className="text-slate-400">Transaction ID</span>
-                      <span className="font-mono text-[10px] text-slate-800">{rideDetails.transactionId || 'N/A'}</span>
-                    </div>
-
-                    <div className="flex justify-between border-t border-slate-50 pt-2.5">
-                      <span className="text-slate-400">Payment Date</span>
-                      <span className="text-slate-700">
-                        {rideDetails.paymentDate ? new Date(rideDetails.paymentDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'N/A'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Quick Dispatch Actions Card */}
-                <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
-                  <h3 className="text-xs font-bold text-slate-805 border-b border-slate-50 pb-2.5 uppercase tracking-widest text-indigo-655">
-                    Operational actions
-                  </h3>
-
-                  <div className="space-y-2">
-                    <button
-                      onClick={() => handleShareTrackingLink(rideDetails._id)}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
-                    >
-                      <Share2 size={13} />
-                      <span>Share Live Tracking Link</span>
-                    </button>
-
-                    <button
-                      onClick={() => handleAssignDriver(rideDetails._id)}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-55 text-indigo-700 hover:bg-indigo-100/60 border border-indigo-100 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
-                    >
-                      <User size={13} />
-                      <span>{rideDetails.driver ? 'Reallocate New Driver' : 'Assign Driver'}</span>
-                    </button>
-
-                    {rideDetails.status === 'Ongoing' && (
-                      <button
-                        onClick={() => handleMarkCompleted(rideDetails._id)}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md shadow-blue-150"
-                      >
-                        <CheckCircle size={13} />
-                        <span>Mark Trip Completed</span>
-                      </button>
-                    )}
-
-                    {(rideDetails.status === 'Ongoing' || rideDetails.status === 'Upcoming') && (
-                      <button
-                        onClick={() => handleCancelRide(rideDetails._id)}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 border border-rose-100 text-rose-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                      >
-                        <XCircle size={13} />
-                        <span>Cancel Ride Request</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-              </div>
-
-            </div>
-          )}
-        </motion.div>
-      )}
-
-      {/* 3. ASSIGN DRIVER MODAL OVERLAY */}
-      {assignModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
-          <div className="bg-white border border-slate-100 rounded-3xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="px-6 py-4.5 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
-              <div>
-                <h3 className="font-bold text-slate-800 text-sm">Assign Dispatch Driver</h3>
-                <p className="text-[10px] text-slate-400 font-medium">Select from available operations transport pool.</p>
-              </div>
-              <button 
-                onClick={() => { setAssignModalOpen(false); setTargetRideId(null); }}
-                className="p-1.5 hover:bg-slate-200/50 rounded-lg text-slate-400 hover:text-slate-650 transition-colors cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="p-4 max-h-[350px] overflow-y-auto space-y-2.5">
-              {driversList.map((driver) => {
-                const isBusy = driver.status === 'On Ride';
-                const isOffline = driver.status === 'Offline' || driver.status === 'Inactive';
-                return (
-                  <div 
-                    key={driver._id} 
-                    className={`flex items-center justify-between p-3 border rounded-2xl transition-all ${
-                      isOffline 
-                        ? 'bg-slate-50/50 border-slate-100 opacity-60' 
-                        : 'bg-white border-slate-150 hover:border-blue-400 shadow-xs'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-100 flex-shrink-0">
-                        <img src={driver.photo} className="w-full h-full object-cover" alt="" />
-                      </div>
+                  <div className="space-y-4 text-xs font-semibold text-slate-700">
+                    <div className="flex items-start gap-2">
+                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-1.5 flex-shrink-0" />
                       <div>
-                        <span className="font-bold text-slate-800 text-xs block">{driver.name}</span>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <span className="text-[9px] text-slate-450 font-bold flex items-center gap-0.5 bg-slate-55/40 px-1 py-0.5 rounded">
-                            <Star size={8} className="text-amber-450 fill-amber-450" />
-                            <span>{driver.rating}</span>
-                          </span>
-                          <span className={`px-1 py-0.5 rounded text-[8px] font-bold ${
-                            isBusy ? 'bg-amber-50 text-amber-700' : isOffline ? 'bg-slate-50 text-slate-400' : 'bg-emerald-50 text-emerald-700'
-                          }`}>
-                            {driver.status}
-                          </span>
-                        </div>
+                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Pickup</span>
+                        <span className="text-slate-800 font-bold block mt-0.5">{selectedRide.route.pickup}</span>
                       </div>
                     </div>
 
-                    <button
-                      disabled={isOffline}
-                      onClick={() => handleConfirmDriverAllocation(driver._id)}
-                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black tracking-wide uppercase transition-all cursor-pointer ${
-                        isBusy 
-                          ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-xs' 
-                          : isOffline 
-                          ? 'bg-slate-100 text-slate-400 pointer-events-none'
-                          : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
-                      }`}
-                    >
-                      {isBusy ? 'Override' : 'Allocate'}
-                    </button>
+                    <div className="flex items-start gap-2 border-t border-slate-50 pt-3">
+                      <span className="w-1.5 h-1.5 bg-red-500 rounded-full mt-1.5 flex-shrink-0" />
+                      <div>
+                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Drop</span>
+                        <span className="text-slate-800 font-bold block mt-0.5">{selectedRide.route.drop}</span>
+                      </div>
+                    </div>
                   </div>
-                );
-              })}
+
+                  <div className="grid grid-cols-3 gap-2 border-t border-slate-50 pt-4.5 text-center">
+                    <div>
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Distance</span>
+                      <span className="text-xs font-black text-slate-850 block mt-0.5 font-sans">{selectedRide.route.distance}</span>
+                    </div>
+                    <div>
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Est. Time</span>
+                      <span className="text-xs font-black text-slate-850 block mt-0.5 font-sans">{selectedRide.route.duration}</span>
+                    </div>
+                    <div>
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">GPS Accuracy</span>
+                      <span className="text-xs font-black text-emerald-600 block mt-0.5 uppercase tracking-wide">High ✓</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
             </div>
+
+            {/* RIGHT COLUMN: FARES, ACTIONS & ASSISTANCE (lg:col-span-3) */}
+            <div className="lg:col-span-3 space-y-6">
+              
+              {/* Fare Breakdown */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block border-b border-slate-50 pb-2.5">
+                  Fare Breakdown
+                </span>
+
+                <div className="space-y-3.5 text-xs font-semibold text-slate-600">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Base Fare</span>
+                    <span>₹{selectedRide.fare.baseFare.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Included Distance (20km)</span>
+                    <span>₹0.00</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Extra Distance (2.4km)</span>
+                    <span>₹{selectedRide.fare.extraDistance.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Tolls & Parking</span>
+                    <span>₹{selectedRide.fare.tolls.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Night Charges (10%)</span>
+                    <span>₹{selectedRide.fare.nightCharges.toFixed(2)}</span>
+                  </div>
+
+                  <div className="flex justify-between border-t border-slate-100 pt-3.5 font-black text-slate-800 text-sm">
+                    <span>Total Fare</span>
+                    <span className="font-mono text-blue-600 text-base">₹{selectedRide.fare.total.toFixed(2)}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="bg-emerald-50 text-emerald-800 border border-emerald-100 px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-wider inline-block">
+                      Paid ({selectedRide.payment.method})
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Extra Details */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-3.5">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block border-b border-slate-50 pb-2.5">
+                  Extra Details
+                </span>
+
+                <div className="space-y-2.5 text-xs font-semibold text-slate-600">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Waiting Time</span>
+                    <span className="font-bold text-slate-800">{selectedRide.extraDetails.waitingTime}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Waiting Charges</span>
+                    <span className="font-bold text-slate-800">₹{selectedRide.extraDetails.waitingCharges.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Current Battery</span>
+                    <span className="font-bold text-slate-800">{selectedRide.extraDetails.battery}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">SOS Status</span>
+                    <span className="font-black text-emerald-600 uppercase tracking-wider">{selectedRide.extraDetails.sosStatus}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm space-y-4">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block border-b border-slate-50 pb-2.5">
+                  Quick Actions
+                </span>
+
+                <div className="grid grid-cols-2 gap-3.5">
+                  <button className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-slate-655 font-black text-[9px] uppercase tracking-wider flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center">
+                    <Map size={14} className="text-slate-500" />
+                    Share Live Location
+                  </button>
+                  <button className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-slate-655 font-black text-[9px] uppercase tracking-wider flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center">
+                    <RefreshCw size={14} className="text-slate-500" />
+                    Re-Route Vehicle
+                  </button>
+                  <button className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-slate-655 font-black text-[9px] uppercase tracking-wider flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center">
+                    <Plus size={14} className="text-slate-500" />
+                    Add Charges
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setRides(prev => prev.map(r => r.id === selectedRide.id ? { ...r, status: 'Completed' } : r));
+                      setSelectedRide(prev => ({ ...prev, status: 'Completed' }));
+                      alert('Trip marked as completed successfully!');
+                    }}
+                    className="p-3 bg-white hover:bg-emerald-50 border border-emerald-250 rounded-xl text-emerald-600 font-black text-[9px] uppercase tracking-wider flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center"
+                  >
+                    <CheckCircle size={14} className="text-emerald-500" />
+                    Complete Ride
+                  </button>
+                </div>
+              </div>
+
+              {/* Need Assistance card */}
+              <div className="bg-slate-900 border border-slate-950 p-5 rounded-2xl shadow-md text-white space-y-4">
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-100">Need Assistance?</h4>
+                  <p className="text-[10px] text-slate-400 font-semibold mt-1">Contact our priority support line for immediate ride intervention.</p>
+                </div>
+                <button
+                  onClick={() => alert('Assistance Center alert dispatched.')}
+                  className="w-full py-2 bg-white hover:bg-slate-55 text-slate-900 font-extrabold text-[10px] uppercase rounded-xl transition-all cursor-pointer shadow-sm text-center"
+                >
+                  Contact Ops HQ
+                </button>
+              </div>
+
+            </div>
+
           </div>
+
         </div>
       )}
 

@@ -1203,9 +1203,10 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
       )}
       {/* 2. FORM VIEW (ADD / EDIT BOOKING) */}
       {(viewMode === 'add' || viewMode === 'edit') && (
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-[1400px] mx-auto pb-32">
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-[1400px] mx-auto pb-32 select-none">
           
-          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+          {/* Header Row */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-100">
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -1215,23 +1216,41 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                     setSelectedId(null);
                   }
                 }}
-                className="p-2 hover:bg-slate-100 text-slate-600 rounded-xl transition-all cursor-pointer border border-slate-150"
+                className="w-10 h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-655 flex items-center justify-center cursor-pointer transition-all shadow-sm"
               >
                 <ArrowLeft size={16} />
               </button>
               <div>
-                <h2 className="text-lg font-black text-slate-800">
-                  {viewMode === 'add' ? 'Create New Booking' : `Modify Booking: ${formData.bookingId}`}
-                </h2>
-                <p className="text-xs text-slate-400 font-semibold">
-                  Register customer and service parameters to catalog transactions.
+                <h1 className="text-xl font-bold text-slate-800 tracking-tight">Create New Booking</h1>
+                <p className="text-[10px] text-slate-400 font-extrabold uppercase mt-1 tracking-wider">
+                  Dashboard &gt; Bookings &gt; <span className="text-red-500">Create New Booking</span>
                 </p>
               </div>
             </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => alert('Draft saved successfully.')}
+                className="flex items-center gap-1.5 px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+              >
+                <FileText size={14} className="text-slate-500" />
+                <span>Save Draft</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setViewMode('list'); setSelectedId(null); }}
+                className="flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                <Layers size={14} className="text-slate-500" />
+                <span>View All Bookings</span>
+              </button>
+            </div>
           </div>
 
-          {/* Progress Journey */}
-          <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm mb-6">
+          {/* Stepper Progress Journey */}
+          <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm mb-6">
             <div className="flex items-center justify-between px-2 max-w-3xl mx-auto">
               {[
                 { step: 1, label: 'Requirements' },
@@ -1245,23 +1264,22 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                     <button
                       type="button"
                       onClick={() => {
-                        // Allow navigating directly to completed steps
                         if (s.step < wizardStep || (s.step === 2 && validateStep(1)) || (s.step === 3 && validateStep(1) && validateStep(2)) || (s.step === 4 && validateStep(1) && validateStep(2) && validateStep(3)) || (s.step === 5 && validateStep(1) && validateStep(2) && validateStep(3) && validateStep(4))) {
                           setWizardStep(s.step);
                         }
                       }}
-                      className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all cursor-pointer ${
+                      className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-all cursor-pointer ${
                         wizardStep === s.step
-                          ? 'wizard-step-active'
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-105'
                           : wizardStep > s.step
-                          ? 'bg-emerald-500 text-white shadow-md shadow-emerald-100'
+                          ? 'bg-emerald-500 text-white shadow-md'
                           : 'bg-slate-50 border border-slate-200 text-slate-450 hover:bg-slate-100'
                       }`}
                     >
-                      {wizardStep > s.step ? <Check size={16} className="stroke-[3]" /> : s.step}
+                      {wizardStep > s.step ? <Check size={14} className="stroke-[3.5]" /> : s.step}
                     </button>
-                    <span className={`text-[10px] font-bold uppercase tracking-wide transition-colors ${
-                      wizardStep === s.step ? 'text-blue-600 font-black' : 'text-slate-400'
+                    <span className={`text-[10px] font-black uppercase tracking-wide transition-colors ${
+                      wizardStep === s.step ? 'text-blue-600' : 'text-slate-400'
                     }`}>
                       {s.label}
                     </span>
@@ -1281,19 +1299,20 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
               
               {/* Left Column: Form Fields (Step based) */}
               <div className="lg:col-span-8 space-y-6">
-                
-                {/* STEP 1: REQUIREMENTS */}
+                           {/* STEP 1: REQUIREMENTS */}
                 {wizardStep === 1 && (
                   <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+                    
                     {/* Guest Details */}
-                    <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
-                      <h3 className="text-sm font-black text-slate-800 border-b border-slate-50 pb-3 flex items-center gap-2">
-                        <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
-                        Guest Details
+                    <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
+                      <h3 className="text-xs font-black text-slate-800 flex items-center gap-2 border-b border-slate-50 pb-3">
+                        <Users size={16} className="text-blue-600" />
+                        <span>Guest Details</span>
                       </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4.5 text-xs font-bold text-slate-700">
                         <div>
-                          <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Guest Name *</label>
+                          <label className="text-slate-500 block mb-1">Guest Name <span className="text-red-500">*</span></label>
                           <div className="relative">
                             <User size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                             <input
@@ -1305,22 +1324,20 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                                 customer: { ...prev.customer, name: e.target.value }
                               }))}
                               placeholder="Enter full name"
-                              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
+                              className="w-full pl-9 pr-4 py-2 bg-slate-50/50 border border-slate-200 rounded-xl font-semibold text-slate-700 focus:outline-none"
                             />
                           </div>
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Contact Number *</label>
-                          <div className="flex gap-2">
+                          <label className="text-slate-500 block mb-1">Contact Number <span className="text-red-500">*</span></label>
+                          <div className="flex gap-1.5">
                             <select
                               value={phoneCountryCode}
                               onChange={(e) => setPhoneCountryCode(e.target.value)}
-                              className="w-24 px-2 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                              className="w-20 px-2 py-2 bg-slate-50/50 border border-slate-200 rounded-xl text-[10px] font-bold focus:outline-none"
                             >
                               <option value="+91">+91 (IN)</option>
-                              <option value="+1">+1 (US)</option>
-                              <option value="+44">+44 (UK)</option>
                             </select>
                             <input
                               type="tel"
@@ -1338,13 +1355,13 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                                 }));
                               }}
                               placeholder="98765 43210"
-                              className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
+                              className="flex-1 px-4 py-2 bg-slate-50/50 border border-slate-200 rounded-xl font-semibold text-slate-700 focus:outline-none"
                             />
                           </div>
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Email ID *</label>
+                          <label className="text-slate-500 block mb-1">Email ID <span className="text-red-500">*</span></label>
                           <div className="relative">
                             <Mail size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                             <input
@@ -1356,14 +1373,14 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                                 customer: { ...prev.customer, email: e.target.value }
                               }))}
                               placeholder="example@email.com"
-                              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
+                              className="w-full pl-9 pr-4 py-2 bg-slate-50/50 border border-slate-200 rounded-xl font-semibold text-slate-700 focus:outline-none"
                             />
                           </div>
                         </div>
 
                         <div>
                           <div className="flex justify-between items-center mb-1">
-                            <label className="text-[10px] font-extrabold text-slate-400 uppercase">WhatsApp Number</label>
+                            <label className="text-slate-500">WhatsApp Number</label>
                             <label className="flex items-center gap-1.5 cursor-pointer">
                               <input
                                 type="checkbox"
@@ -1374,12 +1391,12 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                               <span className="text-[9px] font-bold text-slate-400 uppercase">Same as phone</span>
                             </label>
                           </div>
-                          <div className="flex gap-2">
+                          <div className="flex gap-1.5">
                             <select
                               value={whatsappCountryCode}
                               onChange={(e) => setWhatsappCountryCode(e.target.value)}
                               disabled={sameAsPhone}
-                              className="w-24 px-2 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 disabled:opacity-60"
+                              className="w-20 px-2 py-2 bg-slate-50/50 border border-slate-200 rounded-xl text-[10px] font-bold focus:outline-none disabled:opacity-60"
                             >
                               <option value="+91">+91 (IN)</option>
                             </select>
@@ -1392,13 +1409,13 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                                 customer: { ...prev.customer, whatsApp: e.target.value }
                               }))}
                               placeholder="WhatsApp number"
-                              className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all disabled:opacity-60"
+                              className="flex-1 px-4 py-2 bg-slate-50/50 border border-slate-200 rounded-xl font-semibold text-slate-700 focus:outline-none disabled:opacity-60"
                             />
                           </div>
                         </div>
 
                         <div className="sm:col-span-2">
-                          <label className="text-[10px] font-extrabold text-slate-400 uppercase block mb-1">Communication Address *</label>
+                          <label className="text-slate-500 block mb-1">Communication Address <span className="text-red-500">*</span></label>
                           <textarea
                             required
                             value={formData.customer?.address}
@@ -1408,18 +1425,19 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                             }))}
                             placeholder="Street name, landmark, city, state and zip code"
                             rows="2"
-                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all resize-none"
+                            className="w-full px-4 py-2 bg-slate-50/50 border border-slate-200 rounded-xl font-semibold text-slate-700 focus:outline-none resize-none"
                           />
                         </div>
                       </div>
                     </div>
 
-                    {/* Booking Category Cards */}
+                    {/* Booking Category */}
                     <div className="space-y-3">
-                      <h3 className="text-sm font-black text-slate-800 flex items-center gap-2 pl-1">
-                        <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
-                        Booking Category
+                      <h3 className="text-xs font-black text-slate-800 flex items-center gap-2 pl-1 uppercase tracking-wider">
+                        <span className="w-1.5 h-3 bg-blue-600 rounded-full"></span>
+                        <span>Booking Category</span>
                       </h3>
+                      
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         {[
                           { id: 'Homestay Booking', title: 'Homestay / Hotel', desc: 'Book luxury homestays, premium resorts, hotels and private villas.', icon: Home },
@@ -1436,37 +1454,39 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                               onClick={() => {
                                 setFormData(prev => ({ ...prev, bookingType: cat.id }));
                               }}
-                              className={`p-5 rounded-2xl border-2 cursor-pointer transition-all ${
+                              className={`p-5 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between h-44 ${
                                 isSelected
-                                  ? 'border-blue-600 bg-blue-50/30'
-                                  : 'border-slate-200 hover:bg-slate-50'
+                                  ? 'border-blue-600 bg-blue-50/10'
+                                  : 'border-slate-200 hover:bg-slate-50 bg-white'
                               }`}
                             >
-                              <div className="flex justify-between items-start mb-4">
-                                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                                  <Icon size={22} />
+                              <div className="flex justify-between items-start">
+                                <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                                  <Icon size={20} />
                                 </div>
                                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
-                                  isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300'
+                                  isSelected ? 'border-blue-600 bg-blue-600' : 'border-slate-300'
                                 }`}>
-                                  {isSelected && <Check size={12} className="stroke-[3.5]" />}
+                                  {isSelected && <span className="w-2 h-2 rounded-full bg-white block" />}
                                 </div>
                               </div>
-                              <h4 className="text-xs font-black text-slate-800 mb-1">{cat.title}</h4>
-                              <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">{cat.desc}</p>
+                              <div>
+                                <h4 className="text-xs font-black text-slate-800 mb-1">{cat.title}</h4>
+                                <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">{cat.desc}</p>
+                              </div>
                             </div>
                           );
                         })}
                       </div>
 
                       {/* Sub-selector for Homestay vs Hotel */}
-                      {formData.bookingType === 'Homestay Booking' || formData.bookingType === 'Hotel Booking' ? (
-                        <div className="flex gap-2 p-1.5 bg-slate-100 rounded-xl w-fit mt-2">
+                      {(formData.bookingType === 'Homestay Booking' || formData.bookingType === 'Hotel Booking') && (
+                        <div className="flex gap-2 p-1 bg-slate-100 rounded-xl w-fit mt-2">
                           <button
                             type="button"
                             onClick={() => setFormData(prev => ({ ...prev, bookingType: 'Homestay Booking' }))}
                             className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                              formData.bookingType === 'Homestay Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                              formData.bookingType === 'Homestay Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500'
                             }`}
                           >
                             🏡 Homestay Booking
@@ -1475,22 +1495,22 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                             type="button"
                             onClick={() => setFormData(prev => ({ ...prev, bookingType: 'Hotel Booking' }))}
                             className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                              formData.bookingType === 'Hotel Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                              formData.bookingType === 'Hotel Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500'
                             }`}
                           >
                             🏢 Hotel Booking
                           </button>
                         </div>
-                      ) : null}
+                      )}
 
                       {/* Sub-selector for Tour vs Sightseeing */}
-                      {formData.bookingType === 'Tour Package Booking' || formData.bookingType === 'Sightseeing Booking' ? (
-                        <div className="flex gap-2 p-1.5 bg-slate-100 rounded-xl w-fit mt-2">
+                      {(formData.bookingType === 'Tour Package Booking' || formData.bookingType === 'Sightseeing Booking') && (
+                        <div className="flex gap-2 p-1 bg-slate-100 rounded-xl w-fit mt-2">
                           <button
                             type="button"
                             onClick={() => setFormData(prev => ({ ...prev, bookingType: 'Tour Package Booking' }))}
                             className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                              formData.bookingType === 'Tour Package Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                              formData.bookingType === 'Tour Package Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500'
                             }`}
                           >
                             🗺 Tour Package
@@ -1499,32 +1519,33 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                             type="button"
                             onClick={() => setFormData(prev => ({ ...prev, bookingType: 'Sightseeing Booking' }))}
                             className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                              formData.bookingType === 'Sightseeing Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                              formData.bookingType === 'Sightseeing Booking' ? 'bg-white text-slate-850 shadow-sm' : 'text-slate-500'
                             }`}
                           >
                             📸 Local Sightseeing
                           </button>
                         </div>
-                      ) : null}
+                      )}
                     </div>
 
                     {/* Stay Requirements */}
                     {(formData.bookingType === 'Homestay Booking' || formData.bookingType === 'Hotel Booking') && (
-                      <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
+                      <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
                         <div className="flex items-center justify-between border-b border-slate-50 pb-3">
-                          <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
-                            <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
-                            Stay Requirements
+                          <h3 className="text-xs font-black text-slate-800 flex items-center gap-2">
+                            <Users size={16} className="text-blue-600" />
+                            <span>Stay Requirements</span>
                           </h3>
-                          <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1 rounded-full uppercase tracking-wider">
+                          <span className="text-[9px] font-black bg-blue-50 text-blue-700 px-3 py-1 rounded-full uppercase tracking-wider">
                             Total Capacity: {formData.guests?.total || 0} Pax
                           </span>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-bold text-slate-700">
                           {[
                             { label: 'Total Adults', field: 'adults' },
-                            { label: 'Child (5-9y)', field: 'child5_9' },
-                            { label: 'Child (0-4y)', field: 'child0_4' },
+                            { label: 'Child (5-9Y)', field: 'child5_9' },
+                            { label: 'Child (0-4Y)', field: 'child0_4' },
                             { label: 'Total Rooms', isRoomsCount: true }
                           ].map((countItem, idx) => {
                             let value = 0;
@@ -1534,8 +1555,8 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                               value = roomsList.reduce((sum, r) => sum + (r[countItem.field] || 0), 0);
                             }
                             return (
-                              <div key={idx} className="space-y-1.5">
-                                <label className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">{countItem.label}</label>
+                              <div key={idx} className="space-y-1">
+                                <label className="text-slate-555 block mb-0.5">{countItem.label}</label>
                                 <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-1">
                                   <button
                                     type="button"
@@ -1546,7 +1567,7 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                                         updateRoomCount(roomsList[0]?.id, countItem.field, 'sub');
                                       }
                                     }}
-                                    className="w-8 h-8 rounded-lg bg-white border border-slate-150 hover:bg-slate-50 text-slate-600 flex items-center justify-center font-bold text-sm cursor-pointer"
+                                    className="w-8 h-8 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 flex items-center justify-center font-bold text-sm cursor-pointer"
                                   >
                                     -
                                   </button>
@@ -1560,7 +1581,7 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                                         updateRoomCount(roomsList[0]?.id, countItem.field, 'add');
                                       }
                                     }}
-                                    className="w-8 h-8 rounded-lg bg-white border border-slate-150 hover:bg-slate-50 text-slate-600 flex items-center justify-center font-bold text-sm cursor-pointer"
+                                    className="w-8 h-8 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 flex items-center justify-center font-bold text-sm cursor-pointer"
                                   >
                                     +
                                   </button>
@@ -1570,17 +1591,17 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                           })}
                         </div>
 
-                        {/* Room Allocation breakdown */}
+                        {/* Room Assignments breakdown list */}
                         <div className="pt-2">
                           <div className="flex items-center gap-2 mb-3">
                             <div className="h-px bg-slate-100 flex-1"></div>
-                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest px-2">Room Assignments</span>
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Room Assignments</span>
                             <div className="h-px bg-slate-100 flex-1"></div>
                           </div>
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                             {roomsList.map((room, roomIdx) => (
-                              <div key={room.id} className="p-4 rounded-2xl border border-slate-150 bg-slate-50/50 space-y-3">
+                              <div key={room.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
                                 <div className="flex justify-between items-center">
                                   <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
                                     <Bed size={14} className="text-blue-600" />
@@ -1590,35 +1611,36 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                                     <button
                                       type="button"
                                       onClick={() => deleteRoom(room.id)}
-                                      className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                      className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer border border-transparent"
                                     >
-                                      <Trash2 size={14} />
+                                      <Trash2 size={13} />
                                     </button>
                                   )}
                                 </div>
-                                <div className="grid grid-cols-3 gap-2 text-center">
-                                  <div className="bg-white p-2 rounded-xl border border-slate-100">
-                                    <span className="block text-[8px] font-bold text-slate-400 uppercase mb-0.5">Adults</span>
+                                
+                                <div className="grid grid-cols-3 gap-2 text-center text-[10px] font-bold text-slate-500">
+                                  <div className="bg-white p-2 rounded-xl border border-slate-150">
+                                    <span className="block text-[8px] font-extrabold text-slate-400 uppercase mb-0.5">AD</span>
                                     <div className="flex justify-between items-center gap-1 mt-1">
-                                      <button type="button" onClick={() => updateRoomCount(room.id, 'adults', 'sub')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">-</button>
-                                      <span className="text-xs font-black text-slate-800">{room.adults}</span>
-                                      <button type="button" onClick={() => updateRoomCount(room.id, 'adults', 'add')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">+</button>
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'adults', 'sub')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1">-</button>
+                                      <span className="text-xs font-extrabold text-slate-855">{room.adults}</span>
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'adults', 'add')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1">+</button>
                                     </div>
                                   </div>
-                                  <div className="bg-white p-2 rounded-xl border border-slate-100">
-                                    <span className="block text-[8px] font-bold text-slate-400 uppercase mb-0.5">C (5-9)</span>
+                                  <div className="bg-white p-2 rounded-xl border border-slate-150">
+                                    <span className="block text-[8px] font-extrabold text-slate-400 uppercase mb-0.5">C (5-9)</span>
                                     <div className="flex justify-between items-center gap-1 mt-1">
-                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child5_9', 'sub')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">-</button>
-                                      <span className="text-xs font-black text-slate-800">{room.child5_9}</span>
-                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child5_9', 'add')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">+</button>
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child5_9', 'sub')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1">-</button>
+                                      <span className="text-xs font-extrabold text-slate-855">{room.child5_9}</span>
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child5_9', 'add')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1">+</button>
                                     </div>
                                   </div>
-                                  <div className="bg-white p-2 rounded-xl border border-slate-100">
-                                    <span className="block text-[8px] font-bold text-slate-400 uppercase mb-0.5">C (0-4)</span>
+                                  <div className="bg-white p-2 rounded-xl border border-slate-150">
+                                    <span className="block text-[8px] font-extrabold text-slate-400 uppercase mb-0.5">C (0-4)</span>
                                     <div className="flex justify-between items-center gap-1 mt-1">
-                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child0_4', 'sub')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">-</button>
-                                      <span className="text-xs font-black text-slate-800">{room.child0_4}</span>
-                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child0_4', 'add')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1.5">+</button>
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child0_4', 'sub')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1">-</button>
+                                      <span className="text-xs font-extrabold text-slate-855">{room.child0_4}</span>
+                                      <button type="button" onClick={() => updateRoomCount(room.id, 'child0_4', 'add')} className="text-[10px] font-black text-slate-400 hover:text-slate-700 px-1">+</button>
                                     </div>
                                   </div>
                                 </div>
@@ -1629,7 +1651,7 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                           <button
                             type="button"
                             onClick={addAnotherRoom}
-                            className="w-full py-3 rounded-2xl border-2 border-dashed border-slate-200 text-slate-500 font-bold hover:bg-blue-50/20 hover:border-blue-600 hover:text-blue-600 transition-all flex items-center justify-center gap-2 text-xs cursor-pointer"
+                            className="w-full py-2.5 rounded-xl border-2 border-dashed border-slate-200 text-slate-455 hover:text-blue-600 hover:border-blue-600 font-bold transition-all flex items-center justify-center gap-1.5 text-xs cursor-pointer bg-white"
                           >
                             <Plus size={14} className="stroke-[3]" />
                             <span>Add Another Room</span>
@@ -1638,11 +1660,11 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                       </div>
                     )}
 
-                    {/* Stay Locations & Dates */}
-                    <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
-                      <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
-                        <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
-                        Itinerary & Destinations
+                    {/* Itinerary & Destinations */}
+                    <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4">
+                      <h3 className="text-xs font-black text-slate-800 flex items-center gap-2 uppercase tracking-wider">
+                        <MapPin size={16} className="text-blue-600" />
+                        <span>Itinerary & Destinations</span>
                       </h3>
 
                       <div className="space-y-4 relative">
@@ -1651,13 +1673,14 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                         )}
 
                         {itineraryList.map((item, index) => (
-                          <div key={item.id} className="relative z-10 bg-slate-50/50 p-4.5 rounded-2xl border border-slate-150 flex flex-col md:flex-row gap-4 items-start">
-                            <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-md shadow-blue-100">
+                          <div key={item.id} className="relative z-10 bg-slate-50/50 p-4.5 rounded-xl border border-slate-200 flex flex-col md:flex-row gap-4 items-start">
+                            <div className="w-8 h-8 rounded-full bg-blue-650 text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-sm">
                               {index + 1}
                             </div>
-                            <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+                            
+                            <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 w-full text-xs font-bold text-slate-700">
                               <div>
-                                <label className="text-[9px] font-extrabold text-slate-455 uppercase block mb-1">Destination Location</label>
+                                <label className="text-slate-500 block mb-1">Location / Destination</label>
                                 <div className="relative">
                                   <MapPin size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                                   <input
@@ -1666,37 +1689,37 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                                     value={item.destination}
                                     onChange={(e) => updateItineraryItem(item.id, 'destination', e.target.value)}
                                     placeholder="e.g. Manali, Himachal"
-                                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
                                   />
                                 </div>
                               </div>
 
                               <div>
-                                <label className="text-[9px] font-extrabold text-slate-455 uppercase block mb-1">Check-in Date</label>
+                                <label className="text-slate-500 block mb-1">Check-in Date</label>
                                 <input
                                   type="date"
                                   required
                                   value={item.checkInDate}
                                   onChange={(e) => updateItineraryItem(item.id, 'checkInDate', e.target.value)}
-                                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
                                 />
                               </div>
 
                               <div>
-                                <label className="text-[9px] font-extrabold text-slate-455 uppercase block mb-1">Check-out Date</label>
+                                <label className="text-slate-500 block mb-1">Check-out Date</label>
                                 <div className="flex items-center gap-2">
                                   <input
                                     type="date"
                                     required
                                     value={item.checkOutDate}
                                     onChange={(e) => updateItineraryItem(item.id, 'checkOutDate', e.target.value)}
-                                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
                                   />
                                   {itineraryList.length > 1 && (
                                     <button
                                       type="button"
                                       onClick={() => deleteItineraryItem(item.id)}
-                                      className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer shrink-0 border border-slate-150"
+                                      className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer shrink-0 border border-slate-200 bg-white"
                                     >
                                       <Trash2 size={13} />
                                     </button>
@@ -1706,17 +1729,18 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                             </div>
                           </div>
                         ))}
-
-                        <button
-                          type="button"
-                          onClick={addAnotherItineraryItem}
-                          className="w-full py-3 rounded-2xl border-2 border-dashed border-slate-200 text-slate-500 font-bold hover:bg-blue-50/20 hover:border-blue-600 hover:text-blue-600 transition-all flex items-center justify-center gap-2 text-xs cursor-pointer"
-                        >
-                          <MapPin size={14} />
-                          <span>Add Another Location</span>
-                        </button>
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={addAnotherItineraryItem}
+                        className="w-full py-2.5 rounded-xl border-2 border-dashed border-slate-200 text-slate-455 hover:text-blue-600 hover:border-blue-600 font-bold transition-all flex items-center justify-center gap-1.5 text-xs cursor-pointer bg-white"
+                      >
+                        <Plus size={14} className="stroke-[3]" />
+                        <span>Add Another Location</span>
+                      </button>
                     </div>
+
                   </motion.div>
                 )}
 
@@ -2239,57 +2263,65 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
               <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-24">
                 
                 {/* Booking Summary Card */}
-                <div className="bg-blue-600 rounded-3xl p-6 text-white shadow-lg shadow-blue-200 relative overflow-hidden">
+                <div className="bg-blue-600 rounded-2xl p-6 text-white shadow-md relative overflow-hidden">
                   <div className="absolute -right-8 -bottom-8 opacity-10">
                     <Compass size={160} />
                   </div>
-                  <h4 className="text-sm font-black mb-6 flex items-center justify-between">
-                    Booking Summary
-                    <Info size={16} className="opacity-60" />
+                  <h4 className="text-xs font-black uppercase tracking-wider mb-6 flex items-center justify-between">
+                    <span>Booking Summary</span>
+                    <Info size={15} className="opacity-60" />
                   </h4>
-                  <div className="space-y-4 relative z-10 text-xs">
+                  
+                  <div className="space-y-3.5 relative z-10 text-xs">
                     <div className="flex justify-between items-center p-3 bg-white/10 rounded-xl backdrop-blur-sm">
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex items-center gap-2">
                         <Users size={14} className="text-white/80" />
-                        <span className="font-semibold">Total Guests</span>
+                        <span className="font-bold">Total Guests</span>
                       </div>
-                      <span className="font-bold">{formData.guests?.total || 0} Pax</span>
+                      <span className="font-extrabold">{String(formData.guests?.total || 0).padStart(2, '0')} Pax</span>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                       <div className="p-3 bg-white/10 rounded-xl backdrop-blur-sm">
-                        <p className="text-[9px] uppercase opacity-70 font-bold mb-0.5">Adults</p>
-                        <p className="text-base font-bold">{formData.guests?.adults || 0}</p>
+                        <p className="text-[9px] uppercase opacity-70 font-black mb-0.5">Adults</p>
+                        <p className="text-base font-black">{String(formData.guests?.adults || 0).padStart(2, '0')}</p>
                       </div>
                       <div className="p-3 bg-white/10 rounded-xl backdrop-blur-sm">
-                        <p className="text-[9px] uppercase opacity-70 font-bold mb-0.5">Children</p>
-                        <p className="text-base font-bold">{formData.guests?.children || 0}</p>
+                        <p className="text-[9px] uppercase opacity-70 font-black mb-0.5">Children</p>
+                        <p className="text-base font-black">{String(formData.guests?.children || 0).padStart(2, '0')}</p>
                       </div>
                     </div>
 
                     <div className="flex justify-between items-center p-3 bg-white/10 rounded-xl backdrop-blur-sm">
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex items-center gap-2">
                         <Bed size={14} className="text-white/80" />
-                        <span className="font-semibold">Rooms Booked</span>
+                        <span className="font-bold">Rooms Booked</span>
                       </div>
-                      <span className="font-bold">{roomsList.length} Units</span>
+                      <span className="font-extrabold">{String(roomsList.length).padStart(2, '0')} Units</span>
                     </div>
 
                     <div className="flex justify-between items-center p-3 bg-white/10 rounded-xl backdrop-blur-sm">
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex items-center gap-2">
                         <MapPin size={14} className="text-white/80" />
-                        <span className="font-semibold">Destinations</span>
+                        <span className="font-bold">Destinations</span>
                       </div>
-                      <span className="font-bold truncate max-w-[120px] text-right">
-                        {itineraryList.map(i => i.destination).filter(Boolean).join(', ') || '0 Cities'}
+                      <span className="font-extrabold truncate max-w-[120px] text-right">
+                        {String(itineraryList.map(i => i.destination).filter(Boolean).length).padStart(2, '0')} Cities
                       </span>
                     </div>
+                  </div>
+
+                  <div className="border-t border-white/20 mt-4.5 pt-4 text-center">
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-white/70 uppercase tracking-widest">
+                      <CheckCircle2 size={12} className="text-white/80" />
+                      Draft saved automatically
+                    </span>
                   </div>
                 </div>
 
                 {/* Property Highlights */}
-                <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm space-y-4">
-                  <h5 className="text-[10px] font-black text-slate-800 uppercase tracking-wider">Property Highlights</h5>
+                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
+                  <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Property Highlights</h5>
                   
                   {formData.propertyDetails?.propertyId ? (
                     <div className="space-y-3">
@@ -2303,25 +2335,25 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                           <p className="text-[10px] text-blue-600 font-bold mt-1">₹{formData.pricing?.bookingAmount?.toLocaleString()} Base Cost</p>
                         </div>
                       </div>
-                      <p className="text-[10px] text-slate-450 leading-relaxed italic bg-slate-50 p-2.5 rounded-xl border border-slate-150">
+                      <p className="text-[10px] text-slate-455 leading-relaxed italic bg-slate-50 p-2.5 rounded-xl border border-slate-150">
                         "Selected standard rate package. Automatic 12% GST invoice will generate on final checkout receipt."
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      <div className="flex gap-3">
+                    <div className="space-y-3 text-xs font-semibold text-slate-700">
+                      <div className="flex gap-3 items-center">
                         <img 
-                          className="w-16 h-16 rounded-xl object-cover shrink-0" 
-                          src="https://lh3.googleusercontent.com/aida-public/AB6AXuDqP4nUGqIAjXJothJVyEsiekA_F1pu9ggEWxNbK0WjZn3Q5W-N4U-873jYB7EMNk-hfEMT_IdyJ5JEJubS2oMrNsQ8YsSotMLFSAGyooVu6w_ZRHe00zAhNWx-5EKK4SlYRj4EKImNmmf4bJNwB5LJ_04M-GdeK3x6eMXHQAlbL6Yh67xt956-WZDRO3M-aBLXx0b0od-pdLrBMlZlpQ4C6hd5gD1VgLloNBwHJaLf2sTO9Bmtcs8jEhqfwsZB-JO4T6-17087JXE"
+                          className="w-14 h-14 rounded-xl object-cover shrink-0 bg-slate-50" 
+                          src="https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=120"
                           alt="Luxury Mountain Villa"
                         />
                         <div>
-                          <p className="text-xs font-black text-slate-850 font-sans">Luxury Mountain Villa</p>
-                          <p className="text-[10px] text-slate-400 font-semibold">4.8 ★ Premium Selection</p>
-                          <p className="text-[10px] text-blue-600 font-bold mt-1">₹12,500 / night</p>
+                          <p className="font-extrabold text-slate-805 font-sans leading-none">Luxury Mountain Villa</p>
+                          <p className="text-[10px] text-slate-400 font-extrabold mt-1">4.8 ★ Premium Selection</p>
+                          <p className="text-[10px] text-blue-600 font-black mt-1">₹12,500 / night</p>
                         </div>
                       </div>
-                      <p className="text-[10px] text-slate-450 leading-relaxed italic bg-slate-50 p-2.5 rounded-xl border border-slate-150">
+                      <p className="text-[10px] text-slate-455 leading-relaxed italic bg-slate-50 p-2.5 rounded-xl border border-slate-150">
                         "Perfect for large families, includes breakfast and guided trekking tours."
                       </p>
                     </div>
@@ -2329,7 +2361,6 @@ REFUNDED AMOUNT: INR ${booking.pricing?.refundAmount || 0}
                 </div>
 
               </div>
-
             </div>
 
             {/* Sticky Actions Footer */}

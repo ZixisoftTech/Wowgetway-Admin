@@ -16,6 +16,8 @@ import {
   ArrowRight,
   Check, 
   User, 
+  Users,
+  Bed,
   MapPin, 
   X,
   FileText,
@@ -224,7 +226,22 @@ export default function ManageHomestays() {
       { seasonName: 'Off Season', fromDate: '', toDate: '' }
     ],
     rooms: [
-      { roomType: 'Standard', totalRooms: 1, extraPersonAllowed: 1, roomNumbers: [], photos: [], description: '' }
+      { 
+        roomType: 'Deluxe Room', 
+        totalRooms: 4, 
+        totalOccupancy: 8,
+        roomNumbers: ['102', '103', '104', '105'], 
+        extraPersonAllowedActive: true,
+        extraPersonCapacity: '2 Extra Persons',
+        extraPersonPrice: 50,
+        photos: [
+          'https://images.unsplash.com/photo-1590490360182-c33d57733427?w=600',
+          'https://images.unsplash.com/photo-1566665797739-1674de7a421a?w=600',
+          'https://images.unsplash.com/photo-1591088398332-8a7791972843?w=600',
+          'https://images.unsplash.com/photo-1582719478250-c89cae4db85b?w=600'
+        ], 
+        description: 'Our Deluxe Room offers a perfect blend of comfort and nature. Enjoy beautiful mountain views, cozy interiors, and modern amenities for a relaxing stay. Ideal for couples and small families.' 
+      }
     ],
     rates: [],
     status: 'Draft',
@@ -283,19 +300,108 @@ export default function ManageHomestays() {
   const handleRoomChange = (index, field, value) => {
     setFormData(prev => {
       const updatedRooms = [...prev.rooms];
-      if (field === 'roomNumbers') {
-        const nums = value.split(',').map(s => s.trim()).filter(Boolean);
-        updatedRooms[index] = {
-          ...updatedRooms[index],
-          roomNumbers: nums,
-          totalRooms: nums.length
-        };
-      } else {
-        updatedRooms[index] = {
-          ...updatedRooms[index],
-          [field]: field === 'extraPersonAllowed' || field === 'totalRooms' ? Number(value) || 0 : value
-        };
+      updatedRooms[index] = {
+        ...updatedRooms[index],
+        [field]: field === 'extraPersonAllowed' || field === 'totalRooms' || field === 'totalOccupancy' || field === 'extraPersonPrice'
+          ? Number(value) || 0
+          : value
+      };
+      return { ...prev, rooms: updatedRooms };
+    });
+  };
+
+  const handleTotalRoomsChange = (roomIdx, value) => {
+    const val = Math.max(0, parseInt(value) || 0);
+    setFormData(prev => {
+      const updatedRooms = [...prev.rooms];
+      const currentNumbers = [...(updatedRooms[roomIdx].roomNumbers || [])];
+      
+      if (val > currentNumbers.length) {
+        for (let i = currentNumbers.length; i < val; i++) {
+          currentNumbers.push((101 + i).toString());
+        }
+      } else if (val < currentNumbers.length) {
+        currentNumbers.splice(val);
       }
+      
+      updatedRooms[roomIdx] = {
+        ...updatedRooms[roomIdx],
+        totalRooms: val,
+        roomNumbers: currentNumbers
+      };
+      return { ...prev, rooms: updatedRooms };
+    });
+  };
+
+  const handleRoomNumberChange = (roomIdx, numIdx, value) => {
+    setFormData(prev => {
+      const updatedRooms = [...prev.rooms];
+      const currentNumbers = [...(updatedRooms[roomIdx].roomNumbers || [])];
+      currentNumbers[numIdx] = value;
+      updatedRooms[roomIdx] = {
+        ...updatedRooms[roomIdx],
+        roomNumbers: currentNumbers
+      };
+      return { ...prev, rooms: updatedRooms };
+    });
+  };
+
+  const addRoomNumber = (roomIdx) => {
+    setFormData(prev => {
+      const updatedRooms = [...prev.rooms];
+      const currentNumbers = [...(updatedRooms[roomIdx].roomNumbers || [])];
+      currentNumbers.push((101 + currentNumbers.length).toString());
+      updatedRooms[roomIdx] = {
+        ...updatedRooms[roomIdx],
+        totalRooms: currentNumbers.length,
+        roomNumbers: currentNumbers
+      };
+      return { ...prev, rooms: updatedRooms };
+    });
+  };
+
+  const toggleExtraPerson = (roomIdx) => {
+    setFormData(prev => {
+      const updatedRooms = [...prev.rooms];
+      updatedRooms[roomIdx] = {
+        ...updatedRooms[roomIdx],
+        extraPersonAllowedActive: !updatedRooms[roomIdx].extraPersonAllowedActive
+      };
+      return { ...prev, rooms: updatedRooms };
+    });
+  };
+
+  const addRoomPhoto = (roomIdx) => {
+    const mockRoomPhotos = [
+      'https://images.unsplash.com/photo-1590490360182-c33d57733427?w=600',
+      'https://images.unsplash.com/photo-1566665797739-1674de7a421a?w=600',
+      'https://images.unsplash.com/photo-1591088398332-8a7791972843?w=600',
+      'https://images.unsplash.com/photo-1582719478250-c89cae4db85b?w=600',
+      'https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=600'
+    ];
+    const randomPhoto = mockRoomPhotos[Math.floor(Math.random() * mockRoomPhotos.length)];
+    setFormData(prev => {
+      const updatedRooms = [...prev.rooms];
+      const currentPhotos = [...(updatedRooms[roomIdx].photos || [])];
+      if (currentPhotos.length < 10) {
+        currentPhotos.push(randomPhoto);
+      }
+      updatedRooms[roomIdx] = {
+        ...updatedRooms[roomIdx],
+        photos: currentPhotos
+      };
+      return { ...prev, rooms: updatedRooms };
+    });
+  };
+
+  const removeRoomPhoto = (roomIdx, photoIdx) => {
+    setFormData(prev => {
+      const updatedRooms = [...prev.rooms];
+      const currentPhotos = (updatedRooms[roomIdx].photos || []).filter((_, i) => i !== photoIdx);
+      updatedRooms[roomIdx] = {
+        ...updatedRooms[roomIdx],
+        photos: currentPhotos
+      };
       return { ...prev, rooms: updatedRooms };
     });
   };
@@ -303,7 +409,17 @@ export default function ManageHomestays() {
   const addRoomCategory = () => {
     setFormData(prev => ({
       ...prev,
-      rooms: [...prev.rooms, { roomType: 'Standard', totalRooms: 1, extraPersonAllowed: 1, roomNumbers: [], photos: [], description: '' }]
+      rooms: [...prev.rooms, { 
+        roomType: 'Standard', 
+        totalRooms: 2, 
+        totalOccupancy: 4, 
+        roomNumbers: ['201', '202'], 
+        extraPersonAllowedActive: false,
+        extraPersonCapacity: '2 Extra Persons',
+        extraPersonPrice: 0,
+        photos: [], 
+        description: '' 
+      }]
     }));
   };
 
@@ -1351,95 +1467,219 @@ export default function ManageHomestays() {
 
             {/* Step 5: Rooms management */}
             {wizardStep === 5 && (
-              <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4 max-w-4xl mx-auto">
-                <div className="flex justify-between items-center border-b border-slate-50 pb-3">
-                  <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
-                    <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
-                    Room Categories & Inventory Setup
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={addRoomCategory}
-                    className="flex items-center gap-1 text-[11px] font-black text-blue-650 hover:underline cursor-pointer"
-                  >
-                    <Plus size={12} className="stroke-[2.5]" /> Add Category Class
-                  </button>
-                </div>
+              <div className="space-y-6 max-w-4xl mx-auto">
+                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-4">
+                    <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                      <span className="w-1.5 h-3.5 bg-blue-600 rounded-full"></span>
+                      Room Categories & Inventory Setup
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={addRoomCategory}
+                      className="flex items-center gap-1 text-[11px] font-black text-blue-600 hover:text-blue-700 cursor-pointer"
+                    >
+                      <Plus size={12} className="stroke-[2.5]" /> Add Category Class
+                    </button>
+                  </div>
 
-                <div className="space-y-4 max-h-[380px] overflow-y-auto pr-1">
-                  {formData.rooms.map((room, idx) => (
-                    <div key={idx} className="p-4 bg-slate-50 border border-slate-150 rounded-2xl space-y-3 relative">
-                      
-                      {/* Delete class */}
-                      {formData.rooms.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeRoomCategory(idx)}
-                          className="absolute top-4 right-4 text-red-500 hover:text-red-700 cursor-pointer"
-                          title="Delete room category class"
-                        >
-                          <X size={15} />
-                        </button>
-                      )}
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div>
-                          <label className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block mb-1">Room Class / Type *</label>
-                          <select
-                            value={room.roomType}
-                            onChange={(e) => handleRoomChange(idx, 'roomType', e.target.value)}
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                  <div className="space-y-6">
+                    {formData.rooms.map((room, idx) => (
+                      <div key={idx} className="p-6 bg-slate-50/50 border border-slate-200/60 rounded-2xl space-y-5 relative animate-fade-in">
+                        
+                        {/* Delete Class Button */}
+                        {formData.rooms.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeRoomCategory(idx)}
+                            className="absolute top-6 right-6 text-slate-400 hover:text-red-500 cursor-pointer transition-colors p-1"
+                            title="Delete room category class"
                           >
-                            <option value="Standard">Standard</option>
-                            <option value="Deluxe">Deluxe</option>
-                            <option value="Super Deluxe">Super Deluxe</option>
-                            <option value="Premium">Premium</option>
-                            <option value="Family Suite">Family Suite</option>
-                          </select>
+                            <X size={16} />
+                          </button>
+                        )}
+
+                        {/* First Row of Fields */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">Room Class / Type *</label>
+                            <select
+                              value={room.roomType}
+                              onChange={(e) => handleRoomChange(idx, 'roomType', e.target.value)}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-500 transition-all shadow-sm"
+                            >
+                              <option value="Deluxe Room">Deluxe Room</option>
+                              <option value="Standard Room">Standard Room</option>
+                              <option value="Super Deluxe Room">Super Deluxe Room</option>
+                              <option value="Premium Room">Premium Room</option>
+                              <option value="Executive Suite">Executive Suite</option>
+                              <option value="Family Cabin">Family Cabin</option>
+                              <option value="Luxury Villa">Luxury Villa</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">Total Number of Rooms *</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={room.totalRooms || 0}
+                              onChange={(e) => handleTotalRoomsChange(idx, e.target.value)}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-500 transition-all shadow-sm"
+                            />
+                            <span className="text-[9px] text-slate-400 mt-1 block">Total units available under this category</span>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">Total Occupancy *</label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={room.totalOccupancy || 0}
+                              onChange={(e) => handleRoomChange(idx, 'totalOccupancy', e.target.value)}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-500 transition-all shadow-sm"
+                            />
+                            <span className="text-[9px] text-slate-400 mt-1 block">Maximum guests allowed in all rooms combined</span>
+                          </div>
                         </div>
 
-                        <div>
-                          <label className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block mb-1">Extra Guests Permitted</label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={room.extraPersonAllowed}
-                            onChange={(e) => handleRoomChange(idx, 'extraPersonAllowed', e.target.value)}
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                        {/* Room Numbers Section */}
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Room Numbers</label>
+                          <span className="text-[10px] text-slate-450 block mt-0.5 font-medium">Enter specific identifiers for each individual unit.</span>
+                          
+                          <div className="flex flex-wrap items-center gap-3 mt-2">
+                            {(room.roomNumbers || []).map((num, numIdx) => (
+                              <div key={numIdx} className="bg-white border border-slate-200/80 px-3 py-2 rounded-xl flex flex-col gap-0.5 shadow-sm min-w-[80px]">
+                                <span className="text-[8px] font-bold text-slate-400 uppercase">Room {numIdx + 1}</span>
+                                <input
+                                  type="text"
+                                  value={num}
+                                  onChange={(e) => handleRoomNumberChange(idx, numIdx, e.target.value)}
+                                  className="w-full text-xs font-bold text-slate-750 focus:outline-none bg-transparent"
+                                />
+                              </div>
+                            ))}
+
+                            {/* Dotted Plus Button */}
+                            <button
+                              type="button"
+                              onClick={() => addRoomNumber(idx)}
+                              className="w-12 h-12 border-2 border-dashed border-slate-200 hover:border-blue-500 rounded-xl flex items-center justify-center text-slate-400 hover:text-blue-500 transition-all cursor-pointer bg-white"
+                            >
+                              <Plus size={16} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Extra Person Allowance Sub-Card */}
+                        <div className="bg-white border border-slate-200/60 rounded-2xl p-4 shadow-sm space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-slate-750">
+                              <Users size={16} className="text-rose-500" />
+                              <span className="text-xs font-bold">Extra Person Allowance</span>
+                            </div>
+                            
+                            {/* Toggle Switch */}
+                            <button
+                              type="button"
+                              onClick={() => toggleExtraPerson(idx)}
+                              className={`w-10 h-5 rounded-full p-0.5 transition-colors duration-200 focus:outline-none cursor-pointer flex ${
+                                room.extraPersonAllowedActive ? 'bg-rose-500 justify-end' : 'bg-slate-200 justify-start'
+                              }`}
+                            >
+                              <motion.span layout className="w-4 h-4 bg-white rounded-full shadow-sm" />
+                            </button>
+                          </div>
+
+                          {room.extraPersonAllowedActive && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-50 animate-fade-in">
+                              <div>
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">Capacity per room</label>
+                                <select
+                                  value={room.extraPersonCapacity || '2 Extra Persons'}
+                                  onChange={(e) => handleRoomChange(idx, 'extraPersonCapacity', e.target.value)}
+                                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-750 focus:outline-none focus:bg-white transition-all shadow-sm"
+                                >
+                                  <option value="1 Extra Person">1 Extra Person</option>
+                                  <option value="2 Extra Persons">2 Extra Persons</option>
+                                  <option value="3 Extra Persons">3 Extra Persons</option>
+                                  <option value="4 Extra Persons">4 Extra Persons</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">Price per extra person</label>
+                                <div className="relative">
+                                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-xs font-bold text-slate-450 font-mono">₹</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={room.extraPersonPrice || 0}
+                                    onChange={(e) => handleRoomChange(idx, 'extraPersonPrice', e.target.value)}
+                                    className="w-full pl-6 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-750 focus:outline-none focus:bg-white transition-all shadow-sm"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Room Gallery */}
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Room Gallery</label>
+                          <span className="text-[10px] text-slate-450 block mt-0.5 font-medium">Upload high-quality images (up to 10). Recommended size 1200x800px.</span>
+                          
+                          <div className="flex flex-wrap items-center gap-3 mt-2">
+                            {(room.photos || []).map((img, imgIdx) => (
+                              <div key={imgIdx} className="relative w-20 h-16 rounded-xl overflow-hidden border border-slate-200 group shadow-sm flex-shrink-0">
+                                <img src={img} alt="Room" className="w-full h-full object-cover" />
+                                <button
+                                  type="button"
+                                  onClick={() => removeRoomPhoto(idx, imgIdx)}
+                                  className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white cursor-pointer"
+                                >
+                                  <X size={14} className="stroke-[2.5]" />
+                                </button>
+                              </div>
+                            ))}
+
+                            {/* Dotted Plus Photo Button */}
+                            <button
+                              type="button"
+                              onClick={() => addRoomPhoto(idx)}
+                              className="w-20 h-16 border-2 border-dashed border-slate-200 hover:border-blue-500 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:text-blue-500 transition-all cursor-pointer bg-white"
+                            >
+                              <Plus size={14} />
+                              <span className="text-[8px] font-bold uppercase mt-1">Add Photos</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Room Description */}
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Room Description</label>
+                          <textarea
+                            maxLength={500}
+                            value={room.description || ''}
+                            onChange={(e) => handleRoomChange(idx, 'description', e.target.value)}
+                            placeholder="Our Deluxe Room offers a perfect blend of comfort..."
+                            className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-semibold text-slate-755 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-100 transition-all min-h-[80px]"
                           />
+                          <div className="text-right text-[9px] font-bold text-slate-400 tracking-wider">
+                            {(room.description || '').length}/500 characters
+                          </div>
                         </div>
 
-                        <div>
-                          <label className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block mb-1">Room Numbers * (Comma Separated)</label>
-                          <input
-                            type="text"
-                            value={room.roomNumbers.join(', ')}
-                            onChange={(e) => handleRoomChange(idx, 'roomNumbers', e.target.value)}
-                            placeholder="e.g. 101, 102, 103"
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none"
-                          />
-                          <span className="text-[9px] font-bold text-slate-450 mt-1 block">Total Configured: {room.totalRooms} rooms</span>
-                        </div>
                       </div>
+                    ))}
 
-                      <div>
-                        <label className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block mb-1">Room Category Description</label>
-                        <input
-                          type="text"
-                          value={room.description}
-                          onChange={(e) => handleRoomChange(idx, 'description', e.target.value)}
-                          placeholder="e.g. Front lawn view, wooden interior..."
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none"
-                        />
+                    {formData.rooms.length === 0 && (
+                      <div className="text-center py-12 text-slate-400">
+                        Please configure at least one room category.
                       </div>
-                    </div>
-                  ))}
-
-                  {formData.rooms.length === 0 && (
-                    <div className="text-center py-12 text-slate-400">
-                      Please configure at least one room category.
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
             )}

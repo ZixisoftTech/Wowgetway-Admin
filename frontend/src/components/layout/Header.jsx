@@ -19,7 +19,7 @@ export default function Header() {
   };
 
   return (
-    <header className="sticky top-0 bg-slate-50/80 backdrop-blur-md border-b border-slate-100 z-10 py-4 px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center select-none">
+    <header className="sticky top-0 bg-slate-50/80 backdrop-blur-md border-b border-slate-100 z-20 py-4 px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center select-none">
       {/* Welcome Title */}
       <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
         <div className="flex items-center gap-3">

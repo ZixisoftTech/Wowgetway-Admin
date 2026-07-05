@@ -323,7 +323,19 @@ const handlers = {
         const salaries = getDB('wow_salaries');
         const item = salaries.find(s => s._id === params.id);
         if (!item) return { status: 404, data: { error: 'Salary record not found' } };
-        return item;
+        
+        const employees = getDB('wow_employees');
+        const emp = employees.find(e => e._id === item.employeeId);
+        return {
+          ...item,
+          employee: emp || {
+            _id: item.employeeId,
+            firstName: 'Unknown',
+            lastName: 'Staff',
+            role: 'Staff',
+            avatar: ''
+          }
+        };
       }
     },
 

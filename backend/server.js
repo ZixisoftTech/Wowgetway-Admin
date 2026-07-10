@@ -45,6 +45,20 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Ensure database connection is active (needed for Serverless restarts/standbys)
+app.use(async (req, res, next) => {
+  if (mongoose.connection.readyState === 0 || mongoose.connection.readyState === 2) {
+    try {
+      console.log('[Database Middleware] Connecting/Reconnecting to MongoDB Atlas...');
+      await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 8000 });
+      console.log('[Database Middleware] Connection established successfully!');
+    } catch (err) {
+      console.warn('[Database Middleware] Connection failed:', err.message);
+    }
+  }
+  next();
+});
+
 // Log incoming requests
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
@@ -52,7 +66,8 @@ app.use((req, res, next) => {
 });
 
 // Serve uploaded files statically
-app.use('/uploads', express.static('uploads'));
+const uploadDir = process.env.VERCEL ? '/tmp/uploads' : 'uploads';
+app.use('/uploads', express.static(uploadDir));
 
 // Setup api routes
 app.use('/api/dashboard', dashboardRouter);
@@ -63,21 +78,11 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected/fallback_mode',
+    readyState: mongoose.connection.readyState,
     uptime: process.uptime()
   });
 });
 
-// Connect to database asynchronously so that the app still boots if local MongoDB is down
-console.log('Attempting to connect to MongoDB...');
-mongoose.connect(MONGO_URI, {
-  serverSelectionTimeoutMS: 3000 // Timeout fast so we can run on fallback
-})
-.then(() => {
-  console.log('Success: Connected to MongoDB.');
-})
-.catch((err) => {
-  console.warn('Warning: Could not connect to MongoDB. Server is starting in MEMORY FALLBACK mode.', err.message);
-});
 
 // Global error handler
 app.use((err, req, res, next) => {

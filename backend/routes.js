@@ -2742,13 +2742,20 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 
+// Helper to resolve writable directory dynamically (use /tmp/uploads on Vercel)
+const getUploadDir = (subDir = '') => {
+  const base = process.env.VERCEL ? '/tmp/uploads' : './uploads';
+  const dir = subDir ? path.join(base, subDir) : base;
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+};
+
 // Multer storage setup for JPG, PNG, PDF document uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const dir = './uploads';
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+    const dir = getUploadDir();
     cb(null, dir);
   },
   filename: function (req, file, cb) {
@@ -8599,10 +8606,7 @@ router.post('/admin/upload', authenticateToken, upload.single('file'), (req, res
 
 const settingsStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const dir = 'uploads/settings';
-    if (!fs.existsSync(dir)){
-      fs.mkdirSync(dir, { recursive: true });
-    }
+    const dir = getUploadDir('settings');
     cb(null, dir);
   },
   filename: function (req, file, cb) {
@@ -10148,10 +10152,7 @@ let mockPropertyAuditLogsDatabase = [];
 // Custom Multer Instance for Properties Image upload
 const propertyStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const dir = 'uploads/properties';
-    if (!fs.existsSync(dir)){
-      fs.mkdirSync(dir, { recursive: true });
-    }
+    const dir = getUploadDir('properties');
     cb(null, dir);
   },
   filename: function (req, file, cb) {

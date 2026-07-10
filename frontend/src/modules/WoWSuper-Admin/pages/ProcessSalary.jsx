@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { ArrowLeft, Save, IndianRupee, AlertCircle, Search, CheckCircle2 } from 'lucide-react';
 
-const API_SALARIES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/salaries';
+const API_SALARIES_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/salaries';
 
 export default function ProcessSalary({ onCancel, selectedSalaryId, employeesList }) {
   const queryClient = useQueryClient();

@@ -26,8 +26,8 @@ import {
 import ProcessSalary from './ProcessSalary.jsx';
 import SalaryDetails from './SalaryDetails.jsx';
 
-const API_SALARIES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/salaries';
-const API_EMPLOYEES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/employees-list';
+const API_SALARIES_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/salaries';
+const API_EMPLOYEES_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/employees-list';
 
 export default function SalaryManagement() {
   const queryClient = useQueryClient();

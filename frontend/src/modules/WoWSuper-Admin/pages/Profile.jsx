@@ -30,7 +30,7 @@ export default function Profile() {
   const reduxUser = useSelector((state) => state.superAdminAuth.user);
 
   const getApiUrl = (path) => {
-    const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://wow-getway-api.onrender.com';
+    const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
     return `${base}${path}`;
   };
   
@@ -85,7 +85,7 @@ export default function Profile() {
       
       let fileUrl = res.data.fileUrl;
       if (fileUrl.startsWith('/')) {
-        const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://wow-getway-api.onrender.com';
+        const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
         fileUrl = `${base}${fileUrl}`;
       }
       setProfilePhoto(fileUrl);

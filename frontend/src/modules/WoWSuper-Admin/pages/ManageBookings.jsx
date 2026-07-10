@@ -45,8 +45,8 @@ import {
 } from 'lucide-react';
 import MetricCard from '../components/widgets/MetricCard.jsx';
 
-const API_BOOKINGS_URL = 'https://wow-getway-api.onrender.com/api/dashboard/bookings-list';
-const API_HOMESTAYS_URL = 'https://wow-getway-api.onrender.com/api/dashboard/homestays-list';
+const API_BOOKINGS_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/bookings-list';
+const API_HOMESTAYS_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/homestays-list';
 
 export default function ManageBookings() {
   const queryClient = useQueryClient();

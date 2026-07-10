@@ -39,7 +39,7 @@ import {
 import MetricCard from '../components/widgets/MetricCard.jsx';
 
 const getApiUrl = (path) => {
-  const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://wow-getway-api.onrender.com';
+  const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
   return `${base}${path}`;
 };
 

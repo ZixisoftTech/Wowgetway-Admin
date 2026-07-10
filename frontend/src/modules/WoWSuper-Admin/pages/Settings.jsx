@@ -79,7 +79,7 @@ export default function Settings() {
   const [editingCityStatus, setEditingCityStatus] = useState('Active');
 
   const getApiUrl = (path) => {
-    const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://wow-getway-api.onrender.com';
+    const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
     return `${base}${path}`;
   };
 
@@ -397,7 +397,7 @@ export default function Settings() {
     setSmtpLoading(true);
     setSmtpError('');
     try {
-      const res = await axios.get('https://wow-getway-api.onrender.com/api/admin/settings/smtp');
+      const res = await axios.get(getApiUrl('/api/admin/settings/smtp'));
       setSmtpHost(res.data.host);
       setSmtpPort(res.data.port);
       setSmtpEmail(res.data.email);
@@ -427,7 +427,7 @@ export default function Settings() {
     if (activeTab === 'SMTP') {
       setSmtpLoading(true);
       try {
-        await axios.put('https://wow-getway-api.onrender.com/api/admin/settings/smtp', {
+        await axios.put(getApiUrl('/api/admin/settings/smtp'), {
           host: smtpHost,
           port: smtpPort,
           email: smtpEmail,
@@ -462,7 +462,7 @@ export default function Settings() {
 
     setTestLoading(true);
     try {
-      const res = await axios.post('https://wow-getway-api.onrender.com/api/admin/settings/smtp/test-email', {
+      const res = await axios.post(getApiUrl('/api/admin/settings/smtp/test-email'), {
         recipientEmail: testRecipient
       });
       setTestSuccess(res.data.message || 'Test email dispatched successfully!');

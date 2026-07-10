@@ -22,13 +22,13 @@ import {
 } from 'lucide-react';
 
 const getApiUrl = (path) => {
-  const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://wow-getway-api.onrender.com';
+  const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
   return `${base}${path}`;
 };
 
 const getImageUrl = (path) => {
   if (!path) return 'https://images.unsplash.com/photo-1542718610-a1d656d1884c?auto=format&fit=crop&w=400&q=80';
-  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return path;
   return getApiUrl(path);
 };
 

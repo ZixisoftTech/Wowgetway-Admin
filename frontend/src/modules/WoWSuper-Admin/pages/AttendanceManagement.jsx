@@ -19,7 +19,7 @@ import {
   Briefcase
 } from 'lucide-react';
 
-const API_ATTENDANCE_URL = 'https://wow-getway-api.onrender.com/api/dashboard/attendance';
+const API_ATTENDANCE_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/attendance';
 
 export default function AttendanceManagement() {
   const queryClient = useQueryClient();

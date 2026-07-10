@@ -22,7 +22,7 @@ import {
   clearError 
 } from '../store/homestayOwnerAuthSlice.js';
 
-const API_AUTH_URL = 'https://wow-getway-api.onrender.com/api/homestay-owner/auth';
+const API_AUTH_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/homestay-owner/auth';
 
 export default function Login() {
   const dispatch = useDispatch();

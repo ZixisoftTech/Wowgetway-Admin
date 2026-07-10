@@ -2752,6 +2752,28 @@ const getUploadDir = (subDir = '') => {
   return dir;
 };
 
+// Convert uploaded file to base64 Data URL dynamically and clean up disk file
+const getFileDataUrl = (file) => {
+  if (!file) return '';
+  try {
+    if (file.buffer) {
+      return `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    }
+    if (file.path && fs.existsSync(file.path)) {
+      const data = fs.readFileSync(file.path);
+      const base64 = data.toString('base64');
+      const mime = file.mimetype || 'image/png';
+      try {
+        fs.unlinkSync(file.path);
+      } catch (err) {}
+      return `data:${mime};base64,base64,${base64}`.replace('base64,base64,', 'base64,');
+    }
+  } catch (err) {
+    console.error('Error generating data URL:', err.message);
+  }
+  return '';
+};
+
 // Multer storage setup for JPG, PNG, PDF document uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -8597,7 +8619,7 @@ router.post('/admin/upload', authenticateToken, upload.single('file'), (req, res
   if (!req.file) {
     return res.status(400).json({ error: 'NoFileUploaded', message: 'No file was uploaded.' });
   }
-  const fileUrl = `/uploads/${req.file.filename}`;
+  const fileUrl = getFileDataUrl(req.file);
   res.json({ fileUrl });
 });
 
@@ -9252,7 +9274,7 @@ router.post('/admin/settings/states', authenticateToken, uploadSettings.single('
 
   let stateImage = '';
   if (req.file) {
-    stateImage = `/uploads/settings/${req.file.filename}`;
+    stateImage = getFileDataUrl(req.file);
   }
 
   if (!isMongoConnected()) {
@@ -9313,7 +9335,7 @@ router.put('/admin/settings/states/:id', authenticateToken, uploadSettings.singl
 
     const oldImage = mockNewStatesDatabase[index].stateImage;
     if (req.file) {
-      mockNewStatesDatabase[index].stateImage = `/uploads/settings/${req.file.filename}`;
+      mockNewStatesDatabase[index].stateImage = getFileDataUrl(req.file);
       deleteLocalFile(oldImage);
     }
     mockNewStatesDatabase[index].stateName = stateName;
@@ -9329,13 +9351,13 @@ router.put('/admin/settings/states/:id', authenticateToken, uploadSettings.singl
 
     const exists = await NewState.findOne({ stateName: { $regex: new RegExp(`^${stateName}$`, 'i') }, _id: { $ne: id }, deleted: false });
     if (exists) {
-      if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+      if (req.file) deleteLocalFile(req.file.path);
       return res.status(400).json({ error: 'DuplicateState', message: 'State Name must be unique.' });
     }
 
     const oldImage = stateDoc.stateImage;
     if (req.file) {
-      stateDoc.stateImage = `/uploads/settings/${req.file.filename}`;
+      stateDoc.stateImage = getFileDataUrl(req.file);
       deleteLocalFile(oldImage);
     }
     stateDoc.stateName = stateName;
@@ -9492,7 +9514,7 @@ router.post('/admin/settings/cities', authenticateToken, uploadSettings.single('
 
   let cityImage = '';
   if (req.file) {
-    cityImage = `/uploads/settings/${req.file.filename}`;
+    cityImage = getFileDataUrl(req.file);
   }
 
   if (!isMongoConnected()) {
@@ -9554,7 +9576,7 @@ router.put('/admin/settings/cities/:id', authenticateToken, uploadSettings.singl
 
     const oldImage = mockNewCitiesDatabase[index].cityImage;
     if (req.file) {
-      mockNewCitiesDatabase[index].cityImage = `/uploads/settings/${req.file.filename}`;
+      mockNewCitiesDatabase[index].cityImage = getFileDataUrl(req.file);
       deleteLocalFile(oldImage);
     }
     mockNewCitiesDatabase[index].cityName = cityName;
@@ -9571,13 +9593,13 @@ router.put('/admin/settings/cities/:id', authenticateToken, uploadSettings.singl
 
     const exists = await NewCity.findOne({ stateId, cityName: { $regex: new RegExp(`^${cityName}$`, 'i') }, _id: { $ne: id }, deleted: false });
     if (exists) {
-      if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+      if (req.file) deleteLocalFile(req.file.path);
       return res.status(400).json({ error: 'DuplicateCity', message: 'City Name must be unique within this State.' });
     }
 
     const oldImage = cityDoc.cityImage;
     if (req.file) {
-      cityDoc.cityImage = `/uploads/settings/${req.file.filename}`;
+      cityDoc.cityImage = getFileDataUrl(req.file);
       deleteLocalFile(oldImage);
     }
     cityDoc.cityName = cityName;
@@ -9587,7 +9609,7 @@ router.put('/admin/settings/cities/:id', authenticateToken, uploadSettings.singl
 
     res.json(cityDoc);
   } catch (error) {
-    if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+    if (req.file) deleteLocalFile(req.file.path);
     res.status(500).json({ error: 'ServerError', message: error.message });
   }
 });
@@ -9722,7 +9744,7 @@ router.post('/admin/settings/amenities', authenticateToken, uploadSettings.singl
 
   let amenityIcon = req.body.amenityIcon || '';
   if (req.file) {
-    amenityIcon = `/uploads/settings/${req.file.filename}`;
+    amenityIcon = getFileDataUrl(req.file);
   }
 
   if (!isMongoConnected()) {
@@ -9783,7 +9805,7 @@ router.put('/admin/settings/amenities/:id', authenticateToken, uploadSettings.si
 
     const oldIcon = mockNewAmenitiesDatabase[index].amenityIcon;
     if (req.file) {
-      mockNewAmenitiesDatabase[index].amenityIcon = `/uploads/settings/${req.file.filename}`;
+      mockNewAmenitiesDatabase[index].amenityIcon = getFileDataUrl(req.file);
       deleteLocalFile(oldIcon);
     }
     mockNewAmenitiesDatabase[index].amenityName = amenityName;
@@ -9799,13 +9821,13 @@ router.put('/admin/settings/amenities/:id', authenticateToken, uploadSettings.si
 
     const exists = await NewAmenity.findOne({ amenityName: { $regex: new RegExp(`^${amenityName}$`, 'i') }, _id: { $ne: id }, deleted: false });
     if (exists) {
-      if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+      if (req.file) deleteLocalFile(req.file.path);
       return res.status(400).json({ error: 'DuplicateAmenity', message: 'Amenity Name must be unique.' });
     }
 
     const oldIcon = amenityDoc.amenityIcon;
     if (req.file) {
-      amenityDoc.amenityIcon = `/uploads/settings/${req.file.filename}`;
+      amenityDoc.amenityIcon = getFileDataUrl(req.file);
       deleteLocalFile(oldIcon);
     }
     amenityDoc.amenityName = amenityName;
@@ -9814,7 +9836,7 @@ router.put('/admin/settings/amenities/:id', authenticateToken, uploadSettings.si
 
     res.json(amenityDoc);
   } catch (error) {
-    if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+    if (req.file) deleteLocalFile(req.file.path);
     res.status(500).json({ error: 'ServerError', message: error.message });
   }
 });
@@ -10179,21 +10201,11 @@ router.post('/homestay-owner/properties/upload-image', authenticateToken, upload
     return res.status(400).json({ error: 'NoFileUploaded', message: 'No file was uploaded.' });
   }
   try {
-    const originalPath = req.file.path;
-    const filename = req.file.filename;
-    const optimizedFilename = filename.replace('original-', 'optimized-');
-    const thumbFilename = filename.replace('original-', 'thumb-');
-
-    const optimizedPath = path.join('uploads/properties', optimizedFilename);
-    const thumbPath = path.join('uploads/properties', thumbFilename);
-
-    fs.copyFileSync(originalPath, optimizedPath);
-    fs.copyFileSync(originalPath, thumbPath);
-
+    const dataUrl = getFileDataUrl(req.file);
     res.json({
-      originalUrl: `/uploads/properties/${filename}`,
-      optimizedUrl: `/uploads/properties/${optimizedFilename}`,
-      thumbUrl: `/uploads/properties/${thumbFilename}`
+      originalUrl: dataUrl,
+      optimizedUrl: dataUrl,
+      thumbUrl: dataUrl
     });
   } catch (err) {
     res.status(500).json({ error: 'UploadError', message: err.message });

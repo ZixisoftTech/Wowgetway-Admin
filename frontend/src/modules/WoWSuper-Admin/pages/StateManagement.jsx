@@ -25,8 +25,8 @@ const getApiUrl = (path) => {
 
 const getImageUrl = (path) => {
   if (!path) return 'https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=500';
-  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('blob:')) return path;
-  const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://wow-getway-api.onrender.com';
+  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('blob:') || path.startsWith('data:')) return path;
+  const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
   return `${base}${path}`;
 };
 

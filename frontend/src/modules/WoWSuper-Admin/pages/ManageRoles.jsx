@@ -23,9 +23,9 @@ import {
   ShieldAlert
 } from 'lucide-react';
 
-const API_ROLES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/roles';
-const API_EMPLOYEES_URL = 'https://wow-getway-api.onrender.com/api/dashboard/employees-list';
-const API_ASSIGN_URL = 'https://wow-getway-api.onrender.com/api/dashboard/employees-assign-role';
+const API_ROLES_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/roles';
+const API_EMPLOYEES_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/employees-list';
+const API_ASSIGN_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/employees-assign-role';
 
 // Fetch lists helpers
 const fetchRolesList = async () => {

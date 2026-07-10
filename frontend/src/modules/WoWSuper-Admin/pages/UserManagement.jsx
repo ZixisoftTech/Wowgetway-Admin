@@ -45,7 +45,7 @@ import {
   Trash
 } from 'lucide-react';
 
-const API_BASE_URL = 'https://wow-getway-api.onrender.com/api/dashboard/users';
+const API_BASE_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/users';
 
 const mockUsersList = [
   {

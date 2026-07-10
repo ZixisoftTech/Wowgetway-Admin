@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 
-const API_BASE_URL = 'https://wow-getway-api.onrender.com/api/dashboard';
+const API_BASE_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard';
 
 // Setup axios instance
 const api = axios.create({

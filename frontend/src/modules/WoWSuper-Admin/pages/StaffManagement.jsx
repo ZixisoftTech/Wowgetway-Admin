@@ -18,7 +18,7 @@ import {
   Building
 } from 'lucide-react';
 
-const API_BASE_URL = 'https://wow-getway-api.onrender.com/api/dashboard/employees-list';
+const API_BASE_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/employees-list';
 
 // Fetch staff helper supporting server-side query params
 const fetchStaffList = async ({ queryKey }) => {

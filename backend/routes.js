@@ -2771,6 +2771,15 @@ const getFileDataUrl = (file) => {
   } catch (err) {
     console.error('Error generating data URL:', err.message);
   }
+  // Convert date value safely to ISO string split date format
+const formatDateSafe = (dateVal) => {
+  if (!dateVal) return '';
+  try {
+    const d = new Date(dateVal);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().split('T')[0];
+    }
+  } catch (err) {}
   return '';
 };
 
@@ -10310,9 +10319,9 @@ router.get('/homestay-owner/properties/draft', authenticateToken, async (req, re
       const seasons = {};
       seasonsList.forEach(s => {
         seasons[s.roomCategoryId] = {
-          peak: (s.seasons.peak || []).map(r => ({ start: new Date(r.start).toISOString().split('T')[0], end: new Date(r.end).toISOString().split('T')[0] })),
-          mid: (s.seasons.mid || []).map(r => ({ start: new Date(r.start).toISOString().split('T')[0], end: new Date(r.end).toISOString().split('T')[0] })),
-          off: (s.seasons.off || []).map(r => ({ start: new Date(r.start).toISOString().split('T')[0], end: new Date(r.end).toISOString().split('T')[0] }))
+          peak: (s.seasons.peak || []).map(r => ({ start: formatDateSafe(r.start), end: formatDateSafe(r.end) })),
+          mid: (s.seasons.mid || []).map(r => ({ start: formatDateSafe(r.start), end: formatDateSafe(r.end) })),
+          off: (s.seasons.off || []).map(r => ({ start: formatDateSafe(r.start), end: formatDateSafe(r.end) }))
         };
       });
 
@@ -10395,9 +10404,9 @@ router.get('/homestay-owner/properties/draft', authenticateToken, async (req, re
     const seasons = {};
     seasonsList.forEach(s => {
       seasons[s.roomCategoryId] = {
-        peak: (s.seasons.peak || []).map(r => ({ start: r.start.toISOString().split('T')[0], end: r.end.toISOString().split('T')[0] })),
-        mid: (s.seasons.mid || []).map(r => ({ start: r.start.toISOString().split('T')[0], end: r.end.toISOString().split('T')[0] })),
-        off: (s.seasons.off || []).map(r => ({ start: r.start.toISOString().split('T')[0], end: r.end.toISOString().split('T')[0] }))
+        peak: (s.seasons.peak || []).map(r => ({ start: formatDateSafe(r.start), end: formatDateSafe(r.end) })),
+        mid: (s.seasons.mid || []).map(r => ({ start: formatDateSafe(r.start), end: formatDateSafe(r.end) })),
+        off: (s.seasons.off || []).map(r => ({ start: formatDateSafe(r.start), end: formatDateSafe(r.end) }))
       };
     });
 

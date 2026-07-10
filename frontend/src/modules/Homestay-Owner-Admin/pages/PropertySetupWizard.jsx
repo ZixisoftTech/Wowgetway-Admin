@@ -429,7 +429,7 @@ export default function PropertySetupWizard() {
   ];
 
   // Validation
-  const validateStep = (stepNum) => {
+  const validateStep = (stepNum, returnErrors = false) => {
     let stepErrors = {};
     if (stepNum === 1) {
       if (!formData.name.trim() || formData.name.trim().length < 5 || formData.name.trim().length > 150) {
@@ -493,6 +493,7 @@ export default function PropertySetupWizard() {
       }
     }
 
+    if (returnErrors) return stepErrors;
     setErrors(stepErrors);
     return Object.keys(stepErrors).length === 0;
   };
@@ -546,10 +547,20 @@ export default function PropertySetupWizard() {
       if (!token || !propertyDbId) return;
 
       // E2E validations audit on publish submission
-      if (!validateStep(1) || !validateStep(2) || !validateStep(4) || !validateStep(5) || !validateStep(6)) {
+      const step1Errors = validateStep(1, true);
+      const step2Errors = validateStep(2, true);
+      const step4Errors = validateStep(4, true);
+      const step5Errors = validateStep(5, true);
+      const step6Errors = validateStep(6, true);
+
+      const allErrors = { ...step1Errors, ...step2Errors, ...step4Errors, ...step5Errors, ...step6Errors };
+      if (Object.keys(allErrors).length > 0) {
         Swal.fire({
           title: 'Validation Errors!',
-          text: 'Please ensure all wizard steps are complete and valid before publishing.',
+          html: `<div style="text-align: left; font-size: 13px; max-height: 250px; overflow-y: auto;">
+            <p style="font-weight: 600; margin-bottom: 8px;">Please resolve the following issues before submitting:</p>
+            ${Object.values(allErrors).map(msg => `<div style="margin-bottom: 4px; color: #e11d48;">• ${msg}</div>`).join('')}
+          </div>`,
           icon: 'error',
           confirmButtonColor: '#be123c'
         });

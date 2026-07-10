@@ -13,8 +13,11 @@ axios.defaults.withCredentials = true;
 axios.interceptors.request.use((config) => {
   // Map the hardcoded hosted domain to local port during development
   if (config.url && config.url.includes('https://wow-getway-api.onrender.com')) {
-    const localBase = import.meta.env.VITE_API_URL || 'http://localhost:5005';
-    config.url = config.url.replace('https://wow-getway-api.onrender.com', localBase);
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (isLocal) {
+      const localBase = import.meta.env.VITE_API_URL || 'http://localhost:5005';
+      config.url = config.url.replace('https://wow-getway-api.onrender.com', localBase);
+    }
   }
 
   // Inject JWT from localStorage based on path
@@ -70,9 +73,10 @@ axios.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const localBase = import.meta.env.VITE_API_URL || 'http://localhost:5005';
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const base = isLocal ? (import.meta.env.VITE_API_URL || 'http://localhost:5005') : 'https://wow-getway-api.onrender.com';
         console.log('[Auth Interceptor] Access token expired. Attempting token refresh...');
-        const res = await axios.post(`${localBase}/api/auth/refresh`);
+        const res = await axios.post(`${base}/api/auth/refresh`);
         const { token } = res.data;
 
         // Retrieve user and dispatch update to Redux

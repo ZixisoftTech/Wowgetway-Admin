@@ -24,20 +24,9 @@ app.use(mongoSanitize());
 // Parse cookies securely
 app.use(cookieParser());
 
-// Allow CORS from typical local frontend ports
+// Allow CORS dynamically reflecting the incoming request's origin
 app.use(cors({
-  origin: (origin, callback) => {
-    const allowed = [
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      'https://wow-getway.netlify.app'
-    ];
-    if (!origin || allowed.includes(origin) || origin.endsWith('.vercel.app')) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: true,
   credentials: true
 }));
 

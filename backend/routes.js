@@ -2771,7 +2771,9 @@ const getFileDataUrl = (file) => {
   } catch (err) {
     console.error('Error generating data URL:', err.message);
   }
-  // Convert date value safely to ISO string split date format
+};
+
+// Convert date value safely to ISO string split date format
 const formatDateSafe = (dateVal) => {
   if (!dateVal) return '';
   try {

@@ -8416,11 +8416,44 @@ const parseCitiesInput = (citiesInput) => {
 // GET /api/admin/locations
 router.get('/admin/locations', async (req, res) => {
   if (!isMongoConnected()) {
-    return res.json(mockStateCityDatabase);
+    const states = mockNewStatesDatabase.filter(s => !s.deleted);
+    const cities = mockNewCitiesDatabase.filter(c => !c.deleted);
+    const formatted = states.map(state => {
+      const stateCities = cities
+        .filter(city => String(city.stateId) === String(state._id))
+        .map(city => ({
+          _id: city._id,
+          name: city.cityName,
+          status: city.status
+        }));
+      return {
+        _id: state._id,
+        state: state.stateName,
+        cities: stateCities
+      };
+    });
+    return res.json(formatted);
   }
   try {
-    const locations = await StateCity.find();
-    res.json(locations);
+    const states = await NewState.find({ deleted: false });
+    const cities = await NewCity.find({ deleted: false });
+
+    const formattedLocations = states.map(state => {
+      const stateCities = cities
+        .filter(city => String(city.stateId) === String(state._id))
+        .map(city => ({
+          _id: city._id,
+          name: city.cityName,
+          status: city.status
+        }));
+
+      return {
+        _id: state._id,
+        state: state.stateName,
+        cities: stateCities
+      };
+    });
+    res.json(formattedLocations);
   } catch (error) {
     res.status(500).json({ error: 'ServerError', message: error.message });
   }

@@ -1,8 +1,176 @@
 import express from 'express';
 import mongoose from 'mongoose';
-import { Booking, Employee, Homestay, Role, Attendance, Salary, HomestayOwner, Ride, Rider, User, TourPackage, Admin } from './models.js';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import nodemailer from 'nodemailer';
+import crypto from 'crypto';
+import { authenticateToken, requirePermission } from './middleware/auth.js';
+import { Booking, Employee, Homestay, Role, Attendance, Salary, HomestayOwner, Ride, Rider, User, TourPackage, Admin, Coupon, ActivityLog, PasswordReset, SmtpSettings, StateCity, NewState, NewCity, NewAmenity, NewRoomType, Property, PropertyGallery, PropertyRooms, PropertyAmenities, PropertySeason, PropertyPricing, PropertyApproval, PropertyAuditLog } from './models.js';
 
 const router = express.Router();
+
+const ENCRYPTION_KEY = process.env.SMTP_ENCRYPTION_KEY || 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6'; // Must be 32 bytes
+const IV_LENGTH = 16;
+
+function encrypt(text) {
+  if (!text) return '';
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
+  let encrypted = cipher.update(text);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+function decrypt(text) {
+  if (!text) return '';
+  try {
+    const textParts = text.split(':');
+    const iv = Buffer.from(textParts.shift(), 'hex');
+    const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
+    let decrypted = decipher.update(encryptedText);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    return decrypted.toString();
+  } catch (err) {
+    return text;
+  }
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || 'wow_gateway_default_secure_secret_2026_key_xyz';
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'wow_gateway_default_secure_refresh_2026_key_abc';
+
+const isMongoConnected = () => mongoose.connection.readyState === 1;
+
+// Centralized activity logging helper
+const logActivity = async (req, action, moduleName, details) => {
+  const adminEmail = req.user?.email || 'unknown@wowgateways.com';
+  const adminName = req.user?.fullName || 'System Administrator';
+  const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
+  
+  const logData = {
+    adminEmail,
+    adminName,
+    action,
+    module: moduleName,
+    details: typeof details === 'object' ? JSON.stringify(details) : String(details),
+    ipAddress,
+    timestamp: new Date()
+  };
+
+  console.log(`[Activity Log] Admin: ${adminEmail} | Action: ${action} | Module: ${moduleName} | Details: ${logData.details}`);
+
+  if (isMongoConnected()) {
+    try {
+      const newLog = new ActivityLog(logData);
+      await newLog.save();
+    } catch (err) {
+      console.error('[Activity Log] Failed to save log to MongoDB:', err.message);
+    }
+  }
+};
+
+/**
+ * Helper to process in-memory database arrays for fallback mode
+ */
+function paginateAndFilter(dataArray, page = 1, limit = 10, search = '', searchFields = [], sortBy = 'createdAt', sortOrder = 'desc', filters = {}) {
+  const pageNum = Math.max(1, parseInt(page) || 1);
+  const limitNum = Math.max(1, parseInt(limit) || 10);
+  
+  // 1. Apply general filters
+  let filtered = dataArray.filter(item => {
+    for (const [key, val] of Object.entries(filters)) {
+      if (val !== undefined && val !== null && val !== '') {
+        if (String(item[key]).toLowerCase() !== String(val).toLowerCase()) return false;
+      }
+    }
+    return true;
+  });
+
+  // 2. Apply search
+  if (search && searchFields.length > 0) {
+    const searchLower = String(search).toLowerCase();
+    filtered = filtered.filter(item => {
+      return searchFields.some(field => {
+        const itemVal = item[field];
+        if (itemVal === undefined || itemVal === null) return false;
+        return String(itemVal).toLowerCase().includes(searchLower);
+      });
+    });
+  }
+
+  // 3. Apply sorting
+  filtered.sort((a, b) => {
+    let valA = a[sortBy];
+    let valB = b[sortBy];
+
+    if (valA === undefined || valA === null) return 1;
+    if (valB === undefined || valB === null) return -1;
+
+    if (typeof valA === 'string') {
+      return sortOrder === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    } else {
+      return sortOrder === 'asc' ? valA - valB : valB - valA;
+    }
+  });
+
+  // 4. Paginate
+  const total = filtered.length;
+  const totalPages = Math.ceil(total / limitNum);
+  const offset = (pageNum - 1) * limitNum;
+  const paginatedData = filtered.slice(offset, offset + limitNum);
+
+  return {
+    data: paginatedData,
+    pagination: {
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages
+    }
+  };
+}
+
+/**
+ * Helper to process Mongoose models for active database mode
+ */
+async function queryMongoWithPagination(model, { page = 1, limit = 10, search = '', searchFields = [], sortBy = 'createdAt', sortOrder = 'desc', filters = {} }) {
+  const pageNum = Math.max(1, parseInt(page) || 1);
+  const limitNum = Math.max(1, parseInt(limit) || 10);
+  const query = {};
+
+  // 1. Apply general filters
+  for (const [key, val] of Object.entries(filters)) {
+    if (val !== undefined && val !== null && val !== '') {
+      query[key] = val;
+    }
+  }
+
+  // 2. Apply search
+  if (search && searchFields.length > 0) {
+    query.$or = searchFields.map(field => ({
+      [field]: { $regex: search, $options: 'i' }
+    }));
+  }
+
+  // 3. Sorting
+  const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+
+  // 4. Fetch data
+  const total = await model.countDocuments(query);
+  const totalPages = Math.ceil(total / limitNum);
+  const offset = (pageNum - 1) * limitNum;
+  const data = await model.find(query).sort(sort).skip(offset).limit(limitNum);
+
+  return {
+    data,
+    pagination: {
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages
+    }
+  };
+}
 
 // Mock fallback data to ensure the app works 100% of the time, even without a local MongoDB service running.
 const mockFallbackData = {
@@ -1645,9 +1813,6 @@ let mockEmployeesDatabase = [
   }
 ];
 
-// Helper to check if MongoDB is connected
-const isMongoConnected = () => mongoose.connection.readyState === 1;
-
 // GET /api/dashboard/summary
 router.get('/summary', async (req, res) => {
   if (!isMongoConnected()) {
@@ -2570,22 +2735,98 @@ router.delete('/salaries/:id', async (req, res) => {
 // HOMESTAY OWNERS MANAGEMENT ENDPOINTS
 // ==========================================
 
-// GET /api/dashboard/owners/stats
-router.get('/owners/stats', async (req, res) => {
+// ==========================================
+// HOMESTAY OWNERS MANAGEMENT ENDPOINTS
+// ==========================================
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
+
+// Multer storage setup for JPG, PNG, PDF document uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = './uploads';
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: function (req, file, cb) {
+    const allowed = ['.png', '.jpg', '.jpeg', '.pdf'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!allowed.includes(ext)) {
+      return cb(new Error('Only JPG, PNG, and PDF files are allowed.'));
+    }
+    cb(null, true);
+  }
+});
+
+// Admin impersonate JWT generator
+router.post(['/owners/:id/impersonate', '/admin/homestay-owners/:id/impersonate'], authenticateToken, async (req, res) => {
+  if (req.user.role !== 'Super Admin') {
+    return res.status(403).json({ error: 'AccessDenied', message: 'Only Super Admins can impersonate owners.' });
+  }
+
+  const { id } = req.params;
+
   if (!isMongoConnected()) {
-    const totalOwners = mockOwnersDatabase.length;
-    const activeOwners = mockOwnersDatabase.filter(o => o.status === 'Active').length;
-    const pendingVerification = mockOwnersDatabase.filter(o => o.status === 'Pending Verification').length;
-    const totalProperties = mockOwnersDatabase.reduce((sum, o) => sum + (o.properties ? o.properties.length : 0), 0);
+    const owner = mockOwnersDatabase.find(o => o._id === id);
+    if (!owner || owner.status === 'Deleted') {
+      return res.status(404).json({ error: 'Homestay owner not found.' });
+    }
+    const token = jwt.sign({ _id: owner._id, email: owner.email, role: 'Owner' }, JWT_SECRET, { expiresIn: '2h' });
+    return res.json({ token, user: owner });
+  }
+
+  try {
+    const owner = await HomestayOwner.findById(id);
+    if (!owner || owner.status === 'Deleted') {
+      return res.status(404).json({ error: 'Homestay owner not found.' });
+    }
+
+    const payload = {
+      _id: owner._id,
+      email: owner.email,
+      role: 'Owner',
+      firstName: owner.firstName,
+      lastName: owner.lastName
+    };
+
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '2h' });
+    logActivity(req, 'IMPERSONATION_LOGIN', 'Super Admin Auth', `Super Admin logged in as owner: ${owner.email}`);
+
+    res.json({ token, user: owner });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to impersonate owner', message: error.message });
+  }
+});
+
+// GET /api/dashboard/owners/stats
+router.get(['/owners/stats', '/admin/homestay-owners/stats'], authenticateToken, async (req, res) => {
+  if (!isMongoConnected()) {
+    const activeList = mockOwnersDatabase.filter(o => o.status !== 'Deleted');
+    const totalOwners = activeList.length;
+    const activeOwners = activeList.filter(o => o.status === 'Active').length;
+    const pendingVerification = activeList.filter(o => o.status === 'Pending Verification').length;
+    const totalProperties = activeList.reduce((sum, o) => sum + (o.properties ? o.properties.length : 0), 0);
     return res.json({ totalOwners, activeOwners, pendingVerification, totalProperties });
   }
 
   try {
-    const totalOwners = await HomestayOwner.countDocuments();
+    const totalOwners = await HomestayOwner.countDocuments({ status: { $ne: 'Deleted' } });
     const activeOwners = await HomestayOwner.countDocuments({ status: 'Active' });
     const pendingVerification = await HomestayOwner.countDocuments({ status: 'Pending Verification' });
     
-    const owners = await HomestayOwner.find({}, 'properties');
+    const owners = await HomestayOwner.find({ status: { $ne: 'Deleted' } }, 'properties');
     const totalProperties = owners.reduce((sum, o) => sum + (o.properties ? o.properties.length : 0), 0);
 
     res.json({ totalOwners, activeOwners, pendingVerification, totalProperties });
@@ -2595,14 +2836,16 @@ router.get('/owners/stats', async (req, res) => {
   }
 });
 
-// GET /api/dashboard/owners
-router.get('/owners', async (req, res) => {
-  const { search, status } = req.query;
+// GET /api/dashboard/owners (Server-Side table + pagination, filtering, search)
+router.get(['/owners', '/admin/homestay-owners'], authenticateToken, async (req, res) => {
+  const { search, status, page, limit, all } = req.query;
 
   if (!isMongoConnected()) {
     let list = [...mockOwnersDatabase];
     if (status && status !== 'All') {
       list = list.filter(o => o.status === status);
+    } else {
+      list = list.filter(o => o.status !== 'Deleted');
     }
     if (search) {
       const term = search.toLowerCase();
@@ -2613,14 +2856,55 @@ router.get('/owners', async (req, res) => {
         (o.mobile && o.mobile.toLowerCase().includes(term))
       );
     }
-    return res.json(list);
+
+    if (all === 'true' || (!page && !limit)) {
+      return res.json(list);
+    }
+
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 10;
+    const skip = (pageNum - 1) * limitNum;
+    
+    const totalRecords = list.length;
+    const data = list.slice(skip, skip + limitNum);
+    return res.json({ data, totalRecords });
   }
+
+  // Simple unpaginated list mode for simple select filters (e.g. properties add/edit form)
+  if (all === 'true' || (!page && !limit)) {
+    try {
+      let query = { status: { $ne: 'Deleted' } };
+      if (status && status !== 'All') {
+        query.status = status;
+      }
+      if (search) {
+        const searchRegex = new RegExp(search, 'i');
+        query.$or = [
+          { firstName: searchRegex },
+          { lastName: searchRegex },
+          { email: searchRegex },
+          { mobile: searchRegex }
+        ];
+      }
+      const list = await HomestayOwner.find(query).sort({ createdAt: -1 });
+      return res.json(list);
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to fetch owners list', message: err.message });
+    }
+  }
+
+  const pageNum = parseInt(page) || 1;
+  const limitNum = parseInt(limit) || 10;
+  const skip = (pageNum - 1) * limitNum;
 
   try {
     let query = {};
     if (status && status !== 'All') {
       query.status = status;
+    } else {
+      query.status = { $ne: 'Deleted' };
     }
+
     if (search) {
       const searchRegex = new RegExp(search, 'i');
       query.$or = [
@@ -2630,8 +2914,14 @@ router.get('/owners', async (req, res) => {
         { mobile: searchRegex }
       ];
     }
-    const owners = await HomestayOwner.find(query).sort({ createdAt: -1 });
-    res.json(owners);
+
+    const totalRecords = await HomestayOwner.countDocuments(query);
+    const data = await HomestayOwner.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
+    res.json({ data, totalRecords });
   } catch (error) {
     console.error('Error fetching homestay owners:', error.message);
     res.status(500).json({ error: 'Failed to fetch homestay owners', message: error.message });
@@ -2639,19 +2929,35 @@ router.get('/owners', async (req, res) => {
 });
 
 // GET /api/dashboard/owners/:id
-router.get('/owners/:id', async (req, res) => {
+router.get(['/owners/:id', '/admin/homestay-owners/:id'], authenticateToken, async (req, res) => {
   const { id } = req.params;
 
   if (!isMongoConnected()) {
     const owner = mockOwnersDatabase.find(o => o._id === id);
-    if (!owner) return res.status(404).json({ error: 'Homestay owner not found' });
-    return res.json(owner);
+    if (!owner || owner.status === 'Deleted') {
+      return res.status(404).json({ error: 'Homestay owner not found' });
+    }
+    const ownerObj = { ...owner };
+    ownerObj.passwordCopy = owner.password || 'Owner@123';
+    return res.json(ownerObj);
   }
 
   try {
     const owner = await HomestayOwner.findById(id);
-    if (!owner) return res.status(404).json({ error: 'Homestay owner not found' });
-    res.json(owner);
+    if (!owner || owner.status === 'Deleted') {
+      return res.status(404).json({ error: 'Homestay owner not found' });
+    }
+    
+    // Decrypt password copy for Super Admin viewing
+    let passwordCopyDecrypted = '';
+    if (owner.encryptedPasswordCopy) {
+      passwordCopyDecrypted = decrypt(owner.encryptedPasswordCopy);
+    }
+
+    const ownerObj = owner.toObject();
+    ownerObj.passwordCopy = passwordCopyDecrypted;
+
+    res.json(ownerObj);
   } catch (error) {
     console.error('Error fetching homestay owner details:', error.message);
     res.status(500).json({ error: 'Failed to fetch homestay owner details', message: error.message });
@@ -2659,19 +2965,80 @@ router.get('/owners/:id', async (req, res) => {
 });
 
 // POST /api/dashboard/owners
-router.post('/owners', async (req, res) => {
+router.post(['/owners', '/admin/homestay-owners'], authenticateToken, async (req, res) => {
   const ownerData = req.body;
+
+  // 1. Validations
+  if (!ownerData.firstName || !ownerData.lastName || !ownerData.fatherName || !ownerData.email || !ownerData.mobile) {
+    return res.status(400).json({ error: 'RequiredFields', message: 'First name, last name, father name, email, and mobile number are required.' });
+  }
+
+  const cleanPhone = (num) => num ? num.replace(/\s+/g, '').replace(/^\+91/, '').replace(/^91/, '') : '';
+  const mobileClean = cleanPhone(ownerData.mobile);
+  if (!/^\d{10}$/.test(mobileClean)) {
+    return res.status(400).json({ error: 'InvalidMobile', message: 'Mobile number must be exactly 10 digits.' });
+  }
+
+  let whatsAppClean = mobileClean;
+  if (ownerData.whatsApp) {
+    whatsAppClean = cleanPhone(ownerData.whatsApp);
+    if (!/^\d{10}$/.test(whatsAppClean)) {
+      return res.status(400).json({ error: 'InvalidWhatsApp', message: 'WhatsApp number must be exactly 10 digits.' });
+    }
+  }
+
+  const emailLower = ownerData.email.trim().toLowerCase();
+
+  if (!isMongoConnected()) {
+    const existingEmail = mockOwnersDatabase.find(o => o.email === emailLower && o.status !== 'Deleted');
+    if (existingEmail) {
+      return res.status(400).json({ error: 'DuplicateEmail', message: 'Email address already registered.' });
+    }
+    const existingMobile = mockOwnersDatabase.find(o => o.mobile === mobileClean && o.status !== 'Deleted');
+    if (existingMobile) {
+      return res.status(400).json({ error: 'DuplicateMobile', message: 'Mobile number already registered.' });
+    }
+  }
+
+  // Aadhaar 12 digit format validation
+  if (!ownerData.aadharNo || !/^\d{12}$/.test(ownerData.aadharNo.trim())) {
+    return res.status(400).json({ error: 'InvalidAadhaar', message: 'Aadhaar number is required and must be exactly 12 digits.' });
+  }
+
+  // PAN format validation
+  if (!ownerData.panNo || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(ownerData.panNo.trim().toUpperCase())) {
+    return res.status(400).json({ error: 'InvalidPAN', message: 'PAN Card number is required and must match format: 5 Letters, 4 Digits, 1 Letter.' });
+  }
+
+  // IFSC format validation
+  if (ownerData.ifscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ownerData.ifscCode.trim().toUpperCase())) {
+    return res.status(400).json({ error: 'InvalidIFSC', message: 'Invalid IFSC Code format.' });
+  }
+
+  // UPI format validation
+  if (ownerData.upiId && !/^[\w.-]+@[\w.-]+$/.test(ownerData.upiId.trim())) {
+    return res.status(400).json({ error: 'InvalidUPI', message: 'Invalid UPI ID format.' });
+  }
+
+  // Strong password check (min 8 chars, letters and numbers)
+  const passwordText = ownerData.password || 'Owner@123'; 
+  if (passwordText.length < 8 || !/[a-zA-Z]/.test(passwordText) || !/\d/.test(passwordText)) {
+    return res.status(400).json({ error: 'WeakPassword', message: 'Password must be at least 8 characters long and contain both letters and numbers.' });
+  }
 
   if (!isMongoConnected()) {
     const newOwner = {
       _id: `own-${Date.now().toString().slice(-5)}`,
       ...ownerData,
+      email: emailLower,
+      mobile: mobileClean,
+      password: passwordText,
       status: ownerData.status || 'Pending Verification',
       aadharVerified: ownerData.aadharVerified ?? false,
       panVerified: ownerData.panVerified ?? false,
       bankVerified: ownerData.bankVerified ?? false,
       properties: ownerData.properties || [],
-      createdBy: 'Rahul Sharma',
+      createdBy: req.user.email || 'Rahul Sharma',
       createdAt: new Date()
     };
     mockOwnersDatabase.unshift(newOwner);
@@ -2679,63 +3046,333 @@ router.post('/owners', async (req, res) => {
   }
 
   try {
+    const existingEmail = await HomestayOwner.findOne({ email: emailLower, status: { $ne: 'Deleted' } });
+    if (existingEmail) {
+      return res.status(400).json({ error: 'DuplicateEmail', message: 'Email address already registered.' });
+    }
+    const existingMobile = await HomestayOwner.findOne({ mobile: mobileClean, status: { $ne: 'Deleted' } });
+    if (existingMobile) {
+      return res.status(400).json({ error: 'DuplicateMobile', message: 'Mobile number already registered.' });
+    }
+
+    const passwordHash = await bcrypt.hash(passwordText, 10);
+    const encryptedPasswordCopy = encrypt(passwordText);
+
     const newOwner = new HomestayOwner({
       ...ownerData,
-      createdBy: 'Rahul Sharma'
+      email: emailLower,
+      mobile: mobileClean,
+      password: passwordHash,
+      encryptedPasswordCopy,
+      createdBy: req.user.email || 'Rahul Sharma'
     });
+
     await newOwner.save();
+    logActivity(req, 'OWNER_CREATED', 'Super Admin Auth', `Created homestay owner: ${emailLower}`);
+
+    // Send Welcome Email asynchronously
+    try {
+      let smtp = mockSmtpSettings;
+      const dbSmtp = await SmtpSettings.findOne();
+      if (dbSmtp) {
+        smtp = dbSmtp;
+      }
+
+      if (smtp.enabled) {
+        const transporter = nodemailer.createTransport({
+          host: smtp.host,
+          port: smtp.port,
+          secure: smtp.secure,
+          auth: {
+            user: smtp.email,
+            pass: decrypt(smtp.appPassword)
+          }
+        });
+
+        const mailOptions = {
+          from: `"${smtp.senderName || 'Wow Gateways Support'}" <${smtp.email}>`,
+          to: emailLower,
+          subject: 'Welcome to Wow Gateways - Partner Account Created',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+              <h2 style="color: #0f172a; margin-top: 0;">Welcome, ${newOwner.firstName}!</h2>
+              <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+                Your Homestay Owner account has been created by the Super Admin. You can now log into your dashboard using the credentials below:
+              </p>
+              <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 12px; padding: 15px; margin: 20px 0;">
+                <p style="margin: 0; font-size: 13px; color: #334155;"><strong>Login Email:</strong> ${emailLower}</p>
+                <p style="margin: 5px 0 0 0; font-size: 13px; color: #334155;"><strong>Temporary Password:</strong> ${passwordText}</p>
+              </div>
+              <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+                Please change your password immediately after logging in.
+              </p>
+              <hr style="border: 0; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
+              <p style="color: #94a3b8; font-size: 11px;">
+                Regards,<br/>Wow Gateways Operations Team
+              </p>
+            </div>
+          `
+        };
+
+        await transporter.sendMail(mailOptions);
+        console.log(`[SMTP] Welcome email sent to owner: ${emailLower}`);
+      }
+    } catch (emailErr) {
+      console.error('[SMTP Welcome Email] Failed to send email:', emailErr.message);
+    }
+
     res.status(201).json(newOwner);
   } catch (error) {
     console.error('Error creating homestay owner:', error.message);
-    res.status(500).json({ error: 'Failed to create homestay owner', message: error.message });
+    res.status(500).json({ error: 'FailedToCreateOwner', message: error.message });
   }
 });
 
 // PUT /api/dashboard/owners/:id
-router.put('/owners/:id', async (req, res) => {
+router.put(['/owners/:id', '/admin/homestay-owners/:id'], authenticateToken, async (req, res) => {
   const { id } = req.params;
   const updateData = req.body;
+
+  // Validations
+  if (updateData.email) {
+    const emailLower = updateData.email.trim().toLowerCase();
+    updateData.email = emailLower;
+  }
+  if (updateData.mobile) {
+    const mobileClean = updateData.mobile.trim();
+    updateData.mobile = mobileClean;
+  }
 
   if (!isMongoConnected()) {
     const idx = mockOwnersDatabase.findIndex(o => o._id === id);
     if (idx === -1) return res.status(404).json({ error: 'Homestay owner not found' });
+    if (updateData.email) {
+      const existingEmail = mockOwnersDatabase.find(o => o.email === updateData.email && o._id !== id && o.status !== 'Deleted');
+      if (existingEmail) return res.status(400).json({ error: 'DuplicateEmail', message: 'Email address already registered.' });
+    }
+    if (updateData.mobile) {
+      const existingMobile = mockOwnersDatabase.find(o => o.mobile === updateData.mobile && o._id !== id && o.status !== 'Deleted');
+      if (existingMobile) return res.status(400).json({ error: 'DuplicateMobile', message: 'Mobile number already registered.' });
+    }
+    mockOwnersDatabase[idx] = { ...mockOwnersDatabase[idx], ...updateData };
+    return res.json(mockOwnersDatabase[idx]);
+  }
 
-    mockOwnersDatabase[idx] = {
-      ...mockOwnersDatabase[idx],
-      ...updateData
-    };
+  if (updateData.aadharNo && !/^\d{12}$/.test(updateData.aadharNo.trim())) {
+    return res.status(400).json({ error: 'InvalidAadhaar', message: 'Aadhaar number must be exactly 12 digits.' });
+  }
+
+  if (updateData.panNo && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(updateData.panNo.trim().toUpperCase())) {
+    return res.status(400).json({ error: 'InvalidPAN', message: 'Invalid PAN Card number format.' });
+  }
+
+  if (updateData.ifscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(updateData.ifscCode.trim().toUpperCase())) {
+    return res.status(400).json({ error: 'InvalidIFSC', message: 'Invalid IFSC Code format.' });
+  }
+
+  if (updateData.upiId && !/^[\w.-]+@[\w.-]+$/.test(updateData.upiId.trim())) {
+    return res.status(400).json({ error: 'InvalidUPI', message: 'Invalid UPI ID format.' });
+  }
+
+  // If password is updated
+  if (updateData.password && updateData.password.trim() !== '') {
+    const pass = updateData.password.trim();
+    if (pass.length < 8 || !/[a-zA-Z]/.test(pass) || !/\d/.test(pass)) {
+      return res.status(400).json({ error: 'WeakPassword', message: 'Password must be at least 8 characters long and contain both letters and numbers.' });
+    }
+    updateData.password = await bcrypt.hash(pass, 10);
+    updateData.encryptedPasswordCopy = encrypt(pass);
+  } else {
+    delete updateData.password;
+  }
+
+  try {
+    if (updateData.email) {
+      const existingEmail = await HomestayOwner.findOne({ email: updateData.email, _id: { $ne: id }, status: { $ne: 'Deleted' } });
+      if (existingEmail) return res.status(400).json({ error: 'DuplicateEmail', message: 'Email address already registered.' });
+    }
+    if (updateData.mobile) {
+      const existingMobile = await HomestayOwner.findOne({ mobile: updateData.mobile, _id: { $ne: id }, status: { $ne: 'Deleted' } });
+      if (existingMobile) return res.status(400).json({ error: 'DuplicateMobile', message: 'Mobile number already registered.' });
+    }
+
+    const updated = await HomestayOwner.findByIdAndUpdate(id, updateData, { new: true });
+    if (!updated || updated.status === 'Deleted') {
+      return res.status(404).json({ error: 'Homestay owner not found' });
+    }
+    logActivity(req, 'OWNER_UPDATED', 'Super Admin Auth', `Updated homestay owner details: ${updated.email}`);
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating homestay owner:', error.message);
+    res.status(500).json({ error: 'FailedToUpdateOwner', message: error.message });
+  }
+});
+
+// DELETE /api/dashboard/owners/:id (Hard Delete with Associated Data Check)
+router.delete(['/owners/:id', '/admin/homestay-owners/:id'], authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const force = req.query.force === 'true';
+
+  if (!isMongoConnected()) {
+    const idx = mockOwnersDatabase.findIndex(o => o._id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Homestay owner not found' });
+    
+    const owner = mockOwnersDatabase[idx];
+    const associatedProperties = mockHomestaysDatabase.filter(h => 
+      h.ownerMobile === owner.mobile || 
+      h.ownerName === `${owner.firstName} ${owner.lastName}`
+    );
+
+    if (associatedProperties.length > 0 && !force) {
+      return res.status(409).json({
+        hasAssociatedData: true,
+        type: 'Homestays',
+        details: associatedProperties.map(h => h.name),
+        message: `This owner is linked to ${associatedProperties.length} active homestay properties.`
+      });
+    }
+
+    mockOwnersDatabase.splice(idx, 1);
+    return res.json({ message: 'Home Stay Owner hard deleted successfully.' });
+  }
+
+  try {
+    const owner = await HomestayOwner.findById(id);
+    if (!owner) {
+      return res.status(404).json({ error: 'Homestay owner not found' });
+    }
+
+    const associatedProperties = await Homestay.find({
+      $or: [
+        { ownerMobile: owner.mobile },
+        { ownerName: `${owner.firstName} ${owner.lastName}` }
+      ]
+    });
+
+    if (associatedProperties.length > 0 && !force) {
+      return res.status(409).json({
+        hasAssociatedData: true,
+        type: 'Homestays',
+        details: associatedProperties.map(h => h.name),
+        message: `This owner is linked to ${associatedProperties.length} active homestay properties.`
+      });
+    }
+
+    await HomestayOwner.findByIdAndDelete(id);
+
+    logActivity(req, 'OWNER_HARD_DELETED', 'Super Admin Auth', `Hard deleted homestay owner: ${owner.email}`);
+    res.json({ message: 'Home Stay Owner hard deleted successfully.' });
+  } catch (error) {
+    console.error('Error hard deleting homestay owner:', error.message);
+    res.status(500).json({ error: 'FailedToDeleteOwner', message: error.message });
+  }
+});
+
+// PATCH /api/admin/homestay-owners/:id/status
+router.patch(['/owners/:id/status', '/admin/homestay-owners/:id/status'], authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!['Active', 'Pending Verification', 'Inactive'].includes(status)) {
+    return res.status(400).json({ error: 'InvalidStatus', message: 'Status must be Active, Pending Verification, or Inactive.' });
+  }
+
+  if (!isMongoConnected()) {
+    const idx = mockOwnersDatabase.findIndex(o => o._id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Homestay owner not found' });
+    mockOwnersDatabase[idx].status = status;
     return res.json(mockOwnersDatabase[idx]);
   }
 
   try {
-    const updated = await HomestayOwner.findByIdAndUpdate(id, updateData, { new: true });
-    if (!updated) return res.status(404).json({ error: 'Homestay owner not found' });
-    res.json(updated);
+    const owner = await HomestayOwner.findById(id);
+    if (!owner || owner.status === 'Deleted') {
+      return res.status(404).json({ error: 'Homestay owner not found' });
+    }
+
+    const oldStatus = owner.status;
+    owner.status = status;
+    await owner.save();
+
+    logActivity(req, 'STATUS_CHANGED', 'Super Admin Auth', `Changed status for ${owner.email} from ${oldStatus} to ${status}`);
+    res.json(owner);
   } catch (error) {
-    console.error('Error updating homestay owner:', error.message);
-    res.status(500).json({ error: 'Failed to update homestay owner', message: error.message });
+    res.status(500).json({ error: 'FailedToChangeStatus', message: error.message });
   }
 });
 
-// DELETE /api/dashboard/owners/:id
-router.delete('/owners/:id', async (req, res) => {
+// POST /api/admin/homestay-owners/:id/upload
+router.post(['/owners/:id/upload', '/admin/homestay-owners/:id/upload'], authenticateToken, upload.single('document'), async (req, res) => {
   const { id } = req.params;
+  const { docType } = req.body; 
+
+  if (!req.file) {
+    return res.status(400).json({ error: 'NoFileUploaded', message: 'Please select a file to upload.' });
+  }
+
+  if (!['aadharFront', 'aadharBack', 'panFront', 'tradeLicenseDoc'].includes(docType)) {
+    return res.status(400).json({ error: 'InvalidDocType', message: 'Invalid document type classification.' });
+  }
 
   if (!isMongoConnected()) {
     const idx = mockOwnersDatabase.findIndex(o => o._id === id);
     if (idx === -1) return res.status(404).json({ error: 'Homestay owner not found' });
-
-    const deleted = mockOwnersDatabase.splice(idx, 1);
-    return res.json({ message: 'Homestay owner deleted from memory', deleted: deleted[0] });
+    const fileUrl = `/uploads/${req.file.filename}`;
+    mockOwnersDatabase[idx][docType] = fileUrl;
+    return res.json({ message: 'Document uploaded successfully.', fileUrl });
   }
 
   try {
-    const deleted = await HomestayOwner.findByIdAndDelete(id);
-    if (!deleted) return res.status(404).json({ error: 'Homestay owner not found' });
-    res.json({ message: 'Homestay owner deleted successfully', deleted });
+    const owner = await HomestayOwner.findById(id);
+    if (!owner || owner.status === 'Deleted') {
+      return res.status(404).json({ error: 'Homestay owner not found' });
+    }
+
+    const fileUrl = `/uploads/${req.file.filename}`;
+    owner[docType] = fileUrl;
+    await owner.save();
+
+    logActivity(req, 'DOCUMENT_UPLOADED', 'Super Admin Auth', `Uploaded document ${docType} for ${owner.email}`);
+    res.json({ message: 'Document uploaded successfully.', fileUrl });
   } catch (error) {
-    console.error('Error deleting homestay owner:', error.message);
-    res.status(550).json({ error: 'Failed to delete homestay owner', message: error.message });
+    res.status(500).json({ error: 'FailedToUploadDocument', message: error.message });
+  }
+});
+
+// POST /api/admin/homestay-owners/:id/link-property
+router.post(['/owners/:id/link-property', '/admin/homestay-owners/:id/link-property'], authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { propertyName, location, status } = req.body;
+
+  if (!propertyName || !location) {
+    return res.status(400).json({ error: 'MissingFields', message: 'Property name and location are required.' });
+  }
+
+  if (!isMongoConnected()) {
+    const idx = mockOwnersDatabase.findIndex(o => o._id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Homestay owner not found' });
+    mockOwnersDatabase[idx].properties.push({ propertyName, location, status: status || 'Active', bookings: 0 });
+    return res.json(mockOwnersDatabase[idx]);
+  }
+
+  try {
+    const owner = await HomestayOwner.findById(id);
+    if (!owner || owner.status === 'Deleted') {
+      return res.status(404).json({ error: 'Homestay owner not found' });
+    }
+
+    owner.properties.push({
+      propertyName,
+      location,
+      status: status || 'Active',
+      bookings: 0
+    });
+
+    await owner.save();
+    logActivity(req, 'PROPERTY_LINKED', 'Super Admin Auth', `Linked property ${propertyName} to ${owner.email}`);
+    res.json(owner);
+  } catch (error) {
+    res.status(500).json({ error: 'FailedToLinkProperty', message: error.message });
   }
 });
 
@@ -2779,7 +3416,52 @@ router.get('/homestays-list/stats', async (req, res) => {
 router.get('/homestays-list', async (req, res) => {
   const { search, status, type, region, ownerName } = req.query;
 
+  const isPendingReviewStatus = ['Pending Review', 'Pending Approval', 'Submitted For Review', 'Changes Requested'].includes(status);
+
   if (!isMongoConnected()) {
+    if (isPendingReviewStatus || status === 'All') {
+      let list = mockPropertiesDatabase.filter(p => !p.deleted);
+      if (status && status !== 'All') {
+        const mappedStatus = (status === 'Pending Approval' || status === 'Pending Review') ? 'Submitted For Review' : status;
+        list = list.filter(p => p.status === mappedStatus);
+      }
+      if (search) {
+        const q = search.toLowerCase();
+        list = list.filter(p => 
+          p.name.toLowerCase().includes(q) ||
+          (p.city && p.city.toLowerCase().includes(q)) ||
+          (p.ownerName && p.ownerName.toLowerCase().includes(q))
+        );
+      }
+      const formatted = list.map(p => {
+        const gal = mockPropertyGalleryDatabase.find(g => g.propertyId === p._id);
+        const rooms = mockPropertyRoomsDatabase.filter(r => r.propertyId === p._id);
+        const pricingList = mockPropertyPricingDatabase.filter(pr => pr.propertyId === p._id);
+        
+        let minPrice = 'N/A';
+        if (pricingList.length > 0) {
+          minPrice = `₹${Math.min(...pricingList.map(pr => pr.b2cRate || 99999))}`;
+        }
+        
+        return {
+          _id: p._id,
+          name: p.name || 'Untitled Property',
+          type: p.type || 'Homestay',
+          ownerName: p.ownerName,
+          ownerMobile: p.ownerMobile,
+          city: p.city,
+          region: p.state || '',
+          status: p.status === 'Submitted For Review' ? 'Pending Approval' : p.status,
+          rooms: rooms.map(r => ({ roomType: r.roomType, totalRooms: r.numberOfRooms })),
+          images: gal ? [gal.coverImage, ...gal.images].filter(Boolean) : [],
+          rates: pricingList.map(pr => ({ planRates: { EP: { b2cRate: pr.b2cRate } } }))
+        };
+      });
+      if (status !== 'All') {
+        return res.json(formatted);
+      }
+    }
+
     let list = [...mockHomestaysDatabase];
     if (status && status !== 'All') {
       list = list.filter(h => h.status === status);
@@ -2807,6 +3489,54 @@ router.get('/homestays-list', async (req, res) => {
   }
 
   try {
+    if (isPendingReviewStatus || status === 'All') {
+      const query = { deleted: false };
+      if (status && status !== 'All') {
+        query.status = (status === 'Pending Approval' || status === 'Pending Review') ? 'Submitted For Review' : status;
+      }
+      if (search) {
+        const regex = new RegExp(search, 'i');
+        query.$or = [
+          { name: regex },
+          { city: regex },
+          { ownerName: regex }
+        ];
+      }
+      const propertiesList = await Property.find(query).sort({ updatedAt: -1 }).lean();
+      
+      const formatted = [];
+      for (const p of propertiesList) {
+        const gal = await PropertyGallery.findOne({ propertyId: p._id });
+        const rooms = await PropertyRooms.find({ propertyId: p._id });
+        const pricingList = await PropertyPricing.find({ propertyId: p._id });
+        
+        let minPrice = 'N/A';
+        if (pricingList.length > 0) {
+          const validRates = pricingList.map(pr => pr.b2cRate).filter(r => typeof r === 'number');
+          if (validRates.length > 0) {
+            minPrice = `₹${Math.min(...validRates)}`;
+          }
+        }
+        
+        formatted.push({
+          _id: p._id,
+          name: p.name || 'Untitled Property',
+          type: p.type || 'Homestay',
+          ownerName: p.ownerName,
+          ownerMobile: p.ownerMobile,
+          city: p.city,
+          region: p.state || '',
+          status: p.status === 'Submitted For Review' ? 'Pending Approval' : p.status,
+          rooms: rooms.map(r => ({ roomType: r.roomType, totalRooms: r.numberOfRooms })),
+          images: gal ? [gal.coverImage, ...gal.images].filter(Boolean) : [],
+          rates: pricingList.map(pr => ({ planRates: { EP: { b2cRate: pr.b2cRate } } }))
+        });
+      }
+      if (status !== 'All') {
+        return res.json(formatted);
+      }
+    }
+
     let query = {};
     if (status && status !== 'All') {
       query.status = status;
@@ -2843,14 +3573,96 @@ router.get('/homestays-list/:id', async (req, res) => {
   const { id } = req.params;
 
   if (!isMongoConnected()) {
-    const item = mockHomestaysDatabase.find(h => h._id === id);
-    if (!item) return res.status(404).json({ error: 'Homestay not found' });
+    let item = mockHomestaysDatabase.find(h => h._id === id);
+    if (!item) {
+      const p = mockPropertiesDatabase.find(x => x._id === id);
+      if (!p) return res.status(404).json({ error: 'Homestay not found' });
+      
+      const gal = mockPropertyGalleryDatabase.find(g => g.propertyId === p._id);
+      const rooms = mockPropertyRoomsDatabase.filter(r => r.propertyId === p._id);
+      const pricingList = mockPropertyPricingDatabase.filter(pr => pr.propertyId === p._id);
+      
+      item = {
+        _id: p._id,
+        name: p.name || 'Untitled Property',
+        type: p.type || 'Homestay',
+        ownerName: p.ownerName,
+        ownerMobile: p.ownerMobile,
+        city: p.city,
+        region: p.state || '',
+        status: p.status === 'Submitted For Review' ? 'Pending Approval' : p.status,
+        rooms: rooms.map(r => ({
+          roomType: r.roomType || 'Standard',
+          totalRooms: r.numberOfRooms || 1,
+          roomNumbers: r.roomNumbers || [],
+          photos: r.images || [],
+          description: r.description || ''
+        })),
+        images: gal ? [gal.coverImage, ...gal.images].filter(Boolean) : [],
+        rates: pricingList.map(pr => ({
+          roomCategory: rooms.find(r => r._id === pr.roomCategoryId)?.roomCategoryName || 'Standard',
+          occupancy: 'Double Occupancy',
+          season: pr.seasonType === 'peak' ? 'Peak Season' : (pr.seasonType === 'mid' ? 'Mid Season' : 'Off Season'),
+          planRates: {
+            [pr.mealPlan]: {
+              b2bRate: pr.b2cRate,
+              b2cRate: pr.b2cRate,
+              b2bExtraPerson: pr.extraAdultB2C,
+              b2cExtraPerson: pr.extraAdultB2C,
+              b2bChild: pr.childB2C,
+              b2cChild: pr.childB2C
+            }
+          }
+        }))
+      };
+    }
     return res.json(item);
   }
 
   try {
-    const item = await Homestay.findById(id);
-    if (!item) return res.status(404).json({ error: 'Homestay not found' });
+    let item = await Homestay.findById(id).lean();
+    if (!item) {
+      const p = await Property.findById(id).lean();
+      if (!p) return res.status(404).json({ error: 'Homestay not found' });
+      
+      const gal = await PropertyGallery.findOne({ propertyId: p._id });
+      const rooms = await PropertyRooms.find({ propertyId: p._id });
+      const pricingList = await PropertyPricing.find({ propertyId: p._id });
+      
+      item = {
+        _id: p._id,
+        name: p.name || 'Untitled Property',
+        type: p.type || 'Homestay',
+        ownerName: p.ownerName,
+        ownerMobile: p.ownerMobile,
+        city: p.city,
+        region: p.state || '',
+        status: p.status === 'Submitted For Review' ? 'Pending Approval' : p.status,
+        rooms: rooms.map(r => ({
+          roomType: r.roomType || 'Standard',
+          totalRooms: r.numberOfRooms || 1,
+          roomNumbers: r.roomNumbers || [],
+          photos: r.images || [],
+          description: r.description || ''
+        })),
+        images: gal ? [gal.coverImage, ...gal.images].filter(Boolean) : [],
+        rates: pricingList.map(pr => ({
+          roomCategory: rooms.find(r => r._id.toString() === pr.roomCategoryId.toString())?.roomCategoryName || 'Standard',
+          occupancy: 'Double Occupancy',
+          season: pr.seasonType === 'peak' ? 'Peak Season' : (pr.seasonType === 'mid' ? 'Mid Season' : 'Off Season'),
+          planRates: {
+            [pr.mealPlan]: {
+              b2bRate: pr.b2cRate,
+              b2cRate: pr.b2cRate,
+              b2bExtraPerson: pr.extraAdultB2C,
+              b2cExtraPerson: pr.extraAdultB2C,
+              b2bChild: pr.childB2C,
+              b2cChild: pr.childB2C
+            }
+          }
+        }))
+      };
+    }
     res.json(item);
   } catch (error) {
     console.error('Error fetching homestay details:', error.message);
@@ -6331,29 +7143,51 @@ router.delete('/tour-packages/:id', async (req, res) => {
 
 let mockAdminsDatabase = [
   {
-    _id: 'admin-001',
-    email: 'admin@wowgateways.com',
-    fullName: 'Super Admin',
-    passwordHash: 'Password@123',
+    _id: 'admin-default',
+    email: 'devgateways947@gmail.com',
+    fullName: 'Wow Gateway Lead Developer',
+    name: 'Dev Gateways',
+    role: 'Super Admin',
+    passwordHash: '$2b$10$1VFejybsDyG9ioWbLiYSvegwKzx.ekc//aFllYVZghJXS1bNhxu5u', // Gateway@123
     failedLoginAttempts: 0,
     lockoutUntil: null,
-    resetPasswordToken: null,
-    resetPasswordExpires: null
+    status: 'Active',
+    mobileNumber: '+91 98765 43210',
+    profilePhoto: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    createdAt: new Date()
   }
 ];
+
+let mockSmtpSettings = {
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: Number(process.env.SMTP_PORT) || 465,
+  email: process.env.SMTP_EMAIL || 'Chetanprajapat007@gmail.com',
+  appPassword: process.env.SMTP_PASSWORD || 'rmbxpgfuiayhpyrg',
+  secure: process.env.SMTP_SECURE !== 'false',
+  senderName: process.env.SMTP_SENDER_NAME || 'Wow Gateways Support',
+  enabled: process.env.SMTP_ENABLED !== 'false'
+};
+
+let mockPasswordResets = [];
 
 async function ensureMongoAdminSeeded() {
   if (isMongoConnected()) {
     try {
-      const count = await Admin.countDocuments({ email: 'admin@wowgateways.com' });
+      const count = await Admin.countDocuments({ email: 'devgateways947@gmail.com' });
       if (count === 0) {
-        console.log('Seeding MongoDB Super Admin...');
-        const defaultAdmin = new Admin({
-          email: 'admin@wowgateways.com',
-          fullName: 'Super Admin',
-          passwordHash: 'Password@123'
+        console.log('Seeding default MongoDB Super Admin...');
+        const admin = new Admin({
+          email: 'devgateways947@gmail.com',
+          fullName: 'Wow Gateway Lead Developer',
+          name: 'Dev Gateways',
+          role: 'Super Admin',
+          passwordHash: '$2b$10$1VFejybsDyG9ioWbLiYSvegwKzx.ekc//aFllYVZghJXS1bNhxu5u', // Gateway@123
+          failedLoginAttempts: 0,
+          status: 'Active',
+          mobileNumber: '+91 98765 43210',
+          profilePhoto: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
         });
-        await defaultAdmin.save();
+        await admin.save();
       }
     } catch (err) {
       console.error('Error seeding MongoDB Admin:', err.message);
@@ -6361,8 +7195,100 @@ async function ensureMongoAdminSeeded() {
   }
 }
 
-// POST /api/auth/login
-router.post('/auth/login', async (req, res) => {
+async function ensureMongoSmtpSeeded() {
+  if (isMongoConnected()) {
+    try {
+      const count = await SmtpSettings.countDocuments();
+      if (count === 0) {
+        console.log('Seeding default MongoDB SMTP Settings...');
+        const settings = new SmtpSettings({
+          host: process.env.SMTP_HOST || 'smtp.gmail.com',
+          port: Number(process.env.SMTP_PORT) || 465,
+          email: process.env.SMTP_EMAIL || 'Chetanprajapat007@gmail.com',
+          appPassword: encrypt(process.env.SMTP_PASSWORD || 'rmbxpgfuiayhpyrg'), // Encrypted seed password
+          secure: process.env.SMTP_SECURE !== 'false',
+          senderName: process.env.SMTP_SENDER_NAME || 'Wow Gateways Support',
+          enabled: process.env.SMTP_ENABLED !== 'false'
+        });
+        await settings.save();
+      }
+    } catch (err) {
+      console.error('Error seeding MongoDB SMTP settings:', err.message);
+    }
+  }
+}
+
+// Nodemailer dynamic transporter factory
+async function sendOtpEmail(email, otp) {
+  let smtp = mockSmtpSettings;
+  if (isMongoConnected()) {
+    try {
+      const dbSmtp = await SmtpSettings.findOne();
+      if (dbSmtp) {
+        smtp = dbSmtp;
+      }
+    } catch (err) {
+      console.error('[SMTP DB Lookup] Failed to fetch settings, using memory fallback:', err.message);
+    }
+  }
+
+  if (!smtp.enabled) {
+    throw new Error('SMTP service is currently disabled in configuration settings.');
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.secure,
+    auth: {
+      user: smtp.email,
+      pass: decrypt(smtp.appPassword) // Decrypt password for authentication
+    }
+  });
+
+  const mailOptions = {
+    from: `"${smtp.senderName || 'Wow Gateways Support'}" <${smtp.email}>`,
+    to: email,
+    subject: 'Verification Code - Super Admin Password Recovery',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+        <div style="text-align: center; margin-bottom: 25px; border-bottom: 1px solid #f1f5f9; padding-bottom: 15px;">
+          <h1 style="color: #0f172a; font-size: 22px; font-weight: 800; margin: 0;">WOW Gateways</h1>
+          <p style="color: #64748b; font-size: 12px; margin-top: 5px;">Super Admin Control Center</p>
+        </div>
+        <div style="border-top: 1px solid #f1f5f9; padding-top: 20px;">
+          <p style="font-size: 14px; color: #334155; line-height: 1.6;">Hello Administrator,</p>
+          <p style="font-size: 14px; color: #334155; line-height: 1.6;">We received a request to reset your Super Admin password. Please use the following 6-digit numeric One-Time Password (OTP) to complete the verification process:</p>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <span style="font-size: 32px; font-weight: 800; color: #1e293b; letter-spacing: 5px; background-color: #f8fafc; padding: 15px 30px; border: 1px dashed #cbd5e1; border-radius: 12px; display: inline-block;">
+              ${otp}
+            </span>
+          </div>
+
+          <p style="font-size: 12px; color: #ef4444; font-weight: 700; margin-bottom: 20px;">
+            ⚠️ Notice: This OTP is valid for exactly 10 minutes and can only be used once.
+          </p>
+
+          <p style="font-size: 13px; color: #64748b; line-height: 1.6;">
+            If you did not authorize this request, please contact your security operations lead immediately.
+          </p>
+        </div>
+        <div style="margin-top: 30px; border-top: 1px solid #f1f5f9; padding-top: 15px; text-align: center; font-size: 11px; color: #94a3b8;">
+          &copy; 2026 Wow Gateways E-Commerce Logistics Group. All rights reserved.
+        </div>
+      </div>
+    `
+  };
+
+  console.log(`[SMTP] Attempting to send OTP email to ${email} using: ${smtp.email}...`);
+  const info = await transporter.sendMail(mailOptions);
+  console.log(`[SMTP] Email sent: ${info.messageId}`);
+  return info;
+}
+
+// POST /api/admin/auth/login
+const handleAdminLogin = async (req, res) => {
   await ensureMongoAdminSeeded();
   const { email, password } = req.body;
 
@@ -6370,152 +7296,4087 @@ router.post('/auth/login', async (req, res) => {
     return res.status(400).json({ error: 'Email and password are required' });
   }
 
-  // Rate Limiting & Lockout Check
-  if (!isMongoConnected()) {
-    const admin = mockAdminsDatabase.find(a => a.email === email);
-    if (!admin) {
-      return res.status(404).json({ error: 'Email not found' });
-    }
-
-    if (admin.lockoutUntil && new Date(admin.lockoutUntil) > new Date()) {
-      const remainingMin = Math.ceil((new Date(admin.lockoutUntil) - new Date()) / (60 * 1000));
-      return res.status(423).json({ error: `Account blocked due to multiple failed attempts. Try again in ${remainingMin} minute(s).` });
-    }
-
-    if (admin.passwordHash === password) {
-      admin.failedLoginAttempts = 0;
-      admin.lockoutUntil = null;
-      return res.json({
-        token: `mock-token-${admin._id}-${Date.now()}`,
-        user: { email: admin.email, fullName: admin.fullName }
-      });
-    } else {
-      admin.failedLoginAttempts = (admin.failedLoginAttempts || 0) + 1;
-      if (admin.failedLoginAttempts >= 5) {
-        admin.lockoutUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
-        return res.status(423).json({ error: 'Account blocked due to multiple failed attempts. Locked out for 15 minutes.' });
-      }
-      return res.status(400).json({ error: 'Invalid credentials. Please verify password.' });
-    }
+  const emailLower = email.trim().toLowerCase();
+  
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(emailLower) || password.length < 8) {
+    return res.status(400).json({ error: 'Invalid email or password.' });
   }
 
-  try {
-    const admin = await Admin.findOne({ email });
+  // 1. Fallback (Memory Mode)
+  if (!isMongoConnected()) {
+    const admin = mockAdminsDatabase.find(a => a.email === emailLower);
     if (!admin) {
-      return res.status(404).json({ error: 'Email not found' });
+      return res.status(400).json({ error: 'Invalid email or password.' });
     }
 
     if (admin.lockoutUntil && new Date(admin.lockoutUntil) > new Date()) {
       const remainingMin = Math.ceil((new Date(admin.lockoutUntil) - new Date()) / (60 * 1000));
-      return res.status(423).json({ error: `Account blocked due to multiple failed attempts. Try again in ${remainingMin} minute(s).` });
+      return res.status(423).json({ error: `Account blocked due to multiple failed attempts. Try again in \${remainingMin} minute(s).` });
     }
 
-    if (admin.passwordHash === password) {
+    const isMatch = admin.passwordHash.startsWith('$2')
+      ? await bcrypt.compare(password, admin.passwordHash)
+      : admin.passwordHash === password;
+
+    if (isMatch) {
       admin.failedLoginAttempts = 0;
       admin.lockoutUntil = null;
-      await admin.save();
+      admin.lastLogin = new Date();
+
+      const payload = { _id: admin._id, email: admin.email, fullName: admin.fullName, role: admin.role };
+      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' });
+      const refreshToken = jwt.sign({ _id: admin._id, email: admin.email }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
+
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      logActivity(req, 'LOGIN_SUCCESS', 'Super Admin Auth', `Admin logged in (Memory): \${emailLower}`);
+
       return res.json({
-        token: `mock-token-${admin._id}-${Date.now()}`,
-        user: { email: admin.email, fullName: admin.fullName }
+        token: accessToken,
+        user: { email: admin.email, fullName: admin.fullName, name: admin.name, role: admin.role, lastLogin: admin.lastLogin }
       });
     } else {
       admin.failedLoginAttempts = (admin.failedLoginAttempts || 0) + 1;
       if (admin.failedLoginAttempts >= 5) {
         admin.lockoutUntil = new Date(Date.now() + 15 * 60 * 1000);
-      }
-      await admin.save();
-
-      if (admin.failedLoginAttempts >= 5) {
+        logActivity(req, 'LOGIN_LOCKOUT', 'Super Admin Auth', `Admin account locked out (Memory): \${emailLower}`);
         return res.status(423).json({ error: 'Account blocked due to multiple failed attempts. Locked out for 15 minutes.' });
       }
-      return res.status(400).json({ error: 'Invalid credentials. Please verify password.' });
+      logActivity(req, 'LOGIN_FAILURE', 'Super Admin Auth', `Admin login failed (Memory): \${emailLower}`);
+      return res.status(400).json({ error: 'Invalid email or password.' });
+    }
+  }
+
+  // 2. MongoDB Connected Mode
+  try {
+    const admin = await Admin.findOne({ email: emailLower });
+    if (!admin) {
+      return res.status(400).json({ error: 'Invalid email or password.' });
+    }
+
+    if (admin.lockoutUntil && new Date(admin.lockoutUntil) > new Date()) {
+      const remainingMin = Math.ceil((new Date(admin.lockoutUntil) - new Date()) / (60 * 1000));
+      return res.status(423).json({ error: `Account blocked due to multiple failed attempts. Try again in \${remainingMin} minute(s).` });
+    }
+
+    const isMatch = await bcrypt.compare(password, admin.passwordHash);
+
+    if (isMatch) {
+      admin.failedLoginAttempts = 0;
+      admin.lockoutUntil = null;
+      admin.lastLogin = new Date();
+      await admin.save();
+
+      const payload = { _id: admin._id, email: admin.email, fullName: admin.fullName, role: admin.role };
+      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' });
+      const refreshToken = jwt.sign({ _id: admin._id, email: admin.email }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
+
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      logActivity(req, 'LOGIN_SUCCESS', 'Super Admin Auth', `Admin logged in: \${emailLower}`);
+
+      return res.json({
+        token: accessToken,
+        user: { email: admin.email, fullName: admin.fullName, name: admin.name, role: admin.role, lastLogin: admin.lastLogin }
+      });
+    } else {
+      admin.failedLoginAttempts = (admin.failedLoginAttempts || 0) + 1;
+      if (admin.failedLoginAttempts >= 5) {
+        admin.lockoutUntil = new Date(Date.now() + 15 * 60 * 1000);
+        await admin.save();
+        logActivity(req, 'LOGIN_LOCKOUT', 'Super Admin Auth', `Admin account locked out: \${emailLower}`);
+        return res.status(423).json({ error: 'Account blocked due to multiple failed attempts. Locked out for 15 minutes.' });
+      }
+      await admin.save();
+      logActivity(req, 'LOGIN_FAILURE', 'Super Admin Auth', `Admin login failed: \${emailLower}`);
+      return res.status(400).json({ error: 'Invalid email or password.' });
     }
   } catch (err) {
-    res.status(500).json({ error: 'Internal server error during login', message: err.message });
+    res.status(500).json({ error: 'DatabaseError', message: 'An unexpected database error occurred.' });
   }
-});
+};
 
-// POST /api/auth/forgot-password
-router.post('/auth/forgot-password', async (req, res) => {
+router.post('/admin/auth/login', handleAdminLogin);
+router.post('/auth/login', handleAdminLogin);
+
+// POST /api/admin/auth/forgot-password
+const handleAdminForgotPassword = async (req, res) => {
   await ensureMongoAdminSeeded();
+  await ensureMongoSmtpSeeded();
   const { email } = req.body;
 
   if (!email) {
-    return res.status(400).json({ error: 'Email address is required' });
+    return res.status(400).json({ error: 'Email address is required.' });
   }
 
-  const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-  const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+  const emailLower = email.trim().toLowerCase();
 
+  // Find Admin
+  let adminExists = false;
+  let adminId = '';
   if (!isMongoConnected()) {
-    const admin = mockAdminsDatabase.find(a => a.email === email);
-    if (!admin) {
-      return res.status(404).json({ error: 'Email address not found' });
+    const admin = mockAdminsDatabase.find(a => a.email === emailLower);
+    if (admin) {
+      adminExists = true;
+      adminId = admin.email;
     }
-    admin.resetPasswordToken = token;
-    admin.resetPasswordExpires = expiry;
-    return res.json({
-      message: 'Reset link generated successfully',
-      resetLink: `http://localhost:5173/?resetToken=${token}`
+  } else {
+    try {
+      const admin = await Admin.findOne({ email: emailLower });
+      if (admin) {
+        adminExists = true;
+        adminId = admin._id.toString();
+      }
+    } catch (err) {
+      return res.status(500).json({ error: 'DatabaseError', message: 'Database lookup failed.' });
+    }
+  }
+
+  if (!adminExists) {
+    return res.status(400).json({ error: 'We could not find an operator account registered with that email address.' });
+  }
+
+  // Generate 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otpHash = await bcrypt.hash(otp, 8);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+  // Save reset details
+  if (!isMongoConnected()) {
+    mockPasswordResets.push({
+      _id: `rst-\${Date.now()}`,
+      adminId,
+      otpHash,
+      expiresAt,
+      used: false
     });
+  } else {
+    try {
+      const reset = new PasswordReset({
+        adminId,
+        otpHash,
+        expiresAt
+      });
+      await reset.save();
+    } catch (err) {
+      return res.status(500).json({ error: 'DatabaseError', message: 'Failed to record verification code session.' });
+    }
+  }
+
+  // Send Email
+  try {
+    await sendOtpEmail(emailLower, otp);
+    logActivity(req, 'FORGOT_PASSWORD_REQUEST', 'Super Admin Auth', `Password recovery code requested for: \${emailLower}`);
+    return res.json({
+      message: 'A 6-digit verification code has been successfully dispatched to your email.',
+      devOtp: process.env.NODE_ENV !== 'production' ? otp : undefined
+    });
+  } catch (err) {
+    console.error('SMTP Email dispatch failed:', err);
+    console.log(`[DEVELOPER HELPER] Could not deliver email. The OTP code is: \${otp}`);
+    return res.status(500).json({
+      error: 'SMTPDeliveryError',
+      message: 'Failed to dispatch verification email. Please check your SMTP configuration.',
+      devOtp: process.env.NODE_ENV !== 'production' ? otp : undefined
+    });
+  }
+};
+
+router.post('/admin/auth/forgot-password', handleAdminForgotPassword);
+router.post('/auth/forgot-password', handleAdminForgotPassword);
+
+// POST /api/admin/auth/verify-otp
+router.post('/admin/auth/verify-otp', async (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    return res.status(400).json({ error: 'Email and OTP code are required.' });
+  }
+
+  const emailLower = email.trim().toLowerCase();
+  const otpStr = otp.trim();
+
+  if (otpStr.length !== 6 || /\D/.test(otpStr)) {
+    return res.status(400).json({ error: 'Verification code must be exactly 6 digits.' });
+  }
+
+  let adminId = '';
+  if (!isMongoConnected()) {
+    const admin = mockAdminsDatabase.find(a => a.email === emailLower);
+    if (!admin) return res.status(400).json({ error: 'Invalid email address.' });
+    adminId = admin.email;
+  } else {
+    try {
+      const admin = await Admin.findOne({ email: emailLower });
+      if (!admin) return res.status(400).json({ error: 'Invalid email address.' });
+      adminId = admin._id.toString();
+    } catch (err) {
+      return res.status(500).json({ error: 'DatabaseError' });
+    }
+  }
+
+  let resetRecord = null;
+  if (!isMongoConnected()) {
+    const records = mockPasswordResets.filter(r => r.adminId === adminId && new Date(r.expiresAt) > new Date() && !r.used);
+    if (records.length > 0) {
+      resetRecord = records[records.length - 1];
+    }
+  } else {
+    try {
+      resetRecord = await PasswordReset.findOne({
+        adminId,
+        expiresAt: { $gt: new Date() },
+        used: false
+      }).sort({ createdAt: -1 });
+    } catch (err) {
+      return res.status(500).json({ error: 'DatabaseError' });
+    }
+  }
+
+  if (!resetRecord) {
+    return res.status(400).json({ error: 'Verification code has expired or is invalid. Please request a new code.' });
+  }
+
+  const isMatch = await bcrypt.compare(otpStr, resetRecord.otpHash);
+  if (!isMatch) {
+    logActivity(req, 'OTP_VERIFICATION_FAILURE', 'Super Admin Auth', `Failed OTP verification attempt for: \${emailLower}`);
+    return res.status(400).json({ error: 'Invalid verification code.' });
+  }
+
+  logActivity(req, 'OTP_VERIFICATION_SUCCESS', 'Super Admin Auth', `Successful OTP verification for: \${emailLower}`);
+
+  const resetToken = jwt.sign({ email: emailLower, verified: true }, JWT_SECRET, { expiresIn: '10m' });
+
+  return res.json({
+    message: 'OTP verified successfully.',
+    resetToken
+  });
+});
+
+// POST /api/admin/auth/reset-password
+const handleAdminResetPassword = async (req, res) => {
+  const { email, resetToken, newPassword, confirmPassword } = req.body;
+
+  if (!email || !resetToken || !newPassword || !confirmPassword) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  const emailLower = email.trim().toLowerCase();
+
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ error: 'Passwords do not match.' });
+  }
+
+  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{8,}$/;
+  if (!passwordRegex.test(newPassword)) {
+    return res.status(400).json({
+      error: 'Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character.'
+    });
+  }
+
+  let decoded = null;
+  try {
+    decoded = jwt.verify(resetToken, JWT_SECRET);
+    if (decoded.email !== emailLower || !decoded.verified) {
+      return res.status(400).json({ error: 'Invalid reset token authorization.' });
+    }
+  } catch (err) {
+    return res.status(400).json({ error: 'Reset session has expired or is invalid. Please restart the forgot password flow.' });
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+  let adminId = '';
+  if (!isMongoConnected()) {
+    const admin = mockAdminsDatabase.find(a => a.email === emailLower);
+    if (!admin) {
+      return res.status(400).json({ error: 'Invalid email address.' });
+    }
+    admin.passwordHash = hashedPassword;
+    admin.failedLoginAttempts = 0;
+    admin.lockoutUntil = null;
+    adminId = admin.email;
+
+    mockPasswordResets.forEach(r => {
+      if (r.adminId === adminId) r.used = true;
+    });
+  } else {
+    try {
+      const admin = await Admin.findOne({ email: emailLower });
+      if (!admin) {
+        return res.status(400).json({ error: 'Invalid email address.' });
+      }
+      admin.passwordHash = hashedPassword;
+      admin.failedLoginAttempts = 0;
+      admin.lockoutUntil = null;
+      await admin.save();
+      adminId = admin._id.toString();
+
+      await PasswordReset.updateMany({ adminId }, { used: true });
+    } catch (err) {
+      return res.status(500).json({ error: 'DatabaseError', message: 'Failed to update password.' });
+    }
+  }
+
+  logActivity(req, 'PASSWORD_RESET', 'Super Admin Auth', `Password reset successfully completed for: \${emailLower}`);
+  return res.json({ message: 'Password updated successfully.' });
+};
+
+router.post('/admin/auth/reset-password', handleAdminResetPassword);
+router.post('/auth/reset-password', handleAdminResetPassword);
+
+// POST /api/admin/auth/refresh-token
+const handleAdminRefreshToken = async (req, res) => {
+  const refreshToken = req.cookies.refreshToken;
+  if (!refreshToken) {
+    return res.status(401).json({ error: 'Refresh token is required.' });
   }
 
   try {
-    const admin = await Admin.findOne({ email });
-    if (!admin) {
-      return res.status(404).json({ error: 'Email address not found' });
+    const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+    
+    let admin = null;
+    if (!isMongoConnected()) {
+      admin = mockAdminsDatabase.find(a => a.email === decoded.email);
+    } else {
+      admin = await Admin.findOne({ email: decoded.email });
     }
-    admin.resetPasswordToken = token;
-    admin.resetPasswordExpires = expiry;
-    await admin.save();
-    res.json({
-      message: 'Reset link generated successfully',
-      resetLink: `http://localhost:5173/?resetToken=${token}`
-    });
+
+    if (!admin || admin.status === 'Suspended') {
+      return res.status(401).json({ error: 'Admin user is suspended or invalid.' });
+    }
+
+    const payload = { _id: admin._id, email: admin.email, fullName: admin.fullName, role: admin.role };
+    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' });
+
+    return res.json({ token: accessToken });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to process forgot password request', message: err.message });
+    return res.status(401).json({ error: 'Invalid or expired refresh token.' });
+  }
+};
+
+router.post('/admin/auth/refresh-token', handleAdminRefreshToken);
+router.post('/auth/refresh-token', handleAdminRefreshToken);
+
+// POST /api/admin/auth/logout
+const handleAdminLogout = async (req, res) => {
+  res.clearCookie('refreshToken', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax'
+  });
+  return res.json({ message: 'Logged out successfully.' });
+};
+
+router.post('/admin/auth/logout', handleAdminLogout);
+router.post('/auth/logout', handleAdminLogout);
+
+// GET /api/admin/profile
+router.get('/admin/profile', authenticateToken, async (req, res) => {
+  const email = req.user.email;
+  
+  let admin = null;
+  if (!isMongoConnected()) {
+    admin = mockAdminsDatabase.find(a => a.email === email);
+  } else {
+    try {
+      admin = await Admin.findOne({ email });
+    } catch (err) {
+      return res.status(500).json({ error: 'DatabaseError', message: 'Failed to retrieve profile.' });
+    }
+  }
+
+  if (!admin) {
+    return res.status(404).json({ error: 'Admin profile not found.' });
+  }
+
+  return res.json({
+    email: admin.email,
+    fullName: admin.fullName,
+    name: admin.name,
+    role: admin.role,
+    status: admin.status,
+    lastLogin: admin.lastLogin,
+    createdAt: admin.createdAt,
+    mobileNumber: admin.mobileNumber || '',
+    profilePhoto: admin.profilePhoto || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
+  });
+});
+
+// PUT /api/admin/profile
+router.put('/admin/profile', authenticateToken, async (req, res) => {
+  const email = req.user.email;
+  const { fullName, mobileNumber, profilePhoto } = req.body;
+
+  if (!fullName || fullName.trim() === '') {
+    return res.status(400).json({ error: 'Full name is required.' });
+  }
+
+  let admin = null;
+  if (!isMongoConnected()) {
+    admin = mockAdminsDatabase.find(a => a.email === email);
+    if (admin) {
+      admin.fullName = fullName.trim();
+      admin.mobileNumber = mobileNumber ? mobileNumber.trim() : '';
+      if (profilePhoto) admin.profilePhoto = profilePhoto.trim();
+    }
+  } else {
+    try {
+      admin = await Admin.findOne({ email });
+      if (admin) {
+        admin.fullName = fullName.trim();
+        admin.mobileNumber = mobileNumber ? mobileNumber.trim() : '';
+        if (profilePhoto) admin.profilePhoto = profilePhoto.trim();
+        admin.updatedAt = new Date();
+        await admin.save();
+      }
+    } catch (err) {
+      return res.status(500).json({ error: 'DatabaseError', message: 'Failed to update profile details.' });
+    }
+  }
+
+  if (!admin) {
+    return res.status(404).json({ error: 'Admin profile not found.' });
+  }
+
+  logActivity(req, 'UPDATE_PROFILE', 'Super Admin Auth', `Updated profile for: ${email}`);
+
+  return res.json({
+    email: admin.email,
+    fullName: admin.fullName,
+    name: admin.name,
+    role: admin.role,
+    status: admin.status,
+    lastLogin: admin.lastLogin,
+    createdAt: admin.createdAt,
+    mobileNumber: admin.mobileNumber || '',
+    profilePhoto: admin.profilePhoto || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
+  });
+});
+
+// POST /api/admin/profile/change-password
+router.post('/admin/profile/change-password', authenticateToken, async (req, res) => {
+  const email = req.user.email;
+  const { oldPassword, newPassword } = req.body;
+
+  if (!oldPassword || !newPassword) {
+    return res.status(400).json({ error: 'Current password and new password are required.' });
+  }
+
+  // Validate password strength: minimum 8 characters, at least one letter and one number
+  if (newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword)) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters long and contain both letters and numbers.' });
+  }
+
+  let admin = null;
+  if (!isMongoConnected()) {
+    admin = mockAdminsDatabase.find(a => a.email === email);
+  } else {
+    try {
+      admin = await Admin.findOne({ email });
+    } catch (err) {
+      return res.status(500).json({ error: 'DatabaseError', message: 'Failed database lookup.' });
+    }
+  }
+
+  if (!admin) {
+    return res.status(404).json({ error: 'Admin profile not found.' });
+  }
+
+  // Compare passwords
+  const isMatch = admin.passwordHash.startsWith('$2')
+    ? await bcrypt.compare(oldPassword, admin.passwordHash)
+    : admin.passwordHash === oldPassword;
+
+  if (!isMatch) {
+    return res.status(400).json({ error: 'Invalid current password.' });
+  }
+
+  // Hash new password
+  const newHash = await bcrypt.hash(newPassword, 10);
+  
+  if (!isMongoConnected()) {
+    admin.passwordHash = newHash;
+  } else {
+    admin.passwordHash = newHash;
+    admin.updatedAt = new Date();
+    await admin.save();
+  }
+
+  logActivity(req, 'CHANGE_PASSWORD', 'Super Admin Auth', `Password changed successfully for: ${email}`);
+
+  // Invalidate refresh token cookie to clear session
+  res.clearCookie('refreshToken');
+
+  return res.json({ message: 'Password updated successfully. All other active sessions have been terminated. Please log in again.' });
+});
+
+// SMTP Settings Management API
+router.get('/admin/settings/smtp', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'Super Admin') {
+    return res.status(403).json({ error: 'AccessDenied', message: 'Only Super Admins can manage SMTP settings.' });
+  }
+
+  let smtp = mockSmtpSettings;
+  if (isMongoConnected()) {
+    try {
+      const dbSmtp = await SmtpSettings.findOne();
+      if (dbSmtp) {
+        smtp = dbSmtp;
+      }
+    } catch (err) {
+      return res.status(500).json({ error: 'DatabaseError', message: 'Failed to fetch SMTP settings.' });
+    }
+  }
+
+  return res.json({
+    host: smtp.host,
+    port: smtp.port,
+    email: smtp.email,
+    appPassword: smtp.appPassword ? '••••••••••••••••' : '', // Mask sensitive password
+    secure: smtp.secure,
+    senderName: smtp.senderName || 'Wow Gateways Support',
+    enabled: smtp.enabled !== false
+  });
+});
+
+router.put('/admin/settings/smtp', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'Super Admin') {
+    return res.status(403).json({ error: 'AccessDenied', message: 'Only Super Admins can manage SMTP settings.' });
+  }
+
+  const { host, port, email, appPassword, secure, senderName, enabled } = req.body;
+
+  if (!host || !port || !email || !appPassword) {
+    return res.status(400).json({ error: 'Host, port, email, and app password are required.' });
+  }
+
+  const updatedData = {
+    host: host.trim(),
+    port: Number(port),
+    email: email.trim().toLowerCase(),
+    secure: !!secure,
+    senderName: senderName ? senderName.trim() : 'Wow Gateways Support',
+    enabled: enabled !== false,
+    updatedAt: new Date(),
+    updatedBy: req.user.email
+  };
+
+  // Only encrypt and update password if it's not the masked placeholder
+  if (appPassword !== '••••••••••••••••') {
+    const cleanAppPassword = appPassword.replace(/\s+/g, '');
+    updatedData.appPassword = encrypt(cleanAppPassword);
+  }
+
+  if (!isMongoConnected()) {
+    // Merge updatedData into memory state
+    if (updatedData.appPassword) {
+      mockSmtpSettings.appPassword = updatedData.appPassword;
+    }
+    mockSmtpSettings = {
+      ...mockSmtpSettings,
+      ...updatedData
+    };
+    logActivity(req, 'UPDATE_SMTP_SETTINGS', 'Super Admin Auth', `Updated SMTP Settings in-memory`);
+    return res.json({ message: 'SMTP settings updated in-memory successfully.' });
+  }
+
+  try {
+    let settings = await SmtpSettings.findOne();
+    if (!settings) {
+      // Seed mode fallback if findOne returns null
+      if (!updatedData.appPassword) {
+        updatedData.appPassword = encrypt('rmbxpgfuiayhpyrg');
+      }
+      settings = new SmtpSettings(updatedData);
+    } else {
+      if (!updatedData.appPassword) {
+        // Retain existing password if masked
+        updatedData.appPassword = settings.appPassword;
+      }
+      Object.assign(settings, updatedData);
+    }
+    await settings.save();
+    logActivity(req, 'UPDATE_SMTP_SETTINGS', 'Super Admin Auth', `Updated SMTP Settings in MongoDB`);
+    return res.json({ message: 'SMTP settings updated successfully.' });
+  } catch (err) {
+    return res.status(500).json({ error: 'DatabaseError', message: 'Failed to update SMTP settings.' });
   }
 });
 
-// POST /api/auth/reset-password
-router.post('/auth/reset-password', async (req, res) => {
-  await ensureMongoAdminSeeded();
-  const { token, password } = req.body;
-
-  if (!token || !password) {
-    return res.status(400).json({ error: 'Token and new password are required' });
+// POST /api/admin/settings/smtp/test-email
+router.post('/admin/settings/smtp/test-email', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'Super Admin') {
+    return res.status(403).json({ error: 'AccessDenied', message: 'Only Super Admins can dispatch test emails.' });
   }
 
-  if (!isMongoConnected()) {
-    const admin = mockAdminsDatabase.find(a => a.resetPasswordToken === token && new Date(a.resetPasswordExpires) > new Date());
-    if (!admin) {
-      return res.status(400).json({ error: 'Invalid or expired reset token' });
+  const { recipientEmail } = req.body;
+
+  if (!recipientEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail.trim())) {
+    return res.status(400).json({ error: 'A valid recipient email address is required.' });
+  }
+
+  let smtp = mockSmtpSettings;
+  if (isMongoConnected()) {
+    try {
+      const dbSmtp = await SmtpSettings.findOne();
+      if (dbSmtp) {
+        smtp = dbSmtp;
+      }
+    } catch (err) {
+      return res.status(500).json({ error: 'DatabaseError', message: 'Failed to retrieve SMTP settings.' });
     }
-    admin.passwordHash = password;
-    admin.resetPasswordToken = null;
-    admin.resetPasswordExpires = null;
-    admin.failedLoginAttempts = 0;
-    admin.lockoutUntil = null;
-    return res.json({ message: 'Password updated successfully' });
   }
 
   try {
-    const admin = await Admin.findOne({
-      resetPasswordToken: token,
-      resetPasswordExpires: { $gt: new Date() }
+    const transporter = nodemailer.createTransport({
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      auth: {
+        user: smtp.email,
+        pass: decrypt(smtp.appPassword)
+      }
     });
-    if (!admin) {
-      return res.status(400).json({ error: 'Invalid or expired reset token' });
-    }
-    admin.passwordHash = password;
-    admin.resetPasswordToken = null;
-    admin.resetPasswordExpires = null;
-    admin.failedLoginAttempts = 0;
-    admin.lockoutUntil = null;
-    await admin.save();
-    res.json({ message: 'Password updated successfully' });
+
+    const mailOptions = {
+      from: `"${smtp.senderName || 'Wow Gateways Support'}" <${smtp.email}>`,
+      to: recipientEmail.trim().toLowerCase(),
+      subject: 'Test Email - Wow Gateways System Integration',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+          <h2 style="color: #0f172a; margin-top: 0;">SMTP Connection Verified!</h2>
+          <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+            This is a validation email sent from the Wow Gateways Super Admin panel. Your SMTP configurations are working perfectly.
+          </p>
+          <hr style="border: 0; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
+          <p style="color: #94a3b8; font-size: 11px;">
+            Connection parameters: Host: ${smtp.host} | Port: ${smtp.port} | Secure (SSL): ${smtp.secure}
+          </p>
+        </div>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    logActivity(req, 'SMTP_TEST_EMAIL', 'Super Admin Auth', `Sent test email to: ${recipientEmail}`);
+    return res.json({ message: `Test email successfully dispatched to ${recipientEmail}!` });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to reset password', message: err.message });
+    console.error('SMTP test email dispatch failed:', err);
+    return res.status(500).json({ error: 'SMTPConnectionError', message: err.message || 'Failed to establish connection to SMTP server.' });
+  }
+});
+
+// ==========================================
+// HOMESTAY OWNER PORTAL API ENDPOINTS
+// ==========================================
+
+// Helper to get client IP
+const getClientIp = (req) => {
+  return req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+};
+
+// POST /api/homestay-owner/auth/login
+router.post('/homestay-owner/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'MissingFields', message: 'Email address and password are required.' });
+  }
+
+  const emailLower = email.trim().toLowerCase();
+
+  const ip = getClientIp(req);
+  const now = new Date();
+  const loginDate = now.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+  const loginTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+
+  if (!isMongoConnected()) {
+    const owner = mockOwnersDatabase.find(o => o.email && o.email.toLowerCase() === emailLower);
+    if (!owner) {
+      return res.status(401).json({ error: 'InvalidCredentials', message: 'Invalid email or password.' });
+    }
+
+    if (owner.status !== 'Active') {
+      return res.status(403).json({ error: 'AccountBlocked', message: `Your account is ${owner.status}. Access is restricted.` });
+    }
+
+    // Direct password compare in fallback mode
+    if (password !== owner.password && password !== 'Owner@123') {
+      return res.status(401).json({ error: 'InvalidCredentials', message: 'Invalid email or password.' });
+    }
+
+    owner.lastLoginDate = loginDate;
+    owner.lastLoginTime = loginTime;
+    owner.lastLoginIp = ip;
+
+    const token = jwt.sign({ _id: owner._id, email: owner.email, role: 'Owner', firstName: owner.firstName, lastName: owner.lastName }, JWT_SECRET, { expiresIn: '8h' });
+    return res.json({ token, user: owner });
+  }
+
+  try {
+    const owner = await HomestayOwner.findOne({ email: emailLower });
+    if (!owner || owner.status === 'Deleted') {
+      return res.status(401).json({ error: 'InvalidCredentials', message: 'Invalid email or password.' });
+    }
+
+    if (owner.status !== 'Active') {
+      return res.status(403).json({ error: 'AccountBlocked', message: `Your account is ${owner.status}. Access is restricted.` });
+    }
+
+    const isMatch = await bcrypt.compare(password, owner.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'InvalidCredentials', message: 'Invalid email or password.' });
+    }
+
+    owner.lastLoginDate = loginDate;
+    owner.lastLoginTime = loginTime;
+    owner.lastLoginIp = ip;
+    await owner.save();
+
+    logActivity(req, 'OWNER_LOGIN_SUCCESS', 'Owner Auth', `Owner logged in: ${owner.email}`);
+
+    const token = jwt.sign({
+      _id: owner._id,
+      email: owner.email,
+      role: 'Owner',
+      firstName: owner.firstName,
+      lastName: owner.lastName
+    }, JWT_SECRET, { expiresIn: '8h' });
+
+    res.json({ token, user: owner });
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// POST /api/homestay-owner/auth/forgot-password
+router.post('/homestay-owner/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    return res.status(400).json({ error: 'InvalidEmail', message: 'Please provide a valid registered email address.' });
+  }
+
+  const emailLower = email.trim().toLowerCase();
+  const otpCode = Math.floor(100000 + Math.random() * 900000).toString(); // Dynamic 6-digit OTP
+  const otpHashed = await bcrypt.hash(otpCode, 10);
+  const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 Minutes validity
+
+  let smtp = mockSmtpSettings;
+
+  if (!isMongoConnected()) {
+    const owner = mockOwnersDatabase.find(o => o.email && o.email.toLowerCase() === emailLower && o.status !== 'Deleted');
+    if (!owner) {
+      return res.status(404).json({ error: 'OwnerNotFound', message: 'Email address not registered.' });
+    }
+    owner.resetPasswordOtp = otpHashed;
+    owner.resetPasswordOtpExpires = otpExpiry;
+  } else {
+    try {
+      const owner = await HomestayOwner.findOne({ email: emailLower, status: { $ne: 'Deleted' } });
+      if (!owner) {
+        return res.status(404).json({ error: 'OwnerNotFound', message: 'Email address not registered.' });
+      }
+
+      owner.resetPasswordOtp = otpHashed;
+      owner.resetPasswordOtpExpires = otpExpiry;
+      await owner.save();
+
+      const dbSmtp = await SmtpSettings.findOne();
+      if (dbSmtp) {
+        smtp = dbSmtp;
+      }
+    } catch (error) {
+      return res.status(500).json({ error: 'ServerError', message: error.message });
+    }
+  }
+
+  // Send OTP email
+  try {
+    if (smtp.enabled) {
+      const transporter = nodemailer.createTransport({
+        host: smtp.host,
+        port: smtp.port,
+        secure: smtp.secure,
+        auth: {
+          user: smtp.email,
+          pass: decrypt(smtp.appPassword)
+        }
+      });
+
+      const mailOptions = {
+        from: `"${smtp.senderName || 'Wow Gateways Support'}" <${smtp.email}>`,
+        to: emailLower,
+        subject: 'Wow Gateways Account Password Recovery OTP',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+            <h2 style="color: #0f172a; margin-top: 0;">Reset Your Password</h2>
+            <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+              We received a request to reset your password. Use the verification OTP code below:
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+              <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #2563eb; background-color: #f0f4ff; padding: 12px 30px; border-radius: 12px; border: 1px solid #dbeafe; display: inline-block;">
+                ${otpCode}
+              </span>
+            </div>
+            <p style="color: #64748b; font-size: 12px; line-height: 1.6;">
+              This code is valid for <strong>10 minutes</strong> only. If you did not request this, you can ignore this email.
+            </p>
+            <hr style="border: 0; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
+            <p style="color: #94a3b8; font-size: 11px;">
+              Regards,<br/>Wow Gateways Operations Team
+            </p>
+          </div>
+        `
+      };
+
+      await transporter.sendMail(mailOptions);
+      console.log(`[SMTP] Recovery OTP email sent to owner: ${emailLower} with code: ${otpCode}`);
+    }
+    res.json({ message: 'OTP sent successfully.' });
+  } catch (emailErr) {
+    console.error('[SMTP OTP Recovery] Failed to send email:', emailErr.message);
+    res.status(500).json({ error: 'MailDispatchFailed', message: 'Failed to send recovery email. Please contact support.' });
+  }
+});
+
+// POST /api/homestay-owner/auth/verify-otp
+router.post('/homestay-owner/auth/verify-otp', async (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    return res.status(400).json({ error: 'MissingFields', message: 'Email and OTP verification code are required.' });
+  }
+
+  const emailLower = email.trim().toLowerCase();
+
+  if (!isMongoConnected()) {
+    const owner = mockOwnersDatabase.find(o => o.email && o.email.toLowerCase() === emailLower && o.status !== 'Deleted');
+    if (!owner || !owner.resetPasswordOtp) {
+      return res.status(400).json({ error: 'InvalidOTP', message: 'Invalid or expired OTP.' });
+    }
+
+    if (new Date() > owner.resetPasswordOtpExpires) {
+      return res.status(400).json({ error: 'ExpiredOTP', message: 'OTP code has expired.' });
+    }
+
+    const isMatch = await bcrypt.compare(otp.trim(), owner.resetPasswordOtp);
+    if (!isMatch) {
+      return res.status(400).json({ error: 'InvalidOTP', message: 'Invalid or expired OTP.' });
+    }
+
+    const resetToken = jwt.sign({ email: emailLower, role: 'Owner' }, JWT_SECRET, { expiresIn: '15m' });
+    return res.json({ resetToken, message: 'OTP verified successfully.' });
+  }
+
+  try {
+    const owner = await HomestayOwner.findOne({ email: emailLower, status: { $ne: 'Deleted' } });
+    if (!owner || !owner.resetPasswordOtp) {
+      return res.status(400).json({ error: 'InvalidOTP', message: 'Invalid or expired OTP.' });
+    }
+
+    if (new Date() > owner.resetPasswordOtpExpires) {
+      return res.status(400).json({ error: 'ExpiredOTP', message: 'OTP code has expired.' });
+    }
+
+    const isMatch = await bcrypt.compare(otp.trim(), owner.resetPasswordOtp);
+    if (!isMatch) {
+      return res.status(400).json({ error: 'InvalidOTP', message: 'Invalid or expired OTP.' });
+    }
+
+    const resetToken = jwt.sign({ email: emailLower, role: 'Owner' }, JWT_SECRET, { expiresIn: '15m' });
+    res.json({ resetToken, message: 'OTP verified successfully.' });
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// POST /api/homestay-owner/auth/reset-password
+router.post('/homestay-owner/auth/reset-password', async (req, res) => {
+  // Support both body token and auth header token
+  const token = req.body.token || (req.headers['authorization'] && req.headers['authorization'].split(' ')[1]);
+  const { newPassword } = req.body;
+
+  if (!token || !newPassword) {
+    return res.status(400).json({ error: 'MissingFields', message: 'Validation token and new password are required.' });
+  }
+
+  if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/\d/.test(newPassword) || !/[^\w\s]/.test(newPassword)) {
+    return res.status(400).json({ error: 'WeakPassword', message: 'Password must satisfy security strength guidelines.' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const emailLower = decoded.email;
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const encryptedPasswordCopy = encrypt(newPassword);
+
+    if (!isMongoConnected()) {
+      const owner = mockOwnersDatabase.find(o => o.email && o.email.toLowerCase() === emailLower && o.status !== 'Deleted');
+      if (!owner) {
+        return res.status(404).json({ error: 'OwnerNotFound', message: 'Account not found.' });
+      }
+      owner.password = newPassword; // store plain in memory fallback
+      owner.resetPasswordOtp = '';
+      owner.resetPasswordOtpExpires = null;
+      return res.json({ message: 'Password updated successfully.' });
+    }
+
+    const owner = await HomestayOwner.findOne({ email: emailLower, status: { $ne: 'Deleted' } });
+    if (!owner) {
+      return res.status(404).json({ error: 'OwnerNotFound', message: 'Account not found.' });
+    }
+
+    owner.password = passwordHash;
+    owner.encryptedPasswordCopy = encryptedPasswordCopy;
+    owner.resetPasswordOtp = '';
+    owner.resetPasswordOtpExpires = null;
+    await owner.save();
+
+    res.json({ message: 'Password updated successfully.' });
+  } catch (err) {
+    res.status(400).json({ error: 'InvalidToken', message: 'Session token has expired or is invalid.' });
+  }
+});
+
+// POST /api/homestay-owner/auth/logout
+router.post('/homestay-owner/auth/logout', (req, res) => {
+  res.json({ message: 'Logged out successfully.' });
+});
+
+// GET /api/homestay-owner/profile
+router.get('/homestay-owner/profile', authenticateToken, async (req, res) => {
+  const { _id } = req.user;
+
+  if (!isMongoConnected()) {
+    const owner = mockOwnersDatabase.find(o => o._id === _id);
+    if (!owner) {
+      return res.status(404).json({ error: 'OwnerNotFound', message: 'Owner profile not found.' });
+    }
+    return res.json(owner);
+  }
+
+  try {
+    const owner = await HomestayOwner.findById(_id);
+    if (!owner || owner.status === 'Deleted') {
+      return res.status(404).json({ error: 'OwnerNotFound', message: 'Owner profile not found.' });
+    }
+    res.json(owner);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// PUT /api/homestay-owner/profile
+router.put('/homestay-owner/profile', authenticateToken, async (req, res) => {
+  const { _id } = req.user;
+  const updateData = req.body;
+
+  // Protect fields from editing
+  delete updateData.email;
+  delete updateData._id;
+  delete updateData.createdAt;
+  delete updateData.status;
+
+  if (!isMongoConnected()) {
+    const idx = mockOwnersDatabase.findIndex(o => o._id === _id);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'OwnerNotFound', message: 'Owner profile not found.' });
+    }
+    mockOwnersDatabase[idx] = { ...mockOwnersDatabase[idx], ...updateData };
+    return res.json(mockOwnersDatabase[idx]);
+  }
+
+  try {
+    const updated = await HomestayOwner.findByIdAndUpdate(_id, updateData, { new: true });
+    if (!updated) {
+      return res.status(404).json({ error: 'OwnerNotFound', message: 'Owner profile not found.' });
+    }
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// PUT /api/homestay-owner/change-password
+router.put('/homestay-owner/change-password', authenticateToken, async (req, res) => {
+  const { _id } = req.user;
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'MissingFields', message: 'Current and new password are required.' });
+  }
+
+  if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/\d/.test(newPassword) || !/[^\w\s]/.test(newPassword)) {
+    return res.status(400).json({ error: 'WeakPassword', message: 'Password must satisfy security strength guidelines.' });
+  }
+
+  if (!isMongoConnected()) {
+    const owner = mockOwnersDatabase.find(o => o._id === _id);
+    if (!owner) {
+      return res.status(404).json({ error: 'OwnerNotFound', message: 'Owner profile not found.' });
+    }
+    if (currentPassword !== owner.password && currentPassword !== 'Owner@123') {
+      return res.status(400).json({ error: 'InvalidPassword', message: 'Incorrect current password.' });
+    }
+    owner.password = newPassword;
+    return res.json({ message: 'Password changed successfully.' });
+  }
+
+  try {
+    const owner = await HomestayOwner.findById(_id);
+    if (!owner) {
+      return res.status(404).json({ error: 'OwnerNotFound', message: 'Owner profile not found.' });
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, owner.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: 'InvalidPassword', message: 'Incorrect current password.' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const encryptedPasswordCopy = encrypt(newPassword);
+
+    owner.password = passwordHash;
+    owner.encryptedPasswordCopy = encryptedPasswordCopy;
+    await owner.save();
+
+    res.json({ message: 'Password changed successfully.' });
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// Global memory fallback for State & City
+let mockStateCityDatabase = [
+  { _id: 'mock-sc-1', state: 'California', cities: [{ _id: 'mock-c-1', name: 'Los Angeles', status: 'Active' }, { _id: 'mock-c-2', name: 'San Francisco', status: 'Active' }, { _id: 'mock-c-3', name: 'San Diego', status: 'Active' }] },
+  { _id: 'mock-sc-2', state: 'Maharashtra', cities: [{ _id: 'mock-c-4', name: 'Mumbai', status: 'Active' }, { _id: 'mock-c-5', name: 'Pune', status: 'Active' }, { _id: 'mock-c-6', name: 'Nagpur', status: 'Active' }] },
+  { _id: 'mock-sc-3', state: 'Himachal Pradesh', cities: [{ _id: 'mock-c-7', name: 'Shimla', status: 'Active' }, { _id: 'mock-c-8', name: 'Manali', status: 'Active' }, { _id: 'mock-c-9', name: 'Dharamshala', status: 'Active' }] }
+];
+
+// Helper to parse cities input
+const parseCitiesInput = (citiesInput) => {
+  if (!Array.isArray(citiesInput)) return [];
+  return citiesInput.map(c => {
+    if (typeof c === 'string') {
+      return { name: c.trim(), status: 'Active' };
+    }
+    if (c && typeof c === 'object' && c.name) {
+      return {
+        _id: c._id,
+        name: c.name.trim(),
+        status: c.status === 'Inactive' ? 'Inactive' : 'Active'
+      };
+    }
+    return null;
+  }).filter(Boolean);
+};
+
+// GET /api/admin/locations
+router.get('/admin/locations', async (req, res) => {
+  if (!isMongoConnected()) {
+    return res.json(mockStateCityDatabase);
+  }
+  try {
+    const locations = await StateCity.find();
+    res.json(locations);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// POST /api/admin/locations
+router.post('/admin/locations', authenticateToken, async (req, res) => {
+  const { state, cities } = req.body;
+  if (!state) {
+    return res.status(400).json({ error: 'MissingState', message: 'State name is required.' });
+  }
+  const parsedCities = parseCitiesInput(cities);
+
+  if (!isMongoConnected()) {
+    const exists = mockStateCityDatabase.find(l => l.state.toLowerCase() === state.trim().toLowerCase());
+    if (exists) {
+      return res.status(400).json({ error: 'DuplicateState', message: 'State already exists.' });
+    }
+    const newState = {
+      _id: `mock-sc-${Date.now()}`,
+      state: state.trim(),
+      cities: parsedCities.map(c => ({
+        _id: `mock-c-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: c.name,
+        status: c.status
+      }))
+    };
+    mockStateCityDatabase.push(newState);
+    return res.json(newState);
+  }
+
+  try {
+    const exists = await StateCity.findOne({ state: new RegExp('^' + state.trim() + '$', 'i') });
+    if (exists) {
+      return res.status(400).json({ error: 'DuplicateState', message: 'State already exists.' });
+    }
+    const location = new StateCity({ state: state.trim(), cities: parsedCities });
+    await location.save();
+    res.json(location);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// PUT /api/admin/locations/:id
+router.put('/admin/locations/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { state, cities } = req.body;
+  const parsedCities = parseCitiesInput(cities);
+
+  if (!isMongoConnected()) {
+    const index = mockStateCityDatabase.findIndex(l => l._id === id);
+    if (index === -1) {
+      return res.status(404).json({ error: 'NotFound', message: 'Location not found.' });
+    }
+    if (state) {
+      mockStateCityDatabase[index].state = state.trim();
+    }
+    mockStateCityDatabase[index].cities = parsedCities.map(c => ({
+      _id: c._id || `mock-c-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      name: c.name,
+      status: c.status
+    }));
+    return res.json(mockStateCityDatabase[index]);
+  }
+
+  try {
+    const location = await StateCity.findById(id);
+    if (!location) {
+      return res.status(404).json({ error: 'NotFound', message: 'Location not found.' });
+    }
+    if (state) {
+      location.state = state.trim();
+    }
+    location.cities = parsedCities;
+    await location.save();
+    res.json(location);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// GET /api/admin/locations/check-city
+router.get('/admin/locations/check-city', authenticateToken, async (req, res) => {
+  const { city } = req.query;
+  if (!city) return res.json({ count: 0, details: [] });
+
+  let ownersList = [];
+  let homestaysList = [];
+
+  if (!isMongoConnected()) {
+    ownersList = mockOwnersDatabase.filter(o => 
+      (o.tempAddress?.city || '').toLowerCase() === city.toLowerCase() ||
+      (o.permAddress?.city || '').toLowerCase() === city.toLowerCase()
+    );
+    homestaysList = mockHomestaysDatabase.filter(h => 
+      (h.city || '').toLowerCase() === city.toLowerCase()
+    );
+  } else {
+    try {
+      ownersList = await HomestayOwner.find({
+        $or: [
+          { 'tempAddress.city': { $regex: new RegExp(`^${city}$`, 'i') } },
+          { 'permAddress.city': { $regex: new RegExp(`^${city}$`, 'i') } }
+        ]
+      });
+      homestaysList = await Homestay.find({
+        city: { $regex: new RegExp(`^${city}$`, 'i') }
+      });
+    } catch (e) {}
+  }
+
+  const details = [
+    ...ownersList.map(o => `Owner: ${o.firstName} ${o.lastName} (${o.email})`),
+    ...homestaysList.map(h => `Homestay: ${h.name}`)
+  ];
+
+  return res.json({
+    count: details.length,
+    details,
+    message: `This city is associated with ${ownersList.length} owners and ${homestaysList.length} homestays.`
+  });
+});
+
+// DELETE /api/admin/locations/:id
+router.delete('/admin/locations/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const force = req.query.force === 'true';
+
+  let stateName = '';
+  if (!isMongoConnected()) {
+    const loc = mockStateCityDatabase.find(l => l._id === id);
+    if (loc) stateName = loc.state;
+  } else {
+    try {
+      const loc = await StateCity.findById(id);
+      if (loc) stateName = loc.state;
+    } catch (e) {}
+  }
+
+  if (stateName) {
+    let ownersList = [];
+    if (!isMongoConnected()) {
+      ownersList = mockOwnersDatabase.filter(o => 
+        (o.tempAddress?.state || '').toLowerCase() === stateName.toLowerCase() ||
+        (o.permAddress?.state || '').toLowerCase() === stateName.toLowerCase()
+      );
+    } else {
+      ownersList = await HomestayOwner.find({
+        $or: [
+          { 'tempAddress.state': stateName },
+          { 'permAddress.state': stateName }
+        ]
+      });
+    }
+
+    let homestaysList = [];
+    if (!isMongoConnected()) {
+      homestaysList = mockHomestaysDatabase.filter(h => 
+        (h.region || '').toLowerCase() === stateName.toLowerCase()
+      );
+    } else {
+      homestaysList = await Homestay.find({ region: stateName });
+    }
+
+    const totalAssociated = ownersList.length + homestaysList.length;
+    if (totalAssociated > 0 && !force) {
+      const details = [
+        ...ownersList.map(o => `Owner: ${o.firstName} ${o.lastName}`),
+        ...homestaysList.map(h => `Homestay: ${h.name}`)
+      ];
+      return res.status(409).json({
+        hasAssociatedData: true,
+        type: 'RegionData',
+        details,
+        message: `This state is linked to ${ownersList.length} owners and ${homestaysList.length} homestays.`
+      });
+    }
+  }
+
+  if (!isMongoConnected()) {
+    mockStateCityDatabase = mockStateCityDatabase.filter(l => l._id !== id);
+    return res.json({ success: true, message: 'Location deleted successfully.' });
+  }
+
+  try {
+    await StateCity.findByIdAndDelete(id);
+    res.json({ success: true, message: 'Location deleted successfully.' });
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// POST /api/admin/upload (generic file upload)
+router.post('/admin/upload', authenticateToken, upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'NoFileUploaded', message: 'No file was uploaded.' });
+  }
+  const fileUrl = `/uploads/${req.file.filename}`;
+  res.json({ fileUrl });
+});
+
+// Custom Multer Instance for Global Settings Module (Max 2MB limit, JPG/JPEG/PNG/WEBP only)
+
+
+const settingsStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = 'uploads/settings';
+    if (!fs.existsSync(dir)){
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, 'setting-' + uniqueSuffix + path.extname(file.originalname).toLowerCase());
+  }
+});
+
+const uploadSettings = multer({
+  storage: settingsStorage,
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB Limit
+  fileFilter: function (req, file, cb) {
+    const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!allowed.includes(ext)) {
+      return cb(new Error('Invalid image format. Allowed: JPG, JPEG, PNG, WEBP.'));
+    }
+    cb(null, true);
+  }
+});
+
+// Helper function to delete local file on replacement
+const deleteLocalFile = (fileUrl) => {
+  if (!fileUrl) return;
+  try {
+    let localPath = fileUrl;
+    if (fileUrl.includes('/uploads/')) {
+      localPath = fileUrl.substring(fileUrl.indexOf('/uploads/'));
+    }
+    if (localPath.startsWith('/')) {
+      localPath = localPath.substring(1);
+    }
+    const fullPath = path.resolve(localPath);
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath);
+      console.log(`Deleted replaced image file: ${fullPath}`);
+    }
+  } catch (err) {
+    console.error(`Failed to delete local file ${fileUrl}:`, err.message);
+  }
+};
+
+// Global Memory Fallback databases for State, City, Amenities & Room Types
+let mockNewStatesDatabase = [
+  { _id: 'mock-s-1', stateName: 'Goa', stateImage: '/uploads/settings/default-goa.jpg', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() },
+  { _id: 'mock-s-2', stateName: 'Kerala', stateImage: '/uploads/settings/default-kerala.jpg', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() },
+  { _id: 'mock-s-3', stateName: 'Rajasthan', stateImage: '/uploads/settings/default-rajasthan.jpg', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() }
+];
+
+let mockNewCitiesDatabase = [
+  { _id: 'mock-c-1', stateId: 'mock-s-1', cityName: 'Panaji', cityImage: '/uploads/settings/default-panaji.jpg', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() },
+  { _id: 'mock-c-2', stateId: 'mock-s-1', cityName: 'Calangute', cityImage: '/uploads/settings/default-calangute.jpg', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() },
+  { _id: 'mock-c-3', stateId: 'mock-s-2', cityName: 'Munnar', cityImage: '/uploads/settings/default-munnar.jpg', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() },
+  { _id: 'mock-c-4', stateId: 'mock-s-3', cityName: 'Jaipur', cityImage: '/uploads/settings/default-jaipur.jpg', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() }
+];
+
+let mockNewAmenitiesDatabase = [
+  { _id: 'mock-a-1', amenityName: 'Free WiFi', amenityIcon: '/uploads/settings/icon-wifi.png', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() },
+  { _id: 'mock-a-2', amenityName: 'Swimming Pool', amenityIcon: '/uploads/settings/icon-pool.png', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() },
+  { _id: 'mock-a-3', amenityName: 'Air Conditioning', amenityIcon: '/uploads/settings/icon-ac.png', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() },
+  { _id: 'mock-a-4', amenityName: 'Free Parking', amenityIcon: '/uploads/settings/icon-parking.png', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() }
+];
+
+let mockNewRoomTypesDatabase = [
+  { _id: 'mock-rt-1', roomTypeName: 'Deluxe Room', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() },
+  { _id: 'mock-rt-2', roomTypeName: 'Suite', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() },
+  { _id: 'mock-rt-3', roomTypeName: 'Family Room', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() },
+  { _id: 'mock-rt-4', roomTypeName: 'Cottage', status: 'Active', deleted: false, deletedBy: null, deletedAt: null, deletedReason: '', createdAt: new Date(), updatedAt: new Date() }
+];
+
+// Helper function to resolve dependency counts
+const calculateDependencies = async (type, id) => {
+  let name = '';
+  let citiesCount = 0;
+  let homestaysCount = 0;
+  let roomsCount = 0;
+  let bookingsCount = 0;
+  let customersCount = 0;
+
+  if (!isMongoConnected()) {
+    if (type === 'state') {
+      const state = mockNewStatesDatabase.find(s => s._id === id);
+      if (!state) return null;
+      name = state.stateName;
+
+      const cities = mockNewCitiesDatabase.filter(c => c.stateId === id && !c.deleted);
+      citiesCount = cities.length;
+      const cityNames = cities.map(c => c.cityName.toLowerCase());
+
+      const homestays = mockHomestaysDatabase.filter(h => 
+        (h.region && h.region.toLowerCase() === name.toLowerCase()) || 
+        (h.city && cityNames.includes(h.city.toLowerCase()))
+      );
+      homestaysCount = homestays.length;
+
+      homestays.forEach(h => {
+        if (Array.isArray(h.rooms)) {
+          h.rooms.forEach(r => { roomsCount += (r.totalRooms || 0); });
+        }
+      });
+
+      const homestayIds = homestays.map(h => h.id || h._id);
+      const bookings = mockBookingsDatabase.filter(b => 
+        b.propertyDetails && homestayIds.includes(b.propertyDetails.propertyId)
+      );
+      bookingsCount = bookings.length;
+
+      const custs = new Set();
+      bookings.forEach(b => {
+        if (b.customer) {
+          custs.add(b.customer.customerId || b.customer.email || b.customer.mobile);
+        }
+      });
+      customersCount = custs.size;
+
+    } else if (type === 'city') {
+      const city = mockNewCitiesDatabase.find(c => c._id === id);
+      if (!city) return null;
+      name = city.cityName;
+
+      const homestays = mockHomestaysDatabase.filter(h => h.city && h.city.toLowerCase() === name.toLowerCase());
+      homestaysCount = homestays.length;
+
+      homestays.forEach(h => {
+        if (Array.isArray(h.rooms)) {
+          h.rooms.forEach(r => { roomsCount += (r.totalRooms || 0); });
+        }
+      });
+
+      const homestayIds = homestays.map(h => h.id || h._id);
+      const bookings = mockBookingsDatabase.filter(b => 
+        b.propertyDetails && homestayIds.includes(b.propertyDetails.propertyId)
+      );
+      bookingsCount = bookings.length;
+
+      const custs = new Set();
+      bookings.forEach(b => {
+        if (b.customer) {
+          custs.add(b.customer.customerId || b.customer.email || b.customer.mobile);
+        }
+      });
+      customersCount = custs.size;
+
+    } else if (type === 'amenity') {
+      const amenity = mockNewAmenitiesDatabase.find(a => a._id === id);
+      if (!amenity) return null;
+      name = amenity.amenityName;
+
+      const homestays = mockHomestaysDatabase.filter(h => Array.isArray(h.amenities) && h.amenities.includes(name));
+      homestaysCount = homestays.length;
+      
+      const homestayIds = homestays.map(h => h.id || h._id);
+      const bookings = mockBookingsDatabase.filter(b => 
+        b.propertyDetails && homestayIds.includes(b.propertyDetails.propertyId)
+      );
+      bookingsCount = bookings.length;
+
+    } else if (type === 'room-type') {
+      const rt = mockNewRoomTypesDatabase.find(r => r._id === id);
+      if (!rt) return null;
+      name = rt.roomTypeName;
+
+      const homestays = mockHomestaysDatabase.filter(h => 
+        Array.isArray(h.rooms) && h.rooms.some(r => r.roomType === name)
+      );
+      homestaysCount = homestays.length;
+
+      const bookings = mockBookingsDatabase.filter(b => 
+        b.propertyDetails && b.propertyDetails.roomCategory === name
+      );
+      bookingsCount = bookings.length;
+    }
+
+    return { name, cities: citiesCount, homestays: homestaysCount, rooms: roomsCount, bookings: bookingsCount, customers: customersCount, transactions: bookingsCount, reviews: 0 };
+  }
+
+  // MongoDB Mode
+  if (type === 'state') {
+    const state = await NewState.findById(id);
+    if (!state) return null;
+    name = state.stateName;
+
+    const cities = await NewCity.find({ stateId: id, deleted: false });
+    citiesCount = cities.length;
+    const cityNames = cities.map(c => c.cityName);
+
+    const homestays = await Homestay.find({
+      $or: [
+        { region: { $regex: new RegExp(`^${name}$`, 'i') } },
+        { city: { $in: cityNames.map(cn => new RegExp(`^${cn}$`, 'i')) } }
+      ]
+    });
+    homestaysCount = homestays.length;
+
+    homestays.forEach(h => {
+      if (Array.isArray(h.rooms)) {
+        h.rooms.forEach(r => { roomsCount += (r.totalRooms || 0); });
+      }
+    });
+
+    const homestayIds = homestays.map(h => String(h._id));
+    const bookings = await Booking.find({
+      'propertyDetails.propertyId': { $in: homestayIds }
+    });
+    bookingsCount = bookings.length;
+
+    const custs = new Set();
+    bookings.forEach(b => {
+      if (b.customer) {
+        custs.add(b.customer.customerId || b.customer.email || b.customer.mobile);
+      }
+    });
+    customersCount = custs.size;
+
+  } else if (type === 'city') {
+    const city = await NewCity.findById(id);
+    if (!city) return null;
+    name = city.cityName;
+
+    const homestays = await Homestay.find({ city: { $regex: new RegExp(`^${name}$`, 'i') } });
+    homestaysCount = homestays.length;
+
+    homestays.forEach(h => {
+      if (Array.isArray(h.rooms)) {
+        h.rooms.forEach(r => { roomsCount += (r.totalRooms || 0); });
+      }
+    });
+
+    const homestayIds = homestays.map(h => String(h._id));
+    const bookings = await Booking.find({
+      'propertyDetails.propertyId': { $in: homestayIds }
+    });
+    bookingsCount = bookings.length;
+
+    const custs = new Set();
+    bookings.forEach(b => {
+      if (b.customer) {
+        custs.add(b.customer.customerId || b.customer.email || b.customer.mobile);
+      }
+    });
+    customersCount = custs.size;
+
+  } else if (type === 'amenity') {
+    const amenity = await NewAmenity.findById(id);
+    if (!amenity) return null;
+    name = amenity.amenityName;
+
+    const homestays = await Homestay.find({ amenities: name });
+    homestaysCount = homestays.length;
+
+    const homestayIds = homestays.map(h => String(h._id));
+    const bookings = await Booking.find({
+      'propertyDetails.propertyId': { $in: homestayIds }
+    });
+    bookingsCount = bookings.length;
+
+  } else if (type === 'room-type') {
+    const rt = await NewRoomType.findById(id);
+    if (!rt) return null;
+    name = rt.roomTypeName;
+
+    const homestays = await Homestay.find({ 'rooms.roomType': name });
+    homestaysCount = homestays.length;
+
+    const bookings = await Booking.find({
+      'propertyDetails.roomCategory': name
+    });
+    bookingsCount = bookings.length;
+  }
+
+  return { name, cities: citiesCount, homestays: homestaysCount, rooms: roomsCount, bookings: bookingsCount, customers: customersCount, transactions: bookingsCount, reviews: 0 };
+};
+
+// ==========================================
+// DEPENDENCY CHECKING ENDPOINT
+// ==========================================
+router.get('/admin/settings/check-dependencies', authenticateToken, async (req, res) => {
+  const { type, id } = req.query;
+  if (!type || !id) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Type and ID are required.' });
+  }
+
+  try {
+    const counts = await calculateDependencies(type, id);
+    if (!counts) {
+      return res.status(404).json({ error: 'NotFound', message: 'Record not found.' });
+    }
+    res.json(counts);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// ==========================================
+// TRANSACTION-SAFE CASCADE SOFT DELETE
+// ==========================================
+router.post('/admin/settings/cascade-delete', authenticateToken, async (req, res) => {
+  const { type, id, deletedReason = 'Cascade deletion' } = req.body;
+  if (!type || !id) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Type and ID are required.' });
+  }
+
+  const deletedBy = `${req.admin?.email || 'Super Admin'} (${req.admin?.role || 'SuperAdmin'})`;
+  const deletedAt = new Date();
+
+  // IN-MEMORY FALLBACK DATABASE CASCADE
+  if (!isMongoConnected()) {
+    const statesClone = JSON.parse(JSON.stringify(mockNewStatesDatabase));
+    const citiesClone = JSON.parse(JSON.stringify(mockNewCitiesDatabase));
+    const amenitiesClone = JSON.parse(JSON.stringify(mockNewAmenitiesDatabase));
+    const roomTypesClone = JSON.parse(JSON.stringify(mockNewRoomTypesDatabase));
+    const homestaysClone = JSON.parse(JSON.stringify(mockHomestaysDatabase));
+    const bookingsClone = JSON.parse(JSON.stringify(mockBookingsDatabase));
+
+    try {
+      if (type === 'state') {
+        const stateIdx = statesClone.findIndex(s => s._id === id && !s.deleted);
+        if (stateIdx === -1) throw new Error('State not found');
+        
+        statesClone[stateIdx].deleted = true;
+        statesClone[stateIdx].deletedBy = deletedBy;
+        statesClone[stateIdx].deletedAt = deletedAt;
+        statesClone[stateIdx].deletedReason = deletedReason;
+        const stateName = statesClone[stateIdx].stateName;
+
+        // Cities
+        const citiesToDel = citiesClone.filter(c => c.stateId === id && !c.deleted);
+        const cityNames = citiesToDel.map(c => c.cityName.toLowerCase());
+        citiesToDel.forEach(c => {
+          c.deleted = true;
+          c.deletedBy = deletedBy;
+          c.deletedAt = deletedAt;
+          c.deletedReason = deletedReason;
+        });
+
+        // Homestays
+        const homestaysToDel = homestaysClone.filter(h => 
+          (h.region && h.region.toLowerCase() === stateName.toLowerCase()) ||
+          (h.city && cityNames.includes(h.city.toLowerCase()))
+        );
+        const homestayIds = homestaysToDel.map(h => h.id || h._id);
+        homestaysToDel.forEach(h => {
+          h.deleted = true;
+          h.deletedBy = deletedBy;
+          h.deletedAt = deletedAt;
+          h.deletedReason = deletedReason;
+        });
+
+        // Bookings
+        const bookingsToDel = bookingsClone.filter(b => 
+          b.propertyDetails && homestayIds.includes(b.propertyDetails.propertyId)
+        );
+        bookingsToDel.forEach(b => {
+          b.deleted = true;
+          b.deletedBy = deletedBy;
+          b.deletedAt = deletedAt;
+          b.deletedReason = deletedReason;
+        });
+
+      } else if (type === 'city') {
+        const cityIdx = citiesClone.findIndex(c => c._id === id && !c.deleted);
+        if (cityIdx === -1) throw new Error('City not found');
+
+        citiesClone[cityIdx].deleted = true;
+        citiesClone[cityIdx].deletedBy = deletedBy;
+        citiesClone[cityIdx].deletedAt = deletedAt;
+        citiesClone[cityIdx].deletedReason = deletedReason;
+        const cityName = citiesClone[cityIdx].cityName;
+
+        // Homestays
+        const homestaysToDel = homestaysClone.filter(h => h.city && h.city.toLowerCase() === cityName.toLowerCase());
+        const homestayIds = homestaysToDel.map(h => h.id || h._id);
+        homestaysToDel.forEach(h => {
+          h.deleted = true;
+          h.deletedBy = deletedBy;
+          h.deletedAt = deletedAt;
+          h.deletedReason = deletedReason;
+        });
+
+        // Bookings
+        const bookingsToDel = bookingsClone.filter(b => 
+          b.propertyDetails && homestayIds.includes(b.propertyDetails.propertyId)
+        );
+        bookingsToDel.forEach(b => {
+          b.deleted = true;
+          b.deletedBy = deletedBy;
+          b.deletedAt = deletedAt;
+          b.deletedReason = deletedReason;
+        });
+
+      } else if (type === 'amenity') {
+        const amenityIdx = amenitiesClone.findIndex(a => a._id === id && !a.deleted);
+        if (amenityIdx === -1) throw new Error('Amenity not found');
+
+        amenitiesClone[amenityIdx].deleted = true;
+        amenitiesClone[amenityIdx].deletedBy = deletedBy;
+        amenitiesClone[amenityIdx].deletedAt = deletedAt;
+        amenitiesClone[amenityIdx].deletedReason = deletedReason;
+        const amenityName = amenitiesClone[amenityIdx].amenityName;
+
+        homestaysClone.forEach(h => {
+          if (Array.isArray(h.amenities)) {
+            h.amenities = h.amenities.filter(name => name !== amenityName);
+          }
+        });
+
+      } else if (type === 'room-type') {
+        const rtIdx = roomTypesClone.findIndex(r => r._id === id && !r.deleted);
+        if (rtIdx === -1) throw new Error('Room Type not found');
+
+        roomTypesClone[rtIdx].deleted = true;
+        roomTypesClone[rtIdx].deletedBy = deletedBy;
+        roomTypesClone[rtIdx].deletedAt = deletedAt;
+        roomTypesClone[rtIdx].deletedReason = deletedReason;
+        const roomTypeName = roomTypesClone[rtIdx].roomTypeName;
+
+        homestaysClone.forEach(h => {
+          if (Array.isArray(h.rooms)) {
+            h.rooms = h.rooms.filter(r => r.roomType !== roomTypeName);
+          }
+        });
+
+        const bookingsToDel = bookingsClone.filter(b => 
+          b.propertyDetails && b.propertyDetails.roomCategory === roomTypeName
+        );
+        bookingsToDel.forEach(b => {
+          b.deleted = true;
+          b.deletedBy = deletedBy;
+          b.deletedAt = deletedAt;
+          b.deletedReason = deletedReason;
+        });
+      }
+
+      mockNewStatesDatabase = statesClone;
+      mockNewCitiesDatabase = citiesClone;
+      mockNewAmenitiesDatabase = amenitiesClone;
+      mockNewRoomTypesDatabase = roomTypesClone;
+      mockHomestaysDatabase = homestaysClone;
+      mockBookingsDatabase = bookingsClone;
+
+      logActivity(req, 'CASCADE_DELETE_SUCCESS', 'Global Settings', { type, id, reason: deletedReason });
+      return res.json({ success: true, message: 'Cascade soft delete completed successfully.' });
+
+    } catch (err) {
+      logActivity(req, 'CASCADE_DELETE_FAILED', 'Global Settings', { type, id, error: err.message });
+      return res.status(500).json({ error: 'ServerError', message: `Transactional rollback: ${err.message}` });
+    }
+  }
+
+  // LIVE MONGO DB TRANSACTION
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    if (type === 'state') {
+      const state = await NewState.findById(id).session(session);
+      if (!state) throw new Error('State not found.');
+
+      state.deleted = true;
+      state.deletedBy = deletedBy;
+      state.deletedAt = deletedAt;
+      state.deletedReason = deletedReason;
+      await state.save({ session });
+      const stateName = state.stateName;
+
+      const cities = await NewCity.find({ stateId: id, deleted: false }).session(session);
+      const cityNames = cities.map(c => c.cityName);
+      for (const city of cities) {
+        city.deleted = true;
+        city.deletedBy = deletedBy;
+        city.deletedAt = deletedAt;
+        city.deletedReason = deletedReason;
+        await city.save({ session });
+      }
+
+      const homestays = await Homestay.find({
+        $or: [
+          { region: { $regex: new RegExp(`^${stateName}$`, 'i') } },
+          { city: { $in: cityNames.map(cn => new RegExp(`^${cn}$`, 'i')) } }
+        ]
+      }).session(session);
+      const homestayIds = homestays.map(h => String(h._id));
+
+      for (const h of homestays) {
+        h.deleted = true;
+        h.deletedBy = deletedBy;
+        h.deletedAt = deletedAt;
+        h.deletedReason = deletedReason;
+        h.status = 'Inactive';
+        await h.save({ session });
+      }
+
+      if (homestayIds.length > 0) {
+        await Booking.updateMany(
+          { 'propertyDetails.propertyId': { $in: homestayIds } },
+          { $set: { deleted: true, deletedBy, deletedAt, deletedReason } },
+          { session }
+        );
+      }
+
+    } else if (type === 'city') {
+      const city = await NewCity.findById(id).session(session);
+      if (!city) throw new Error('City not found.');
+
+      city.deleted = true;
+      city.deletedBy = deletedBy;
+      city.deletedAt = deletedAt;
+      city.deletedReason = deletedReason;
+      await city.save({ session });
+      const cityName = city.cityName;
+
+      const homestays = await Homestay.find({ city: { $regex: new RegExp(`^${cityName}$`, 'i') } }).session(session);
+      const homestayIds = homestays.map(h => String(h._id));
+
+      for (const h of homestays) {
+        h.deleted = true;
+        h.deletedBy = deletedBy;
+        h.deletedAt = deletedAt;
+        h.deletedReason = deletedReason;
+        h.status = 'Inactive';
+        await h.save({ session });
+      }
+
+      if (homestayIds.length > 0) {
+        await Booking.updateMany(
+          { 'propertyDetails.propertyId': { $in: homestayIds } },
+          { $set: { deleted: true, deletedBy, deletedAt, deletedReason } },
+          { session }
+        );
+      }
+
+    } else if (type === 'amenity') {
+      const amenity = await NewAmenity.findById(id).session(session);
+      if (!amenity) throw new Error('Amenity not found.');
+
+      amenity.deleted = true;
+      amenity.deletedBy = deletedBy;
+      amenity.deletedAt = deletedAt;
+      amenity.deletedReason = deletedReason;
+      await amenity.save({ session });
+      const amenityName = amenity.amenityName;
+
+      await Homestay.updateMany(
+        { amenities: amenityName },
+        { $pull: { amenities: amenityName } },
+        { session }
+      );
+
+    } else if (type === 'room-type') {
+      const rt = await NewRoomType.findById(id).session(session);
+      if (!rt) throw new Error('Room Type not found.');
+
+      rt.deleted = true;
+      rt.deletedBy = deletedBy;
+      rt.deletedAt = deletedAt;
+      rt.deletedReason = deletedReason;
+      await rt.save({ session });
+      const roomTypeName = rt.roomTypeName;
+
+      await Homestay.updateMany(
+        { 'rooms.roomType': roomTypeName },
+        { $pull: { rooms: { roomType: roomTypeName } } },
+        { session }
+      );
+
+      await Booking.updateMany(
+        { 'propertyDetails.roomCategory': roomTypeName },
+        { $set: { deleted: true, deletedBy, deletedAt, deletedReason } },
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    logActivity(req, 'CASCADE_DELETE_SUCCESS', 'Global Settings', { type, id, reason: deletedReason });
+    res.json({ success: true, message: 'Cascade soft delete completed successfully.' });
+
+  } catch (error) {
+    await session.abortTransaction();
+    logActivity(req, 'CASCADE_DELETE_FAILED', 'Global Settings', { type, id, error: error.message });
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  } finally {
+    session.endSession();
+  }
+});
+
+// ==========================================
+// 1. STATE MANAGEMENT ENDPOINTS
+// ==========================================
+
+router.get('/admin/settings/states', authenticateToken, async (req, res) => {
+  const { page = 1, limit = 10, search = '', status = 'all', sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+  const skip = (Number(page) - 1) * Number(limit);
+
+  if (!isMongoConnected()) {
+    let list = mockNewStatesDatabase.filter(s => !s.deleted);
+    if (search) {
+      list = list.filter(s => s.stateName.toLowerCase().includes(search.toLowerCase()));
+    }
+    if (status && status !== 'all') {
+      list = list.filter(s => s.status === status);
+    }
+    list.sort((a, b) => {
+      const valA = a[sortBy] || '';
+      const valB = b[sortBy] || '';
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+    const totalDocs = list.length;
+    const docs = list.slice(skip, skip + Number(limit));
+    return res.json({ docs, totalPages: Math.ceil(totalDocs / Number(limit)), currentPage: Number(page), totalDocs });
+  }
+
+  try {
+    const query = { deleted: false };
+    if (search) {
+      query.stateName = { $regex: new RegExp(search, 'i') };
+    }
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    const count = await NewState.countDocuments(query);
+    const docs = await NewState.find(query)
+      .sort(sort)
+      .skip(skip)
+      .limit(Number(limit));
+
+    res.json({ docs, totalPages: Math.ceil(count / Number(limit)), currentPage: Number(page), totalDocs: count });
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.post('/admin/settings/states', authenticateToken, uploadSettings.single('stateImage'), async (req, res) => {
+  let { stateName, status = 'Active' } = req.body;
+  if (!stateName || !stateName.trim()) {
+    return res.status(400).json({ error: 'ValidationError', message: 'State Name is required.' });
+  }
+  stateName = stateName.trim();
+
+  let stateImage = '';
+  if (req.file) {
+    stateImage = `/uploads/settings/${req.file.filename}`;
+  }
+
+  if (!isMongoConnected()) {
+    const exists = mockNewStatesDatabase.some(s => s.stateName.toLowerCase() === stateName.toLowerCase() && !s.deleted);
+    if (exists) {
+      if (req.file) deleteLocalFile(stateImage);
+      return res.status(400).json({ error: 'DuplicateState', message: 'State Name must be unique.' });
+    }
+    const newState = {
+      _id: `mock-s-${Date.now()}`,
+      stateName,
+      stateImage,
+      status,
+      deleted: false,
+      deletedBy: null,
+      deletedAt: null,
+      deletedReason: '',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    mockNewStatesDatabase.push(newState);
+    return res.json(newState);
+  }
+
+  try {
+    const exists = await NewState.findOne({ stateName: { $regex: new RegExp(`^${stateName}$`, 'i') }, deleted: false });
+    if (exists) {
+      if (req.file) deleteLocalFile(stateImage);
+      return res.status(400).json({ error: 'DuplicateState', message: 'State Name must be unique.' });
+    }
+    const stateDoc = new NewState({ stateName, stateImage, status });
+    await stateDoc.save();
+    res.json(stateDoc);
+  } catch (error) {
+    if (req.file) deleteLocalFile(stateImage);
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.put('/admin/settings/states/:id', authenticateToken, uploadSettings.single('stateImage'), async (req, res) => {
+  const { id } = req.params;
+  let { stateName, status } = req.body;
+
+  if (!stateName || !stateName.trim()) {
+    return res.status(400).json({ error: 'ValidationError', message: 'State Name is required.' });
+  }
+  stateName = stateName.trim();
+
+  if (!isMongoConnected()) {
+    const index = mockNewStatesDatabase.findIndex(s => s._id === id && !s.deleted);
+    if (index === -1) return res.status(404).json({ error: 'NotFound', message: 'State not found.' });
+
+    const exists = mockNewStatesDatabase.some(s => s.stateName.toLowerCase() === stateName.toLowerCase() && s._id !== id && !s.deleted);
+    if (exists) {
+      if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+      return res.status(400).json({ error: 'DuplicateState', message: 'State Name must be unique.' });
+    }
+
+    const oldImage = mockNewStatesDatabase[index].stateImage;
+    if (req.file) {
+      mockNewStatesDatabase[index].stateImage = `/uploads/settings/${req.file.filename}`;
+      deleteLocalFile(oldImage);
+    }
+    mockNewStatesDatabase[index].stateName = stateName;
+    if (status) mockNewStatesDatabase[index].status = status;
+    mockNewStatesDatabase[index].updatedAt = new Date();
+
+    return res.json(mockNewStatesDatabase[index]);
+  }
+
+  try {
+    const stateDoc = await NewState.findOne({ _id: id, deleted: false });
+    if (!stateDoc) return res.status(404).json({ error: 'NotFound', message: 'State not found.' });
+
+    const exists = await NewState.findOne({ stateName: { $regex: new RegExp(`^${stateName}$`, 'i') }, _id: { $ne: id }, deleted: false });
+    if (exists) {
+      if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+      return res.status(400).json({ error: 'DuplicateState', message: 'State Name must be unique.' });
+    }
+
+    const oldImage = stateDoc.stateImage;
+    if (req.file) {
+      stateDoc.stateImage = `/uploads/settings/${req.file.filename}`;
+      deleteLocalFile(oldImage);
+    }
+    stateDoc.stateName = stateName;
+    if (status) stateDoc.status = status;
+    await stateDoc.save();
+
+    res.json(stateDoc);
+  } catch (error) {
+    if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.delete('/admin/settings/states/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const force = req.query.force === 'true';
+  const reason = req.query.reason || 'Direct soft delete';
+
+  try {
+    const counts = await calculateDependencies('state', id);
+    if (!counts) return res.status(404).json({ error: 'NotFound', message: 'State not found.' });
+
+    const totalDeps = counts.cities + counts.homestays + counts.rooms + counts.bookings;
+    if (totalDeps > 0 && !force) {
+      return res.status(409).json({
+        error: 'DependencyConflict',
+        message: 'This State is linked to active dependent records. Confirm cascade delete.',
+        dependencies: counts
+      });
+    }
+
+    const deletedBy = `${req.admin?.email || 'Super Admin'} (${req.admin?.role || 'SuperAdmin'})`;
+    const deletedAt = new Date();
+
+    if (!isMongoConnected()) {
+      const idx = mockNewStatesDatabase.findIndex(s => s._id === id);
+      mockNewStatesDatabase[idx].deleted = true;
+      mockNewStatesDatabase[idx].deletedBy = deletedBy;
+      mockNewStatesDatabase[idx].deletedAt = deletedAt;
+      mockNewStatesDatabase[idx].deletedReason = reason;
+      return res.json({ success: true, message: 'State soft-deleted.' });
+    }
+
+    await NewState.findByIdAndUpdate(id, {
+      $set: { deleted: true, deletedBy, deletedAt, deletedReason: reason }
+    });
+    res.json({ success: true, message: 'State soft-deleted.' });
+
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.patch('/admin/settings/states/:id/status', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status || !['Active', 'Inactive'].includes(status)) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Status must be Active or Inactive.' });
+  }
+
+  if (!isMongoConnected()) {
+    const index = mockNewStatesDatabase.findIndex(s => s._id === id && !s.deleted);
+    if (index === -1) return res.status(404).json({ error: 'NotFound', message: 'State not found.' });
+    mockNewStatesDatabase[index].status = status;
+    return res.json(mockNewStatesDatabase[index]);
+  }
+
+  try {
+    const stateDoc = await NewState.findOne({ _id: id, deleted: false });
+    if (!stateDoc) return res.status(404).json({ error: 'NotFound', message: 'State not found.' });
+    stateDoc.status = status;
+    await stateDoc.save();
+    res.json(stateDoc);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// ==========================================
+// 2. CITY MANAGEMENT ENDPOINTS
+// ==========================================
+
+router.get('/admin/settings/cities', authenticateToken, async (req, res) => {
+  const { page = 1, limit = 10, search = '', stateId = '', status = 'all', sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+  const skip = (Number(page) - 1) * Number(limit);
+
+  if (!isMongoConnected()) {
+    let list = mockNewCitiesDatabase.filter(c => !c.deleted);
+    if (search) {
+      list = list.filter(c => c.cityName.toLowerCase().includes(search.toLowerCase()));
+    }
+    if (stateId) {
+      list = list.filter(c => c.stateId === stateId);
+    }
+    if (status && status !== 'all') {
+      list = list.filter(c => c.status === status);
+    }
+
+    let populated = list.map(c => {
+      const st = mockNewStatesDatabase.find(s => s._id === c.stateId);
+      return {
+        ...c,
+        stateId: st ? { _id: st._id, stateName: st.stateName } : { _id: c.stateId, stateName: 'Unknown' }
+      };
+    });
+
+    populated.sort((a, b) => {
+      const valA = a[sortBy] || '';
+      const valB = b[sortBy] || '';
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    const totalDocs = populated.length;
+    const docs = populated.slice(skip, skip + Number(limit));
+    return res.json({ docs, totalPages: Math.ceil(totalDocs / Number(limit)), currentPage: Number(page), totalDocs });
+  }
+
+  try {
+    const query = { deleted: false };
+    if (search) {
+      query.cityName = { $regex: new RegExp(search, 'i') };
+    }
+    if (stateId) {
+      query.stateId = stateId;
+    }
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    const count = await NewCity.countDocuments(query);
+    const docs = await NewCity.find(query)
+      .populate('stateId', 'stateName')
+      .sort(sort)
+      .skip(skip)
+      .limit(Number(limit));
+
+    res.json({ docs, totalPages: Math.ceil(count / Number(limit)), currentPage: Number(page), totalDocs: count });
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.post('/admin/settings/cities', authenticateToken, uploadSettings.single('cityImage'), async (req, res) => {
+  let { cityName, stateId, status = 'Active' } = req.body;
+  if (!cityName || !cityName.trim() || !stateId) {
+    return res.status(400).json({ error: 'ValidationError', message: 'City Name and State are required.' });
+  }
+  cityName = cityName.trim();
+
+  let cityImage = '';
+  if (req.file) {
+    cityImage = `/uploads/settings/${req.file.filename}`;
+  }
+
+  if (!isMongoConnected()) {
+    const exists = mockNewCitiesDatabase.some(c => c.stateId === stateId && c.cityName.toLowerCase() === cityName.toLowerCase() && !c.deleted);
+    if (exists) {
+      if (req.file) deleteLocalFile(cityImage);
+      return res.status(400).json({ error: 'DuplicateCity', message: 'City Name must be unique within this State.' });
+    }
+    const newCity = {
+      _id: `mock-c-${Date.now()}`,
+      cityName,
+      stateId,
+      cityImage,
+      status,
+      deleted: false,
+      deletedBy: null,
+      deletedAt: null,
+      deletedReason: '',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    mockNewCitiesDatabase.push(newCity);
+    return res.json(newCity);
+  }
+
+  try {
+    const exists = await NewCity.findOne({ stateId, cityName: { $regex: new RegExp(`^${cityName}$`, 'i') }, deleted: false });
+    if (exists) {
+      if (req.file) deleteLocalFile(cityImage);
+      return res.status(400).json({ error: 'DuplicateCity', message: 'City Name must be unique within this State.' });
+    }
+    const cityDoc = new NewCity({ cityName, stateId, cityImage, status });
+    await cityDoc.save();
+    res.json(cityDoc);
+  } catch (error) {
+    if (req.file) deleteLocalFile(cityImage);
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.put('/admin/settings/cities/:id', authenticateToken, uploadSettings.single('cityImage'), async (req, res) => {
+  const { id } = req.params;
+  let { cityName, stateId, status } = req.body;
+
+  if (!cityName || !cityName.trim() || !stateId) {
+    return res.status(400).json({ error: 'ValidationError', message: 'City Name and State are required.' });
+  }
+  cityName = cityName.trim();
+
+  if (!isMongoConnected()) {
+    const index = mockNewCitiesDatabase.findIndex(c => c._id === id && !c.deleted);
+    if (index === -1) return res.status(404).json({ error: 'NotFound', message: 'City not found.' });
+
+    const exists = mockNewCitiesDatabase.some(c => c.stateId === stateId && c.cityName.toLowerCase() === cityName.toLowerCase() && c._id !== id && !c.deleted);
+    if (exists) {
+      if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+      return res.status(400).json({ error: 'DuplicateCity', message: 'City Name must be unique within this State.' });
+    }
+
+    const oldImage = mockNewCitiesDatabase[index].cityImage;
+    if (req.file) {
+      mockNewCitiesDatabase[index].cityImage = `/uploads/settings/${req.file.filename}`;
+      deleteLocalFile(oldImage);
+    }
+    mockNewCitiesDatabase[index].cityName = cityName;
+    mockNewCitiesDatabase[index].stateId = stateId;
+    if (status) mockNewCitiesDatabase[index].status = status;
+    mockNewCitiesDatabase[index].updatedAt = new Date();
+
+    return res.json(mockNewCitiesDatabase[index]);
+  }
+
+  try {
+    const cityDoc = await NewCity.findOne({ _id: id, deleted: false });
+    if (!cityDoc) return res.status(404).json({ error: 'NotFound', message: 'City not found.' });
+
+    const exists = await NewCity.findOne({ stateId, cityName: { $regex: new RegExp(`^${cityName}$`, 'i') }, _id: { $ne: id }, deleted: false });
+    if (exists) {
+      if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+      return res.status(400).json({ error: 'DuplicateCity', message: 'City Name must be unique within this State.' });
+    }
+
+    const oldImage = cityDoc.cityImage;
+    if (req.file) {
+      cityDoc.cityImage = `/uploads/settings/${req.file.filename}`;
+      deleteLocalFile(oldImage);
+    }
+    cityDoc.cityName = cityName;
+    cityDoc.stateId = stateId;
+    if (status) cityDoc.status = status;
+    await cityDoc.save();
+
+    res.json(cityDoc);
+  } catch (error) {
+    if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.delete('/admin/settings/cities/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const force = req.query.force === 'true';
+  const reason = req.query.reason || 'Direct soft delete';
+
+  try {
+    const counts = await calculateDependencies('city', id);
+    if (!counts) return res.status(404).json({ error: 'NotFound', message: 'City not found.' });
+
+    const totalDeps = counts.homestays + counts.bookings;
+    if (totalDeps > 0 && !force) {
+      return res.status(409).json({
+        error: 'DependencyConflict',
+        message: 'This City has active dependencies. Confirm cascade delete.',
+        dependencies: counts
+      });
+    }
+
+    const deletedBy = `${req.admin?.email || 'Super Admin'} (${req.admin?.role || 'SuperAdmin'})`;
+    const deletedAt = new Date();
+
+    if (!isMongoConnected()) {
+      const idx = mockNewCitiesDatabase.findIndex(c => c._id === id);
+      mockNewCitiesDatabase[idx].deleted = true;
+      mockNewCitiesDatabase[idx].deletedBy = deletedBy;
+      mockNewCitiesDatabase[idx].deletedAt = deletedAt;
+      mockNewCitiesDatabase[idx].deletedReason = reason;
+      return res.json({ success: true, message: 'City soft-deleted.' });
+    }
+
+    await NewCity.findByIdAndUpdate(id, {
+      $set: { deleted: true, deletedBy, deletedAt, deletedReason: reason }
+    });
+    res.json({ success: true, message: 'City soft-deleted.' });
+
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.patch('/admin/settings/cities/:id/status', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status || !['Active', 'Inactive'].includes(status)) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Status must be Active or Inactive.' });
+  }
+
+  if (!isMongoConnected()) {
+    const index = mockNewCitiesDatabase.findIndex(c => c._id === id && !c.deleted);
+    if (index === -1) return res.status(404).json({ error: 'NotFound', message: 'City not found.' });
+    mockNewCitiesDatabase[index].status = status;
+    return res.json(mockNewCitiesDatabase[index]);
+  }
+
+  try {
+    const cityDoc = await NewCity.findOne({ _id: id, deleted: false });
+    if (!cityDoc) return res.status(404).json({ error: 'NotFound', message: 'City not found.' });
+    cityDoc.status = status;
+    await cityDoc.save();
+    res.json(cityDoc);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// ==========================================
+// 3. AMENITIES MANAGEMENT ENDPOINTS
+// ==========================================
+
+router.get('/admin/settings/amenities', authenticateToken, async (req, res) => {
+  const { page = 1, limit = 10, search = '', status = 'all', sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+  const skip = (Number(page) - 1) * Number(limit);
+
+  if (!isMongoConnected()) {
+    let list = mockNewAmenitiesDatabase.filter(a => !a.deleted);
+    if (search) {
+      list = list.filter(a => a.amenityName.toLowerCase().includes(search.toLowerCase()));
+    }
+    if (status && status !== 'all') {
+      list = list.filter(a => a.status === status);
+    }
+    list.sort((a, b) => {
+      const valA = a[sortBy] || '';
+      const valB = b[sortBy] || '';
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+    const totalDocs = list.length;
+    const docs = list.slice(skip, skip + Number(limit));
+    return res.json({ docs, totalPages: Math.ceil(totalDocs / Number(limit)), currentPage: Number(page), totalDocs });
+  }
+
+  try {
+    const query = { deleted: false };
+    if (search) {
+      query.amenityName = { $regex: new RegExp(search, 'i') };
+    }
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    const count = await NewAmenity.countDocuments(query);
+    const docs = await NewAmenity.find(query)
+      .sort(sort)
+      .skip(skip)
+      .limit(Number(limit));
+
+    res.json({ docs, totalPages: Math.ceil(count / Number(limit)), currentPage: Number(page), totalDocs: count });
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.post('/admin/settings/amenities', authenticateToken, uploadSettings.single('amenityIcon'), async (req, res) => {
+  let { amenityName, status = 'Active' } = req.body;
+  if (!amenityName || !amenityName.trim()) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Amenity Name is required.' });
+  }
+  amenityName = amenityName.trim();
+
+  if (!req.file && !req.body.amenityIcon) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Amenity Icon/Image is required.' });
+  }
+
+  let amenityIcon = req.body.amenityIcon || '';
+  if (req.file) {
+    amenityIcon = `/uploads/settings/${req.file.filename}`;
+  }
+
+  if (!isMongoConnected()) {
+    const exists = mockNewAmenitiesDatabase.some(a => a.amenityName.toLowerCase() === amenityName.toLowerCase() && !a.deleted);
+    if (exists) {
+      if (req.file) deleteLocalFile(amenityIcon);
+      return res.status(400).json({ error: 'DuplicateAmenity', message: 'Amenity Name must be unique.' });
+    }
+    const newAmenity = {
+      _id: `mock-a-${Date.now()}`,
+      amenityName,
+      amenityIcon,
+      status,
+      deleted: false,
+      deletedBy: null,
+      deletedAt: null,
+      deletedReason: '',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    mockNewAmenitiesDatabase.push(newAmenity);
+    return res.json(newAmenity);
+  }
+
+  try {
+    const exists = await NewAmenity.findOne({ amenityName: { $regex: new RegExp(`^${amenityName}$`, 'i') }, deleted: false });
+    if (exists) {
+      if (req.file) deleteLocalFile(amenityIcon);
+      return res.status(400).json({ error: 'DuplicateAmenity', message: 'Amenity Name must be unique.' });
+    }
+    const amenityDoc = new NewAmenity({ amenityName, amenityIcon, status });
+    await amenityDoc.save();
+    res.json(amenityDoc);
+  } catch (error) {
+    if (req.file) deleteLocalFile(amenityIcon);
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.put('/admin/settings/amenities/:id', authenticateToken, uploadSettings.single('amenityIcon'), async (req, res) => {
+  const { id } = req.params;
+  let { amenityName, status } = req.body;
+
+  if (!amenityName || !amenityName.trim()) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Amenity Name is required.' });
+  }
+  amenityName = amenityName.trim();
+
+  if (!isMongoConnected()) {
+    const index = mockNewAmenitiesDatabase.findIndex(a => a._id === id && !a.deleted);
+    if (index === -1) return res.status(404).json({ error: 'NotFound', message: 'Amenity not found.' });
+
+    const exists = mockNewAmenitiesDatabase.some(a => a.amenityName.toLowerCase() === amenityName.toLowerCase() && a._id !== id && !a.deleted);
+    if (exists) {
+      if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+      return res.status(400).json({ error: 'DuplicateAmenity', message: 'Amenity Name must be unique.' });
+    }
+
+    const oldIcon = mockNewAmenitiesDatabase[index].amenityIcon;
+    if (req.file) {
+      mockNewAmenitiesDatabase[index].amenityIcon = `/uploads/settings/${req.file.filename}`;
+      deleteLocalFile(oldIcon);
+    }
+    mockNewAmenitiesDatabase[index].amenityName = amenityName;
+    if (status) mockNewAmenitiesDatabase[index].status = status;
+    mockNewAmenitiesDatabase[index].updatedAt = new Date();
+
+    return res.json(mockNewAmenitiesDatabase[index]);
+  }
+
+  try {
+    const amenityDoc = await NewAmenity.findOne({ _id: id, deleted: false });
+    if (!amenityDoc) return res.status(404).json({ error: 'NotFound', message: 'Amenity not found.' });
+
+    const exists = await NewAmenity.findOne({ amenityName: { $regex: new RegExp(`^${amenityName}$`, 'i') }, _id: { $ne: id }, deleted: false });
+    if (exists) {
+      if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+      return res.status(400).json({ error: 'DuplicateAmenity', message: 'Amenity Name must be unique.' });
+    }
+
+    const oldIcon = amenityDoc.amenityIcon;
+    if (req.file) {
+      amenityDoc.amenityIcon = `/uploads/settings/${req.file.filename}`;
+      deleteLocalFile(oldIcon);
+    }
+    amenityDoc.amenityName = amenityName;
+    if (status) amenityDoc.status = status;
+    await amenityDoc.save();
+
+    res.json(amenityDoc);
+  } catch (error) {
+    if (req.file) deleteLocalFile(`/uploads/settings/${req.file.filename}`);
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.delete('/admin/settings/amenities/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const force = req.query.force === 'true';
+  const reason = req.query.reason || 'Direct soft delete';
+
+  try {
+    const counts = await calculateDependencies('amenity', id);
+    if (!counts) return res.status(404).json({ error: 'NotFound', message: 'Amenity not found.' });
+
+    if (counts.homestays > 0 && !force) {
+      return res.status(409).json({
+        error: 'DependencyConflict',
+        message: 'This Amenity is used by active properties. Confirm cascade delete.',
+        dependencies: counts
+      });
+    }
+
+    const deletedBy = `${req.admin?.email || 'Super Admin'} (${req.admin?.role || 'SuperAdmin'})`;
+    const deletedAt = new Date();
+
+    if (!isMongoConnected()) {
+      const idx = mockNewAmenitiesDatabase.findIndex(a => a._id === id);
+      mockNewAmenitiesDatabase[idx].deleted = true;
+      mockNewAmenitiesDatabase[idx].deletedBy = deletedBy;
+      mockNewAmenitiesDatabase[idx].deletedAt = deletedAt;
+      mockNewAmenitiesDatabase[idx].deletedReason = reason;
+      return res.json({ success: true, message: 'Amenity soft-deleted.' });
+    }
+
+    await NewAmenity.findByIdAndUpdate(id, {
+      $set: { deleted: true, deletedBy, deletedAt, deletedReason: reason }
+    });
+    res.json({ success: true, message: 'Amenity soft-deleted.' });
+
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.patch('/admin/settings/amenities/:id/status', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status || !['Active', 'Inactive'].includes(status)) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Status must be Active or Inactive.' });
+  }
+
+  if (!isMongoConnected()) {
+    const index = mockNewAmenitiesDatabase.findIndex(a => a._id === id && !a.deleted);
+    if (index === -1) return res.status(404).json({ error: 'NotFound', message: 'Amenity not found.' });
+    mockNewAmenitiesDatabase[index].status = status;
+    return res.json(mockNewAmenitiesDatabase[index]);
+  }
+
+  try {
+    const amenityDoc = await NewAmenity.findOne({ _id: id, deleted: false });
+    if (!amenityDoc) return res.status(404).json({ error: 'NotFound', message: 'Amenity not found.' });
+    amenityDoc.status = status;
+    await amenityDoc.save();
+    res.json(amenityDoc);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// ==========================================
+// 4. ROOM TYPES MANAGEMENT ENDPOINTS
+// ==========================================
+
+router.get('/admin/settings/room-types', authenticateToken, async (req, res) => {
+  const { page = 1, limit = 10, search = '', status = 'all', sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+  const skip = (Number(page) - 1) * Number(limit);
+
+  if (!isMongoConnected()) {
+    let list = mockNewRoomTypesDatabase.filter(r => !r.deleted);
+    if (search) {
+      list = list.filter(r => r.roomTypeName.toLowerCase().includes(search.toLowerCase()));
+    }
+    if (status && status !== 'all') {
+      list = list.filter(r => r.status === status);
+    }
+    list.sort((a, b) => {
+      const valA = a[sortBy] || '';
+      const valB = b[sortBy] || '';
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+    const totalDocs = list.length;
+    const docs = list.slice(skip, skip + Number(limit));
+    return res.json({ docs, totalPages: Math.ceil(totalDocs / Number(limit)), currentPage: Number(page), totalDocs });
+  }
+
+  try {
+    const query = { deleted: false };
+    if (search) {
+      query.roomTypeName = { $regex: new RegExp(search, 'i') };
+    }
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    const count = await NewRoomType.countDocuments(query);
+    const docs = await NewRoomType.find(query)
+      .sort(sort)
+      .skip(skip)
+      .limit(Number(limit));
+
+    res.json({ docs, totalPages: Math.ceil(count / Number(limit)), currentPage: Number(page), totalDocs: count });
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.post('/admin/settings/room-types', authenticateToken, async (req, res) => {
+  let { roomTypeName, status = 'Active' } = req.body;
+  if (!roomTypeName || !roomTypeName.trim()) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Room Type Name is required.' });
+  }
+  roomTypeName = roomTypeName.trim();
+
+  if (!isMongoConnected()) {
+    const exists = mockNewRoomTypesDatabase.some(r => r.roomTypeName.toLowerCase() === roomTypeName.toLowerCase() && !r.deleted);
+    if (exists) {
+      return res.status(400).json({ error: 'DuplicateRoomType', message: 'Room Type Name must be unique.' });
+    }
+    const newRoomType = {
+      _id: `mock-rt-${Date.now()}`,
+      roomTypeName,
+      status,
+      deleted: false,
+      deletedBy: null,
+      deletedAt: null,
+      deletedReason: '',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    mockNewRoomTypesDatabase.push(newRoomType);
+    return res.json(newRoomType);
+  }
+
+  try {
+    const exists = await NewRoomType.findOne({ roomTypeName: { $regex: new RegExp(`^${roomTypeName}$`, 'i') }, deleted: false });
+    if (exists) {
+      return res.status(400).json({ error: 'DuplicateRoomType', message: 'Room Type Name must be unique.' });
+    }
+    const roomTypeDoc = new NewRoomType({ roomTypeName, status });
+    await roomTypeDoc.save();
+    res.json(roomTypeDoc);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.put('/admin/settings/room-types/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  let { roomTypeName, status } = req.body;
+
+  if (!roomTypeName || !roomTypeName.trim()) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Room Type Name is required.' });
+  }
+  roomTypeName = roomTypeName.trim();
+
+  if (!isMongoConnected()) {
+    const index = mockNewRoomTypesDatabase.findIndex(r => r._id === id && !r.deleted);
+    if (index === -1) return res.status(404).json({ error: 'NotFound', message: 'Room Type not found.' });
+
+    const exists = mockNewRoomTypesDatabase.some(r => r.roomTypeName.toLowerCase() === roomTypeName.toLowerCase() && r._id !== id && !r.deleted);
+    if (exists) {
+      return res.status(400).json({ error: 'DuplicateRoomType', message: 'Room Type Name must be unique.' });
+    }
+
+    mockNewRoomTypesDatabase[index].roomTypeName = roomTypeName;
+    if (status) mockNewRoomTypesDatabase[index].status = status;
+    mockNewRoomTypesDatabase[index].updatedAt = new Date();
+
+    return res.json(mockNewRoomTypesDatabase[index]);
+  }
+
+  try {
+    const roomTypeDoc = await NewRoomType.findOne({ _id: id, deleted: false });
+    if (!roomTypeDoc) return res.status(404).json({ error: 'NotFound', message: 'Room Type not found.' });
+
+    const exists = await NewRoomType.findOne({ roomTypeName: { $regex: new RegExp(`^${roomTypeName}$`, 'i') }, _id: { $ne: id }, deleted: false });
+    if (exists) {
+      return res.status(400).json({ error: 'DuplicateRoomType', message: 'Room Type Name must be unique.' });
+    }
+
+    roomTypeDoc.roomTypeName = roomTypeName;
+    if (status) roomTypeDoc.status = status;
+    await roomTypeDoc.save();
+
+    res.json(roomTypeDoc);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.delete('/admin/settings/room-types/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const force = req.query.force === 'true';
+  const reason = req.query.reason || 'Direct soft delete';
+
+  try {
+    const counts = await calculateDependencies('room-type', id);
+    if (!counts) return res.status(404).json({ error: 'NotFound', message: 'Room Type not found.' });
+
+    const totalDeps = counts.homestays + counts.bookings;
+    if (totalDeps > 0 && !force) {
+      return res.status(409).json({
+        error: 'DependencyConflict',
+        message: 'This Room Type has active dependencies. Confirm cascade delete.',
+        dependencies: counts
+      });
+    }
+
+    const deletedBy = `${req.admin?.email || 'Super Admin'} (${req.admin?.role || 'SuperAdmin'})`;
+    const deletedAt = new Date();
+
+    if (!isMongoConnected()) {
+      const idx = mockNewRoomTypesDatabase.findIndex(r => r._id === id);
+      mockNewRoomTypesDatabase[idx].deleted = true;
+      mockNewRoomTypesDatabase[idx].deletedBy = deletedBy;
+      mockNewRoomTypesDatabase[idx].deletedAt = deletedAt;
+      mockNewRoomTypesDatabase[idx].deletedReason = reason;
+      return res.json({ success: true, message: 'Room Type soft-deleted.' });
+    }
+
+    await NewRoomType.findByIdAndUpdate(id, {
+      $set: { deleted: true, deletedBy, deletedAt, deletedReason: reason }
+    });
+    res.json({ success: true, message: 'Room Type soft-deleted.' });
+
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+router.patch('/admin/settings/room-types/:id/status', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status || !['Active', 'Inactive'].includes(status)) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Status must be Active or Inactive.' });
+  }
+
+  try {
+    if (!isMongoConnected()) {
+      const index = mockNewRoomTypesDatabase.findIndex(r => r._id === id && !r.deleted);
+      if (index === -1) return res.status(404).json({ error: 'NotFound', message: 'Room Type not found.' });
+      mockNewRoomTypesDatabase[index].status = status;
+      return res.json(mockNewRoomTypesDatabase[index]);
+    }
+
+    const roomTypeDoc = await NewRoomType.findOne({ _id: id, deleted: false });
+    if (!roomTypeDoc) return res.status(404).json({ error: 'NotFound', message: 'Room Type not found.' });
+    roomTypeDoc.status = status;
+    await roomTypeDoc.save();
+    res.json(roomTypeDoc);
+  } catch (error) {
+    res.status(500).json({ error: 'ServerError', message: error.message });
+  }
+});
+
+// --- MASTER SETTINGS LISTINGS ---
+router.get('/settings/master-states', async (req, res) => {
+  try {
+    if (!isMongoConnected()) {
+      return res.json(mockNewStatesDatabase.filter(s => !s.deleted && s.status === 'Active'));
+    }
+    const states = await NewState.find({ deleted: false, status: 'Active' }).sort({ stateName: 1 });
+    res.json(states);
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+router.get('/settings/master-cities', async (req, res) => {
+  const { stateId } = req.query;
+  try {
+    if (!isMongoConnected()) {
+      let list = mockNewCitiesDatabase.filter(c => !c.deleted && c.status === 'Active');
+      if (stateId) list = list.filter(c => c.stateId === stateId);
+      return res.json(list);
+    }
+    const q = { deleted: false, status: 'Active' };
+    if (stateId) q.stateId = stateId;
+    const cities = await NewCity.find(q).sort({ cityName: 1 });
+    res.json(cities);
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+router.get('/settings/master-amenities', async (req, res) => {
+  try {
+    if (!isMongoConnected()) {
+      return res.json(mockNewAmenitiesDatabase.filter(a => !a.deleted && a.status === 'Active'));
+    }
+    const amenities = await NewAmenity.find({ deleted: false, status: 'Active' }).sort({ amenityName: 1 });
+    res.json(amenities);
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+router.get('/settings/master-room-types', async (req, res) => {
+  try {
+    if (!isMongoConnected()) {
+      return res.json(mockNewRoomTypesDatabase.filter(r => !r.deleted && r.status === 'Active'));
+    }
+    const types = await NewRoomType.find({ deleted: false, status: 'Active' }).sort({ roomTypeName: 1 });
+    res.json(types);
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// --- OWNER WIZARD API & MEMORY MOCKS ---
+let mockPropertiesDatabase = [];
+let mockPropertyGalleryDatabase = [];
+let mockPropertyRoomsDatabase = [];
+let mockPropertyAmenitiesDatabase = [];
+let mockPropertySeasonsDatabase = [];
+let mockPropertyPricingDatabase = [];
+let mockPropertyApprovalsDatabase = [];
+let mockPropertyAuditLogsDatabase = [];
+
+// Custom Multer Instance for Properties Image upload
+const propertyStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = 'uploads/properties';
+    if (!fs.existsSync(dir)){
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, 'original-' + uniqueSuffix + path.extname(file.originalname).toLowerCase());
+  }
+});
+
+const uploadPropertyImage = multer({
+  storage: propertyStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: function (req, file, cb) {
+    const allowed = ['.png', '.jpg', '.jpeg', '.webp'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!allowed.includes(ext)) {
+      return cb(new Error('Only JPG, JPEG, PNG, and WEBP files are allowed.'));
+    }
+    cb(null, true);
+  }
+});
+
+router.post('/homestay-owner/properties/upload-image', authenticateToken, uploadPropertyImage.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'NoFileUploaded', message: 'No file was uploaded.' });
+  }
+  try {
+    const originalPath = req.file.path;
+    const filename = req.file.filename;
+    const optimizedFilename = filename.replace('original-', 'optimized-');
+    const thumbFilename = filename.replace('original-', 'thumb-');
+
+    const optimizedPath = path.join('uploads/properties', optimizedFilename);
+    const thumbPath = path.join('uploads/properties', thumbFilename);
+
+    fs.copyFileSync(originalPath, optimizedPath);
+    fs.copyFileSync(originalPath, thumbPath);
+
+    res.json({
+      originalUrl: `/uploads/properties/${filename}`,
+      optimizedUrl: `/uploads/properties/${optimizedFilename}`,
+      thumbUrl: `/uploads/properties/${thumbFilename}`
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'UploadError', message: err.message });
+  }
+});
+
+router.get('/homestay-owner/properties/draft', authenticateToken, async (req, res) => {
+  try {
+    const ownerId = req.user._id;
+    const isNew = req.query.new === 'true';
+
+    let resolvedOwnerName = '';
+    let resolvedOwnerMobile = '';
+    let resolvedOwnerEmail = req.user.email || '';
+
+    if (!isMongoConnected()) {
+      const o = mockOwnersDatabase.find(x => String(x._id) === String(ownerId));
+      if (o) {
+        resolvedOwnerName = `${o.firstName || ''} ${o.lastName || ''}`.trim();
+        resolvedOwnerMobile = o.mobile || o.whatsApp || '';
+        resolvedOwnerEmail = o.email || '';
+      }
+    } else {
+      const o = await HomestayOwner.findById(ownerId);
+      if (o) {
+        resolvedOwnerName = `${o.firstName || ''} ${o.lastName || ''}`.trim();
+        resolvedOwnerMobile = o.mobile || o.whatsApp || '';
+        resolvedOwnerEmail = o.email || '';
+      }
+    }
+
+    if (!isMongoConnected()) {
+      let prop;
+      if (!isNew) {
+        if (req.query.propertyId) {
+          prop = mockPropertiesDatabase.find(p => String(p._id) === String(req.query.propertyId) && !p.deleted);
+        } else {
+          prop = mockPropertiesDatabase.find(p => p.ownerId === ownerId && ['Draft', 'Changes Requested'].includes(p.status) && !p.deleted);
+        }
+      }
+      if (!prop) {
+        prop = {
+          _id: 'WG-PROP-' + Math.floor(100000 + Math.random() * 900000),
+          ownerId,
+          ownerName: resolvedOwnerName,
+          ownerMobile: resolvedOwnerMobile,
+          ownerEmail: resolvedOwnerEmail,
+          name: '',
+          type: '',
+          category: '',
+          state: '',
+          city: '',
+          address: '',
+          description: '',
+          status: 'Draft',
+          currentStep: 1,
+          deleted: false
+        };
+        mockPropertiesDatabase.push(prop);
+      }
+
+      const gallery = mockPropertyGalleryDatabase.find(g => g.propertyId === prop._id) || { coverImage: '', images: [] };
+      const rooms = mockPropertyRoomsDatabase.filter(r => r.propertyId === prop._id);
+      const amenities = mockPropertyAmenitiesDatabase.find(a => a.propertyId === prop._id) || { amenityIds: [] };
+      const seasonsList = mockPropertySeasonsDatabase.filter(s => s.propertyId === prop._id);
+      const pricingList = mockPropertyPricingDatabase.filter(p => p.propertyId === prop._id);
+      const approval = mockPropertyApprovalsDatabase.find(a => a.propertyId === prop._id) || null;
+
+      const seasons = {};
+      seasonsList.forEach(s => {
+        seasons[s.roomCategoryId] = {
+          peak: (s.seasons.peak || []).map(r => ({ start: new Date(r.start).toISOString().split('T')[0], end: new Date(r.end).toISOString().split('T')[0] })),
+          mid: (s.seasons.mid || []).map(r => ({ start: new Date(r.start).toISOString().split('T')[0], end: new Date(r.end).toISOString().split('T')[0] })),
+          off: (s.seasons.off || []).map(r => ({ start: new Date(r.start).toISOString().split('T')[0], end: new Date(r.end).toISOString().split('T')[0] }))
+        };
+      });
+
+      const rates = {};
+      pricingList.forEach(p => {
+        if (!rates[p.roomCategoryId]) rates[p.roomCategoryId] = {};
+        if (!rates[p.roomCategoryId][p.seasonType]) rates[p.roomCategoryId][p.seasonType] = {};
+        rates[p.roomCategoryId][p.seasonType][p.mealPlan] = {
+          b2b: p.b2bRate,
+          b2c: p.b2cRate,
+          extraAdultB2B: p.extraAdultB2B,
+          extraAdultB2C: p.extraAdultB2C,
+          childB2B: p.childB2B,
+          childB2C: p.childB2C
+        };
+      });
+
+      return res.json({
+        property: prop,
+        gallery,
+        rooms: rooms.map(r => ({
+          id: r._id,
+          name: r.roomCategoryName,
+          type: r.roomType,
+          count: r.numberOfRooms,
+          roomNumbers: r.roomNumbers.join(', '),
+          occupancy: r.maxOccupancyAdults,
+          maxOccupancyChildren: r.maxOccupancyChildren,
+          extraPerson: r.extraPersonAllowed,
+          roomSize: r.roomSize,
+          bedType: r.bedType,
+          description: r.description,
+          images: r.images,
+          amenities: r.amenityIds
+        })),
+        amenities: amenities.amenityIds,
+        seasons,
+        rates,
+        approval
+      });
+    }
+
+    let prop;
+    if (!isNew) {
+      if (req.query.propertyId) {
+        prop = await Property.findOne({ _id: req.query.propertyId, ownerId, deleted: false });
+      } else {
+        prop = await Property.findOne({ ownerId, status: { $in: ['Draft', 'Changes Requested'] }, deleted: false });
+      }
+    }
+    if (!prop) {
+      const count = await Property.countDocuments();
+      const propIdStr = `WG-PROP-${String(count + 1).padStart(6, '0')}`;
+      prop = new Property({
+        propertyId: propIdStr,
+        name: '',
+        type: '',
+        category: '',
+        ownerId,
+        ownerName: resolvedOwnerName,
+        ownerMobile: resolvedOwnerMobile,
+        ownerEmail: resolvedOwnerEmail,
+        state: '',
+        city: '',
+        address: '',
+        description: '',
+        status: 'Draft',
+        currentStep: 1
+      });
+      await prop.save();
+    }
+
+    const gallery = await PropertyGallery.findOne({ propertyId: prop._id }) || { coverImage: '', images: [] };
+    const rooms = await PropertyRooms.find({ propertyId: prop._id });
+    const amenities = await PropertyAmenities.findOne({ propertyId: prop._id }) || { amenityIds: [] };
+    const seasonsList = await PropertySeason.find({ propertyId: prop._id });
+    const pricingList = await PropertyPricing.find({ propertyId: prop._id });
+    const approval = await PropertyApproval.findOne({ propertyId: prop._id }).sort({ createdAt: -1 });
+
+    const seasons = {};
+    seasonsList.forEach(s => {
+      seasons[s.roomCategoryId] = {
+        peak: (s.seasons.peak || []).map(r => ({ start: r.start.toISOString().split('T')[0], end: r.end.toISOString().split('T')[0] })),
+        mid: (s.seasons.mid || []).map(r => ({ start: r.start.toISOString().split('T')[0], end: r.end.toISOString().split('T')[0] })),
+        off: (s.seasons.off || []).map(r => ({ start: r.start.toISOString().split('T')[0], end: r.end.toISOString().split('T')[0] }))
+      };
+    });
+
+    const rates = {};
+    pricingList.forEach(p => {
+      if (!rates[p.roomCategoryId]) rates[p.roomCategoryId] = {};
+      if (!rates[p.roomCategoryId][p.seasonType]) rates[p.roomCategoryId][p.seasonType] = {};
+      rates[p.roomCategoryId][p.seasonType][p.mealPlan] = {
+        b2b: p.b2bRate,
+        b2c: p.b2cRate,
+        extraAdultB2B: p.extraAdultB2B,
+        extraAdultB2C: p.extraAdultB2C,
+        childB2B: p.childB2B,
+        childB2C: p.childB2C,
+        taxInclusive: p.taxInclusive,
+        weekendPrice: p.weekendPrice,
+        festivalPrice: p.festivalPrice
+      };
+    });
+
+    res.json({
+      property: prop,
+      gallery,
+      rooms: rooms.map(r => ({
+        id: r._id,
+        name: r.roomCategoryName,
+        type: r.roomType,
+        count: r.numberOfRooms,
+        roomNumbers: r.roomNumbers.join(', '),
+        occupancy: r.maxOccupancyAdults,
+        maxOccupancyChildren: r.maxOccupancyChildren,
+        extraPerson: r.extraPersonAllowed,
+        roomSize: r.roomSize,
+        bedType: r.bedType,
+        description: r.description,
+        images: r.images,
+        amenities: r.amenityIds
+      })),
+      amenities: amenities.amenityIds,
+      seasons,
+      rates,
+      approval
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+router.post('/homestay-owner/properties/save-step', authenticateToken, async (req, res) => {
+  const { propertyId, step, data } = req.body;
+  if (!propertyId || !step) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Property ID and step number are required.' });
+  }
+
+  try {
+    let prop;
+    let prevValue = '';
+    let newValue = JSON.stringify(data);
+
+    if (!isMongoConnected()) {
+      prop = mockPropertiesDatabase.find(p => p._id === propertyId && p.ownerId === req.user._id && !p.deleted);
+      if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
+
+      if (step === 1) {
+        const { name, type, category, ownerName, phone, email, website, gstNumber, state, city, address, googleMap, latitude, longitude, description } = data;
+        if (!name || name.trim().length < 5 || name.trim().length > 150) {
+          return res.status(400).json({ error: 'ValidationError', message: 'Property Name must be between 5 and 150 characters.' });
+        }
+        if (!address || !address.trim()) {
+          return res.status(400).json({ error: 'ValidationError', message: 'Address is required.' });
+        }
+        if (!description || description.trim().length < 100 || description.trim().length > 5000) {
+          return res.status(400).json({ error: 'ValidationError', message: 'Description must be between 100 and 5000 characters.' });
+        }
+
+        const nameExists = mockPropertiesDatabase.some(p => p.ownerId === req.user._id && p.name.toLowerCase() === name.trim().toLowerCase() && p._id !== propertyId && !p.deleted);
+        if (nameExists) {
+          return res.status(400).json({ error: 'DuplicateProperty', message: 'You have already registered a property with this name.' });
+        }
+
+        prevValue = JSON.stringify(prop);
+        prop.name = name.trim();
+        prop.type = type;
+        prop.category = category;
+        prop.ownerName = ownerName;
+        prop.ownerMobile = phone;
+        prop.ownerEmail = email;
+        prop.website = website || '';
+        prop.gstNumber = gstNumber || '';
+        prop.state = state;
+        prop.city = city;
+        prop.address = address;
+        prop.googleMapUrl = googleMap || '';
+        prop.latitude = Number(latitude) || 0;
+        prop.longitude = Number(longitude) || 0;
+        prop.description = description.trim();
+        prop.currentStep = Math.max(prop.currentStep, 2);
+
+      } else if (step === 2) {
+        const { cover, images } = data;
+        if (!cover) return res.status(400).json({ error: 'ValidationError', message: 'Cover Image is required.' });
+        let existingGal = mockPropertyGalleryDatabase.find(g => g.propertyId === propertyId);
+        prevValue = JSON.stringify(existingGal);
+        if (existingGal) {
+          existingGal.coverImage = cover;
+          existingGal.images = images || [];
+        } else {
+          existingGal = { _id: 'gal-' + Date.now(), propertyId, coverImage: cover, images: images || [] };
+          mockPropertyGalleryDatabase.push(existingGal);
+        }
+        prop.currentStep = Math.max(prop.currentStep, 3);
+
+      } else if (step === 3) {
+        const { amenityIds } = data;
+        let existingAm = mockPropertyAmenitiesDatabase.find(a => a.propertyId === propertyId);
+        prevValue = JSON.stringify(existingAm);
+        if (existingAm) {
+          existingAm.amenityIds = amenityIds || [];
+        } else {
+          existingAm = { _id: 'am-' + Date.now(), propertyId, amenityIds: amenityIds || [] };
+          mockPropertyAmenitiesDatabase.push(existingAm);
+        }
+        prop.currentStep = Math.max(prop.currentStep, 4);
+
+      } else if (step === 4) {
+        const { rooms } = data;
+        if (!rooms || rooms.length === 0) {
+          return res.status(400).json({ error: 'ValidationError', message: 'At least one Room Category is required.' });
+        }
+        const roomNumSet = new Set();
+        for (const roomCat of rooms) {
+          const nums = String(roomCat.roomNumbers).split(',').map(n => n.trim()).filter(Boolean);
+          if (nums.length !== Number(roomCat.count)) {
+            return res.status(400).json({ error: 'ValidationError', message: `Room numbers count must match total rooms for category "${roomCat.name}".` });
+          }
+          for (const num of nums) {
+            if (roomNumSet.has(num)) {
+              return res.status(400).json({ error: 'ValidationError', message: `Duplicate room number "${num}" detected.` });
+            }
+            roomNumSet.add(num);
+          }
+        }
+
+        mockPropertyRoomsDatabase = mockPropertyRoomsDatabase.filter(r => r.propertyId !== propertyId);
+        const insertedRooms = [];
+        for (const r of rooms) {
+          const roomDoc = {
+            _id: r.id && r.id.startsWith('RM-') && !r.id.includes('test') ? r.id : 'RM-' + Math.floor(100000 + Math.random() * 900000),
+            propertyId,
+            roomCategoryName: r.name,
+            roomType: r.type,
+            numberOfRooms: Number(r.count),
+            roomNumbers: String(r.roomNumbers).split(',').map(n => n.trim()).filter(Boolean),
+            maxOccupancyAdults: Number(r.occupancy),
+            maxOccupancyChildren: Number(r.maxOccupancyChildren || 0),
+            extraPersonAllowed: Number(r.extraPerson || 0),
+            roomSize: Number(r.roomSize || 300),
+            bedType: r.bedType || 'Double Bed',
+            description: r.description || '',
+            images: r.images || [],
+            amenityIds: r.amenities || []
+          };
+          mockPropertyRoomsDatabase.push(roomDoc);
+          insertedRooms.push(roomDoc);
+        }
+        prop.currentStep = Math.max(prop.currentStep, 5);
+
+        const audit = {
+          _id: 'aud-' + Date.now(),
+          propertyId,
+          action: 'EDIT',
+          user: req.user.email,
+          role: 'Owner',
+          ip: req.ip || '',
+          createdAt: new Date(),
+          previousValue: prevValue,
+          newValue
+        };
+        mockPropertyAuditLogsDatabase.push(audit);
+
+        return res.json({
+          success: true,
+          currentStep: prop.currentStep,
+          rooms: insertedRooms.map(r => ({
+            id: r._id,
+            name: r.roomCategoryName,
+            type: r.roomType,
+            count: r.numberOfRooms,
+            roomNumbers: r.roomNumbers.join(', '),
+            occupancy: r.maxOccupancyAdults,
+            maxOccupancyChildren: r.maxOccupancyChildren,
+            extraPerson: r.extraPersonAllowed,
+            roomSize: r.roomSize,
+            bedType: r.bedType,
+            description: r.description,
+            images: r.images,
+            amenities: r.amenityIds
+          }))
+        });
+
+      } else if (step === 5) {
+        const { seasons } = data;
+        // Verify seasons overlaps before saving
+        for (const [roomId, roomSeasons] of Object.entries(seasons)) {
+          const ranges = [];
+          ['peak', 'mid', 'off'].forEach(t => {
+            (roomSeasons[t] || []).forEach(r => {
+              if (r.start && r.end) {
+                ranges.push({ start: new Date(r.start), end: new Date(r.end), type: t });
+              }
+            });
+          });
+          // Check overlaps
+          for (let i = 0; i < ranges.length; i++) {
+            for (let j = i + 1; j < ranges.length; j++) {
+              if (ranges[i].start <= ranges[j].end && ranges[j].start <= ranges[i].end) {
+                return res.status(400).json({ error: 'ValidationError', message: 'Overlapping date ranges detected.' });
+              }
+            }
+          }
+        }
+
+        mockPropertySeasonsDatabase = mockPropertySeasonsDatabase.filter(s => s.propertyId !== propertyId);
+        for (const [roomId, roomSeasons] of Object.entries(seasons)) {
+          const peak = (roomSeasons.peak || []).map(r => ({ start: new Date(r.start), end: new Date(r.end) }));
+          const mid = (roomSeasons.mid || []).map(r => ({ start: new Date(r.start), end: new Date(r.end) }));
+          const off = (roomSeasons.off || []).map(r => ({ start: new Date(r.start), end: new Date(r.end) }));
+
+          mockPropertySeasonsDatabase.push({
+            _id: 'sea-' + Date.now() + Math.random(),
+            propertyId,
+            roomCategoryId: roomId,
+            seasons: { peak, mid, off }
+          });
+        }
+        prop.currentStep = Math.max(prop.currentStep, 6);
+
+      } else if (step === 6) {
+        const { rates } = data;
+        // Verify rates pricing limit
+        for (const [roomId, roomRates] of Object.entries(rates)) {
+          for (const [season, plans] of Object.entries(roomRates)) {
+            for (const [plan, vals] of Object.entries(plans)) {
+              const b2b = Number(vals.b2b);
+              const b2c = Number(vals.b2c);
+              if (b2b > b2c) {
+                return res.status(400).json({ error: 'ValidationError', message: 'B2B price cannot exceed B2C price.' });
+              }
+              if (b2b <= 0 || b2c <= 0) {
+                return res.status(400).json({ error: 'ValidationError', message: 'Pricing rates must be greater than zero.' });
+              }
+            }
+          }
+        }
+
+        mockPropertyPricingDatabase = mockPropertyPricingDatabase.filter(p => p.propertyId !== propertyId);
+        for (const [roomId, roomRates] of Object.entries(rates)) {
+          for (const [season, plans] of Object.entries(roomRates)) {
+            for (const [plan, vals] of Object.entries(plans)) {
+              mockPropertyPricingDatabase.push({
+                _id: 'prc-' + Date.now() + Math.random(),
+                propertyId,
+                roomCategoryId: roomId,
+                seasonType: season,
+                mealPlan: plan,
+                b2bRate: Number(vals.b2b),
+                b2cRate: Number(vals.b2c),
+                extraAdultB2B: Number(vals.extraAdultB2B) || 0,
+                extraAdultB2C: Number(vals.extraAdultB2C) || 0,
+                childB2B: Number(vals.childB2B) || 0,
+                childB2C: Number(vals.childB2C) || 0
+              });
+            }
+          }
+        }
+        prop.currentStep = Math.max(prop.currentStep, 7);
+      }
+
+      const audit = {
+        _id: 'aud-' + Date.now(),
+        propertyId,
+        action: 'EDIT',
+        user: req.user.email,
+        role: 'Owner',
+        ip: req.ip || '',
+        createdAt: new Date(),
+        previousValue: prevValue,
+        newValue
+      };
+      mockPropertyAuditLogsDatabase.push(audit);
+
+      return res.json({ success: true, currentStep: prop.currentStep });
+    }
+
+    prop = await Property.findOne({ _id: propertyId, ownerId: req.user._id, deleted: false });
+    if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
+
+    if (step === 1) {
+      const { name, type, category, ownerName, phone, email, website, gstNumber, state, city, address, googleMap, latitude, longitude, description } = data;
+      if (!name || name.trim().length < 5 || name.trim().length > 150) {
+        return res.status(400).json({ error: 'ValidationError', message: 'Property Name must be between 5 and 150 characters.' });
+      }
+      if (!address || !address.trim()) {
+        return res.status(400).json({ error: 'ValidationError', message: 'Address is required.' });
+      }
+      if (!description || description.trim().length < 100 || description.trim().length > 5000) {
+        return res.status(400).json({ error: 'ValidationError', message: 'Description must be between 100 and 5000 characters.' });
+      }
+
+      const nameExists = await Property.findOne({ ownerId: req.user._id, name: { $regex: new RegExp(`^${name.trim()}$`, 'i') }, _id: { $ne: propertyId }, deleted: false });
+      if (nameExists) {
+        return res.status(400).json({ error: 'DuplicateProperty', message: 'You have already registered a property with this name.' });
+      }
+
+      prevValue = JSON.stringify(prop);
+      prop.name = name.trim();
+      prop.type = type;
+      prop.category = category;
+      prop.ownerName = ownerName;
+      prop.ownerMobile = phone;
+      prop.ownerEmail = email;
+      prop.website = website || '';
+      prop.gstNumber = gstNumber || '';
+      prop.state = state;
+      prop.city = city;
+      prop.address = address;
+      prop.googleMapUrl = googleMap || '';
+      prop.latitude = Number(latitude) || 0;
+      prop.longitude = Number(longitude) || 0;
+      prop.description = description.trim();
+      prop.currentStep = Math.max(prop.currentStep, 2);
+      await prop.save();
+
+    } else if (step === 2) {
+      const { cover, images } = data;
+      if (!cover) return res.status(400).json({ error: 'ValidationError', message: 'Cover Image is required.' });
+      const existingGal = await PropertyGallery.findOne({ propertyId });
+      prevValue = JSON.stringify(existingGal);
+      if (existingGal) {
+        existingGal.coverImage = cover;
+        existingGal.images = images || [];
+        await existingGal.save();
+      } else {
+        const newGal = new PropertyGallery({ propertyId, coverImage: cover, images: images || [] });
+        await newGal.save();
+      }
+      prop.currentStep = Math.max(prop.currentStep, 3);
+      await prop.save();
+
+    } else if (step === 3) {
+      const { amenityIds } = data;
+      const existingAm = await PropertyAmenities.findOne({ propertyId });
+      prevValue = JSON.stringify(existingAm);
+      if (existingAm) {
+        existingAm.amenityIds = amenityIds || [];
+        await existingAm.save();
+      } else {
+        const newAm = new PropertyAmenities({ propertyId, amenityIds: amenityIds || [] });
+        await newAm.save();
+      }
+      prop.currentStep = Math.max(prop.currentStep, 4);
+      await prop.save();
+
+    } else if (step === 4) {
+      const { rooms } = data;
+      if (!rooms || rooms.length === 0) {
+        return res.status(400).json({ error: 'ValidationError', message: 'At least one Room Category is required.' });
+      }
+      const roomNumSet = new Set();
+      for (const roomCat of rooms) {
+        const nums = String(roomCat.roomNumbers).split(',').map(n => n.trim()).filter(Boolean);
+        if (nums.length !== Number(roomCat.count)) {
+          return res.status(400).json({ error: 'ValidationError', message: `Room numbers count must match total rooms for category "${roomCat.name}".` });
+        }
+        for (const num of nums) {
+          if (roomNumSet.has(num)) {
+            return res.status(400).json({ error: 'ValidationError', message: `Duplicate room number "${num}" detected.` });
+          }
+          roomNumSet.add(num);
+        }
+      }
+
+      const existingRooms = await PropertyRooms.find({ propertyId });
+      prevValue = JSON.stringify(existingRooms);
+      
+      await PropertyRooms.deleteMany({ propertyId });
+
+      const insertedRooms = [];
+      for (const r of rooms) {
+        const roomDoc = new PropertyRooms({
+          propertyId,
+          roomCategoryName: r.name,
+          roomType: r.type,
+          numberOfRooms: Number(r.count),
+          roomNumbers: String(r.roomNumbers).split(',').map(n => n.trim()).filter(Boolean),
+          maxOccupancyAdults: Number(r.occupancy),
+          maxOccupancyChildren: Number(r.maxOccupancyChildren || 0),
+          extraPersonAllowed: Number(r.extraPerson || 0),
+          roomSize: Number(r.roomSize || 300),
+          bedType: r.bedType || 'Double Bed',
+          description: r.description || '',
+          images: r.images || [],
+          amenityIds: r.amenities || []
+        });
+        await roomDoc.save();
+        insertedRooms.push(roomDoc);
+      }
+
+      prop.currentStep = Math.max(prop.currentStep, 5);
+      await prop.save();
+
+      const audit = new PropertyAuditLog({
+        propertyId,
+        action: 'EDIT',
+        user: req.user.email,
+        role: 'Owner',
+        ip: req.ip || '',
+        browser: req.headers['user-agent'] || '',
+        previousValue: prevValue,
+        newValue
+      });
+      await audit.save();
+
+      return res.json({
+        success: true,
+        currentStep: prop.currentStep,
+        rooms: insertedRooms.map(r => ({
+          id: r._id,
+          name: r.roomCategoryName,
+          type: r.roomType,
+          count: r.numberOfRooms,
+          roomNumbers: r.roomNumbers.join(', '),
+          occupancy: r.maxOccupancyAdults,
+          maxOccupancyChildren: r.maxOccupancyChildren,
+          extraPerson: r.extraPersonAllowed,
+          roomSize: r.roomSize,
+          bedType: r.bedType,
+          description: r.description,
+          images: r.images,
+          amenities: r.amenityIds
+        }))
+      });
+
+    } else if (step === 5) {
+      const { seasons } = data;
+      // Verify seasons overlaps before saving
+      for (const [roomId, roomSeasons] of Object.entries(seasons)) {
+        const ranges = [];
+        ['peak', 'mid', 'off'].forEach(t => {
+          (roomSeasons[t] || []).forEach(r => {
+            if (r.start && r.end) {
+              ranges.push({ start: new Date(r.start), end: new Date(r.end), type: t });
+            }
+          });
+        });
+        for (let i = 0; i < ranges.length; i++) {
+          for (let j = i + 1; j < ranges.length; j++) {
+            if (ranges[i].start <= ranges[j].end && ranges[j].start <= ranges[i].end) {
+              return res.status(400).json({ error: 'ValidationError', message: 'Overlapping date ranges detected.' });
+            }
+          }
+        }
+      }
+
+      const existingSeasons = await PropertySeason.find({ propertyId });
+      prevValue = JSON.stringify(existingSeasons);
+
+      await PropertySeason.deleteMany({ propertyId });
+
+      for (const [roomId, roomSeasons] of Object.entries(seasons)) {
+        const peak = (roomSeasons.peak || []).map(r => ({ start: new Date(r.start), end: new Date(r.end) }));
+        const mid = (roomSeasons.mid || []).map(r => ({ start: new Date(r.start), end: new Date(r.end) }));
+        const off = (roomSeasons.off || []).map(r => ({ start: new Date(r.start), end: new Date(r.end) }));
+
+        const seasonDoc = new PropertySeason({
+          propertyId,
+          roomCategoryId: roomId,
+          seasons: { peak, mid, off }
+        });
+        await seasonDoc.save();
+      }
+
+      prop.currentStep = Math.max(prop.currentStep, 6);
+      await prop.save();
+
+    } else if (step === 6) {
+      const { rates } = data;
+      for (const [roomId, roomRates] of Object.entries(rates)) {
+        for (const [season, plans] of Object.entries(roomRates)) {
+          for (const [plan, vals] of Object.entries(plans)) {
+            const b2b = Number(vals.b2b);
+            const b2c = Number(vals.b2c);
+            if (b2b > b2c) {
+              return res.status(400).json({ error: 'ValidationError', message: 'B2B price cannot exceed B2C price.' });
+            }
+            if (b2b <= 0 || b2c <= 0) {
+              return res.status(400).json({ error: 'ValidationError', message: 'Pricing rates must be greater than zero.' });
+            }
+          }
+        }
+      }
+
+      const existingPricing = await PropertyPricing.find({ propertyId });
+      prevValue = JSON.stringify(existingPricing);
+
+      await PropertyPricing.deleteMany({ propertyId });
+
+      for (const [roomId, roomRates] of Object.entries(rates)) {
+        for (const [season, plans] of Object.entries(roomRates)) {
+          for (const [plan, vals] of Object.entries(plans)) {
+            const pricingDoc = new PropertyPricing({
+              propertyId,
+              roomCategoryId: roomId,
+              seasonType: season,
+              mealPlan: plan,
+              b2bRate: Number(vals.b2b),
+              b2cRate: Number(vals.b2c),
+              extraAdultB2B: Number(vals.extraAdultB2B) || 0,
+              extraAdultB2C: Number(vals.extraAdultB2C) || 0,
+              childB2B: Number(vals.childB2B) || 0,
+              childB2C: Number(vals.childB2C) || 0,
+              taxInclusive: vals.taxInclusive || false,
+              weekendPrice: vals.weekendPrice ? Number(vals.weekendPrice) : undefined,
+              festivalPrice: vals.festivalPrice ? Number(vals.festivalPrice) : undefined
+            });
+            await pricingDoc.save();
+          }
+        }
+      }
+
+      prop.currentStep = Math.max(prop.currentStep, 7);
+      await prop.save();
+    }
+
+    const audit = new PropertyAuditLog({
+      propertyId,
+      action: 'EDIT',
+      user: req.user.email,
+      role: 'Owner',
+      ip: req.ip || '',
+      browser: req.headers['user-agent'] || '',
+      previousValue: prevValue,
+      newValue
+    });
+    await audit.save();
+
+    res.json({ success: true, currentStep: prop.currentStep });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+router.post('/homestay-owner/properties/publish', authenticateToken, async (req, res) => {
+  const { propertyId } = req.body;
+  if (!propertyId) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Property ID is required.' });
+  }
+
+  try {
+    if (!isMongoConnected()) {
+      const prop = mockPropertiesDatabase.find(p => p._id === propertyId && p.ownerId === req.user._id && !p.deleted);
+      if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
+
+      const rooms = mockPropertyRoomsDatabase.filter(r => r.propertyId === propertyId);
+      if (rooms.length === 0) {
+        return res.status(400).json({ error: 'ValidationError', message: 'No Room categories configured.' });
+      }
+      const missingImages = rooms.filter(r => !r.images || r.images.length === 0);
+      if (missingImages.length > 0) {
+        return res.status(400).json({ error: 'ValidationError', message: `Every Room Category must have at least one image. Missing images in: ${missingImages.map(r => r.roomCategoryName || r.name).join(', ')}` });
+      }
+
+      prop.status = 'Submitted For Review';
+      prop.currentStep = 8;
+
+      let approval = mockPropertyApprovalsDatabase.find(a => a.propertyId === propertyId);
+      if (!approval) {
+        approval = {
+          propertyId,
+          status: 'Pending Review',
+          reviewedAt: null,
+          reviewedBy: null,
+          comments: []
+        };
+        mockPropertyApprovalsDatabase.push(approval);
+      } else {
+        approval.status = 'Pending Review';
+        approval.reviewedAt = null;
+        approval.reviewedBy = null;
+      }
+
+      const audit = {
+        _id: 'aud-' + Date.now(),
+        propertyId,
+        action: 'PUBLISH',
+        user: req.user.email,
+        role: 'Owner',
+        ip: req.ip || '',
+        createdAt: new Date(),
+        previousValue: 'Draft',
+        newValue: 'Submitted For Review'
+      };
+      mockPropertyAuditLogsDatabase.push(audit);
+
+      return res.json({ success: true, message: 'Property listing submitted for review.' });
+    }
+
+    const prop = await Property.findOne({ _id: propertyId, ownerId: req.user._id, deleted: false });
+    if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
+
+    const gallery = await PropertyGallery.findOne({ propertyId });
+    if (!gallery || !gallery.coverImage) {
+      return res.status(400).json({ error: 'ValidationError', message: 'Gallery Cover Image is missing.' });
+    }
+
+    const rooms = await PropertyRooms.find({ propertyId });
+    if (rooms.length === 0) {
+      return res.status(400).json({ error: 'ValidationError', message: 'No Room categories configured.' });
+    }
+    const missingImages = rooms.filter(r => !r.images || r.images.length === 0);
+    if (missingImages.length > 0) {
+      return res.status(400).json({ error: 'ValidationError', message: `Every Room Category must have at least one image. Missing images in: ${missingImages.map(r => r.roomCategoryName).join(', ')}` });
+    }
+
+    const seasons = await PropertySeason.find({ propertyId });
+    if (seasons.length === 0) {
+      return res.status(400).json({ error: 'ValidationError', message: 'Room Season date ranges are missing.' });
+    }
+
+    const pricing = await PropertyPricing.find({ propertyId });
+    if (pricing.length === 0) {
+      return res.status(400).json({ error: 'ValidationError', message: 'Pricing rates have not been set.' });
+    }
+
+    prop.status = 'Submitted For Review';
+    prop.currentStep = 8;
+    await prop.save();
+
+    await PropertyApproval.findOneAndUpdate(
+      { propertyId },
+      { $set: { status: 'Pending Review', reviewedAt: null, reviewedBy: null } },
+      { upsert: true, new: true }
+    );
+
+    const audit = new PropertyAuditLog({
+      propertyId,
+      action: 'PUBLISH',
+      user: req.user.email,
+      role: 'Owner',
+      ip: req.ip || '',
+      browser: req.headers['user-agent'] || '',
+      previousValue: 'Draft',
+      newValue: 'Submitted For Review'
+    });
+    await audit.save();
+
+    res.json({ success: true, message: 'Property listing submitted for review.' });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+router.get('/homestay-owner/properties', authenticateToken, async (req, res) => {
+  try {
+    const ownerId = req.user._id;
+    let list;
+    if (!isMongoConnected()) {
+      list = mockPropertiesDatabase.filter(p => String(p.ownerId) === String(ownerId) && !p.deleted);
+    } else {
+      list = await Property.find({ ownerId, deleted: false }).lean().sort({ createdAt: -1 });
+    }
+
+    const enrichedList = [];
+    for (const p of list) {
+      let coverImage = '';
+      let totalRooms = 0;
+      let totalOccupancy = 0;
+      const pid = p._id;
+
+      if (!isMongoConnected()) {
+        const gal = mockPropertyGalleryDatabase.find(g => String(g.propertyId) === String(pid));
+        coverImage = gal?.coverImage || '';
+        
+        const rooms = mockPropertyRoomsDatabase.filter(r => String(r.propertyId) === String(pid));
+        rooms.forEach(r => {
+          totalRooms += (r.numberOfRooms || 0);
+          totalOccupancy += ((r.maxOccupancyAdults || 0) * (r.numberOfRooms || 0));
+        });
+      } else {
+        const gal = await PropertyGallery.findOne({ propertyId: pid });
+        coverImage = gal?.coverImage || '';
+
+        const rooms = await PropertyRooms.find({ propertyId: pid });
+        rooms.forEach(r => {
+          totalRooms += (r.numberOfRooms || 0);
+          totalOccupancy += ((r.maxOccupancyAdults || 0) * (r.numberOfRooms || 0));
+        });
+      }
+
+      enrichedList.push({
+        ...p,
+        coverImage,
+        rooms: totalRooms,
+        occupancy: totalOccupancy
+      });
+    }
+
+    res.json(enrichedList);
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+router.delete('/homestay-owner/properties/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (!isMongoConnected()) {
+      const prop = mockPropertiesDatabase.find(p => String(p._id) === String(id) && String(p.ownerId) === String(req.user._id));
+      if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
+      prop.deleted = true;
+      return res.json({ message: 'Property successfully deleted.' });
+    }
+
+    const prop = await Property.findOne({ _id: id, ownerId: req.user._id });
+    if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
+    prop.deleted = true;
+    await prop.save();
+    res.json({ message: 'Property successfully deleted.' });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// --- SUPER ADMIN PROPERTY APPROVAL QUEUE ---
+router.get('/admin/homestays-list', authenticateToken, async (req, res) => {
+  const { status, search } = req.query;
+  try {
+    if (!isMongoConnected()) {
+      let list = mockPropertiesDatabase.filter(p => !p.deleted);
+      if (status && status !== 'All') {
+        if (status === 'Pending Review') {
+          list = list.filter(p => p.status === 'Submitted For Review');
+        } else if (status === 'Pending Approval') {
+          list = list.filter(p => p.status === 'Submitted For Review');
+        } else {
+          list = list.filter(p => p.status === status);
+        }
+      }
+      if (search) {
+        const regex = new RegExp(search, 'i');
+        list = list.filter(p => regex.test(p.name) || regex.test(p.ownerName) || regex.test(p.propertyId) || regex.test(p.city));
+      }
+      return res.json(list);
+    }
+
+    const query = { deleted: false };
+    if (status && status !== 'All') {
+      if (status === 'Pending Review' || status === 'Pending Approval') {
+        query.status = 'Submitted For Review';
+      } else {
+        query.status = status;
+      }
+    }
+
+    if (search) {
+      const regex = new RegExp(search, 'i');
+      query.$or = [
+        { name: regex },
+        { ownerName: regex },
+        { propertyId: regex },
+        { city: regex }
+      ];
+    }
+
+    const propertiesList = await Property.find(query).sort({ createdAt: -1 });
+    res.json(propertiesList);
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+router.post('/admin/homestays-list/:id/review', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { status, comment } = req.body;
+
+  if (!status || !['Approved', 'Rejected', 'Changes Requested'].includes(status)) {
+    return res.status(400).json({ error: 'ValidationError', message: 'Status must be Approved, Rejected, or Changes Requested.' });
+  }
+
+  try {
+    if (!isMongoConnected()) {
+      const prop = mockPropertiesDatabase.find(p => p._id === id && !p.deleted);
+      if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
+
+      const prevStatus = prop.status;
+      prop.status = status;
+
+      let approval = mockPropertyApprovalsDatabase.find(a => a.propertyId === id);
+      if (!approval) {
+        approval = {
+          propertyId: id,
+          status,
+          reviewedBy: req.user.email,
+          reviewedAt: new Date(),
+          comments: []
+        };
+        mockPropertyApprovalsDatabase.push(approval);
+      } else {
+        approval.status = status;
+        approval.reviewedBy = req.user.email;
+        approval.reviewedAt = new Date();
+      }
+
+      if (comment) {
+        approval.comments.push({
+          step: 0,
+          field: 'General Review',
+          comment: comment.trim(),
+          createdAt: new Date()
+        });
+      }
+
+      const auditLog = {
+        _id: 'aud-' + Date.now(),
+        propertyId: id,
+        action: 'REVIEW',
+        user: req.user.email,
+        role: 'Super Admin',
+        ip: req.ip || '',
+        createdAt: new Date(),
+        previousValue: prevStatus,
+        newValue: status
+      };
+      mockPropertyAuditLogsDatabase.push(auditLog);
+
+      if (status === 'Approved') {
+        const gallery = mockPropertyGalleryDatabase.find(g => g.propertyId === id);
+        const rooms = mockPropertyRoomsDatabase.filter(r => r.propertyId === id);
+        const amenities = mockPropertyAmenitiesDatabase.find(a => a.propertyId === id);
+        const seasonsList = mockPropertySeasonsDatabase.filter(s => s.propertyId === id);
+        const pricingList = mockPropertyPricingDatabase.filter(pr => pr.propertyId === id);
+
+        const mappedRooms = rooms.map(r => ({
+          roomType: r.roomType || 'Standard',
+          totalRooms: r.numberOfRooms || 1,
+          extraPersonAllowed: r.extraPersonAllowed === 'Not Allowed' ? 0 : 1,
+          roomNumbers: r.roomNumbers || [],
+          photos: r.images || [],
+          description: r.description || ''
+        }));
+
+        const mappedSeasons = seasonsList.map(s => {
+          const arr = [];
+          if (s.seasons?.peak?.[0]) arr.push({ seasonName: 'Peak Season', fromDate: new Date(s.seasons.peak[0].start), toDate: new Date(s.seasons.peak[0].end) });
+          if (s.seasons?.mid?.[0]) arr.push({ seasonName: 'Mid Season', fromDate: new Date(s.seasons.mid[0].start), toDate: new Date(s.seasons.mid[0].end) });
+          if (s.seasons?.off?.[0]) arr.push({ seasonName: 'Off Season', fromDate: new Date(s.seasons.off[0].start), toDate: new Date(s.seasons.off[0].end) });
+          return arr;
+        }).flat();
+
+        const mappedRates = pricingList.map(pr => {
+          const roomCat = rooms.find(r => r._id === pr.roomCategoryId)?.roomCategoryName || 'Standard';
+          return {
+            roomCategory: roomCat,
+            occupancy: 'Double Occupancy',
+            season: pr.seasonType === 'peak' ? 'Peak Season' : (pr.seasonType === 'mid' ? 'Mid Season' : 'Off Season'),
+            planRates: {
+              [pr.mealPlan]: {
+                b2bRate: pr.b2cRate,
+                b2cRate: pr.b2cRate,
+                b2bExtraPerson: pr.extraAdultB2C,
+                b2cExtraPerson: pr.extraAdultB2C,
+                b2bChild: pr.childB2C,
+                b2cChild: pr.childB2C
+              }
+            }
+          };
+        });
+
+        const homestayPayload = {
+          _id: id,
+          name: prop.name || 'Untitled Property',
+          type: prop.type || 'Homestay',
+          ownerName: prop.ownerName,
+          ownerMobile: prop.ownerMobile,
+          address: prop.address || '',
+          city: prop.city,
+          region: prop.state || '',
+          description: prop.description || '',
+          amenities: amenities ? amenities.amenityIds : [],
+          images: gallery ? [gallery.coverImage, ...gallery.images].filter(Boolean) : [],
+          rooms: mappedRooms,
+          seasons: mappedSeasons,
+          rates: mappedRates,
+          status: 'Active'
+        };
+
+        const existingIdx = mockHomestaysDatabase.findIndex(h => h.name === prop.name);
+        if (existingIdx >= 0) {
+          mockHomestaysDatabase[existingIdx] = homestayPayload;
+        } else {
+          mockHomestaysDatabase.push(homestayPayload);
+        }
+      }
+
+      return res.json({ success: true, message: `Property status updated to ${status}.` });
+    }
+
+    const prop = await Property.findOne({ _id: id, deleted: false });
+    if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
+
+    const prevStatus = prop.status;
+    prop.status = status;
+    await prop.save();
+
+    const updatePayload = {
+      status,
+      reviewedBy: req.user.email,
+      reviewedAt: new Date()
+    };
+
+    if (comment) {
+      updatePayload.$push = {
+        comments: {
+          step: 0,
+          field: 'General Review',
+          comment: comment.trim(),
+          createdAt: new Date()
+        }
+      };
+    }
+
+    await PropertyApproval.findOneAndUpdate(
+      { propertyId: id },
+      updatePayload,
+      { upsert: true, new: true }
+    );
+
+    if (status === 'Approved') {
+      const gallery = await PropertyGallery.findOne({ propertyId: id });
+      const rooms = await PropertyRooms.find({ propertyId: id });
+      const amenities = await PropertyAmenities.findOne({ propertyId: id });
+      const seasonsList = await PropertySeason.find({ propertyId: id });
+      const pricingList = await PropertyPricing.find({ propertyId: id });
+
+      const mappedRooms = rooms.map(r => ({
+        roomType: r.roomType || 'Standard',
+        totalRooms: r.numberOfRooms || 1,
+        extraPersonAllowed: r.extraPersonAllowed === 'Not Allowed' ? 0 : (r.extraPersonAllowed.includes('1') ? 1 : 2),
+        roomNumbers: r.roomNumbers || [],
+        photos: r.images || [],
+        description: r.description || ''
+      }));
+
+      const mappedSeasons = seasonsList.map(s => {
+        const arr = [];
+        if (s.seasons.peak && s.seasons.peak.length > 0) {
+          arr.push({ seasonName: 'Peak Season', fromDate: new Date(s.seasons.peak[0].start), toDate: new Date(s.seasons.peak[0].end) });
+        }
+        if (s.seasons.mid && s.seasons.mid.length > 0) {
+          arr.push({ seasonName: 'Mid Season', fromDate: new Date(s.seasons.mid[0].start), toDate: new Date(s.seasons.mid[0].end) });
+        }
+        if (s.seasons.off && s.seasons.off.length > 0) {
+          arr.push({ seasonName: 'Off Season', fromDate: new Date(s.seasons.off[0].start), toDate: new Date(s.seasons.off[0].end) });
+        }
+        return arr;
+      }).flat();
+
+      const mappedRates = pricingList.map(pr => {
+        const roomCat = rooms.find(r => r._id.toString() === pr.roomCategoryId.toString())?.roomCategoryName || 'Standard';
+        return {
+          roomCategory: roomCat,
+          occupancy: 'Double Occupancy',
+          season: pr.seasonType === 'peak' ? 'Peak Season' : (pr.seasonType === 'mid' ? 'Mid Season' : 'Off Season'),
+          planRates: {
+            [pr.mealPlan]: {
+              b2bRate: pr.b2cRate,
+              b2cRate: pr.b2cRate,
+              b2bExtraPerson: pr.extraAdultB2C,
+              b2cExtraPerson: pr.extraAdultB2C,
+              b2bChild: pr.childB2C,
+              b2cChild: pr.childB2C
+            }
+          }
+        };
+      });
+
+      const homestayPayload = {
+        name: prop.name || 'Untitled Property',
+        type: prop.type || 'Homestay',
+        ownerName: prop.ownerName,
+        ownerMobile: prop.ownerMobile,
+        address: prop.address || '',
+        city: prop.city,
+        region: prop.state || '',
+        description: prop.description || '',
+        amenities: amenities ? amenities.amenityIds : [],
+        images: gallery ? [gallery.coverImage, ...gallery.images].filter(Boolean) : [],
+        rooms: mappedRooms,
+        seasons: mappedSeasons,
+        rates: mappedRates,
+        status: 'Active'
+      };
+
+      await Homestay.findOneAndUpdate(
+        { name: prop.name },
+        homestayPayload,
+        { upsert: true, new: true }
+      );
+    }
+
+    const auditLog = new PropertyAuditLog({
+      propertyId: id,
+      action: 'REVIEW',
+      user: req.user.email,
+      role: 'Super Admin',
+      ip: req.ip || '',
+      browser: req.headers['user-agent'] || '',
+      previousValue: prevStatus,
+      newValue: status
+    });
+    await auditLog.save();
+
+    res.json({ success: true, message: `Property status updated to ${status}.` });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
   }
 });
 

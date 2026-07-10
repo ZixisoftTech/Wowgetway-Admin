@@ -574,8 +574,20 @@ const HomestayOwnerSchema = new mongoose.Schema({
   // Verification Badges
   status: {
     type: String,
-    enum: ['Active', 'Pending Verification', 'Inactive'],
+    enum: ['Active', 'Pending Verification', 'Inactive', 'Deleted'],
     default: 'Pending Verification'
+  },
+  encryptedPasswordCopy: {
+    type: String,
+    default: ''
+  },
+  deletedAt: {
+    type: Date,
+    default: null
+  },
+  deletedBy: {
+    type: String,
+    default: ''
   },
   aadharVerified: {
     type: Boolean,
@@ -603,6 +615,26 @@ const HomestayOwnerSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now
+  },
+  lastLoginDate: {
+    type: String,
+    default: ''
+  },
+  lastLoginTime: {
+    type: String,
+    default: ''
+  },
+  lastLoginIp: {
+    type: String,
+    default: ''
+  },
+  resetPasswordOtp: {
+    type: String,
+    default: ''
+  },
+  resetPasswordOtpExpires: {
+    type: Date,
+    default: null
   }
 });
 
@@ -890,17 +922,268 @@ const TourPackageSchema = new mongoose.Schema({
 export const TourPackage = mongoose.model('TourPackage', TourPackageSchema);
 
 const AdminSchema = new mongoose.Schema({
-  email: { type: String, unique: true, required: true },
+  name: { type: String, default: 'Super Admin' },
   fullName: { type: String, required: true },
-  passwordHash: { type: String, required: true }, // Store plaintext in fallback/mock mode, but define hash field
+  email: { type: String, unique: true, required: true },
+  passwordHash: { type: String, required: true },
+  role: { type: String, default: 'Super Admin' },
+  status: { type: String, default: 'Active' },
+  profilePhoto: { type: String, default: '' },
+  mobileNumber: { type: String, default: '' },
+  lastLogin: { type: Date, default: null },
   failedLoginAttempts: { type: Number, default: 0 },
   lockoutUntil: { type: Date, default: null },
   resetPasswordToken: { type: String, default: null },
   resetPasswordExpires: { type: Date, default: null },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
 });
 
 export const Admin = mongoose.model('Admin', AdminSchema);
+
+const PasswordResetSchema = new mongoose.Schema({
+  adminId: { type: String, required: true }, // admin email or ID
+  otpHash: { type: String, required: true },
+  expiresAt: { type: Date, required: true },
+  used: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now }
+});
+
+export const PasswordReset = mongoose.model('PasswordReset', PasswordResetSchema);
+
+const SmtpSettingsSchema = new mongoose.Schema({
+  host: { type: String, default: 'smtp.gmail.com' },
+  port: { type: Number, default: 465 },
+  email: { type: String, default: 'Chetanprajapat007@gmail.com' },
+  appPassword: { type: String, default: 'rmbxpgfuiayhpyrg' },
+  secure: { type: Boolean, default: true },
+  senderName: { type: String, default: 'Wow Gateways Support' },
+  enabled: { type: Boolean, default: true },
+  updatedAt: { type: Date, default: Date.now },
+  updatedBy: { type: String, default: 'System' }
+});
+
+export const SmtpSettings = mongoose.model('SmtpSettings', SmtpSettingsSchema);
+
+const CouponSchema = new mongoose.Schema({
+  code: { type: String, unique: true, required: true },
+  type: { type: String, enum: ['percentage', 'fixed'], default: 'percentage' },
+  value: { type: Number, required: true },
+  minOrder: { type: Number, default: 0 },
+  maxUses: { type: Number, default: 0 },
+  usedCount: { type: Number, default: 0 },
+  expiry: { type: Date, required: true },
+  status: { type: String, enum: ['Active', 'Inactive', 'Expired'], default: 'Active' },
+  createdAt: { type: Date, default: Date.now },
+  createdBy: { type: String, default: 'Super Admin' },
+  updatedBy: { type: String, default: 'Super Admin' }
+});
+
+export const Coupon = mongoose.model('Coupon', CouponSchema);
+
+const ActivityLogSchema = new mongoose.Schema({
+  adminEmail: { type: String, required: true },
+  adminName: { type: String, required: true },
+  action: { type: String, required: true }, // e.g. CREATE, UPDATE, DELETE
+  module: { type: String, required: true }, // e.g. Staff Management, Manage Bookings
+  details: { type: String, default: '' },
+  ipAddress: { type: String, default: '' },
+  timestamp: { type: Date, default: Date.now }
+});
+
+export const ActivityLog = mongoose.model('ActivityLog', ActivityLogSchema);
+
+const CitySchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' }
+});
+
+const StateCitySchema = new mongoose.Schema({
+  state: { type: String, required: true, unique: true },
+  cities: [CitySchema]
+});
+
+export const StateCity = mongoose.model('StateCity', StateCitySchema);
+
+// Global Settings Module New Schemas
+const NewStateSchema = new mongoose.Schema({
+  stateName: { type: String, required: true, unique: true },
+  stateImage: { type: String, default: '' },
+  status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
+  deleted: { type: Boolean, default: false },
+  deletedBy: { type: String, default: null },
+  deletedAt: { type: Date, default: null },
+  deletedReason: { type: String, default: '' }
+}, { timestamps: true });
+
+const NewCitySchema = new mongoose.Schema({
+  stateId: { type: mongoose.Schema.Types.ObjectId, ref: 'NewState', required: true },
+  cityName: { type: String, required: true },
+  cityImage: { type: String, default: '' },
+  status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
+  deleted: { type: Boolean, default: false },
+  deletedBy: { type: String, default: null },
+  deletedAt: { type: Date, default: null },
+  deletedReason: { type: String, default: '' }
+}, { timestamps: true });
+
+// Compound index for cityName unique within same state
+NewCitySchema.index({ stateId: 1, cityName: 1 }, { unique: true });
+
+const NewAmenitySchema = new mongoose.Schema({
+  amenityName: { type: String, required: true, unique: true },
+  amenityIcon: { type: String, required: true },
+  status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
+  deleted: { type: Boolean, default: false },
+  deletedBy: { type: String, default: null },
+  deletedAt: { type: Date, default: null },
+  deletedReason: { type: String, default: '' }
+}, { timestamps: true });
+
+const NewRoomTypeSchema = new mongoose.Schema({
+  roomTypeName: { type: String, required: true, unique: true },
+  status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
+  deleted: { type: Boolean, default: false },
+  deletedBy: { type: String, default: null },
+  deletedAt: { type: Date, default: null },
+  deletedReason: { type: String, default: '' }
+}, { timestamps: true });
+
+export const NewState = mongoose.model('NewState', NewStateSchema, 'states');
+export const NewCity = mongoose.model('NewCity', NewCitySchema, 'cities');
+export const NewAmenity = mongoose.model('NewAmenity', NewAmenitySchema, 'amenities');
+export const NewRoomType = mongoose.model('NewRoomType', NewRoomTypeSchema, 'roomTypes');
+
+// --- NORMALIZED PROPERTY WIZARD SCHEMAS ---
+
+const PropertySchema = new mongoose.Schema({
+  propertyId: { type: String, required: true, unique: true }, // WG-PROP-000001
+  name: { type: String, required: true },
+  type: { type: String, required: true },
+  category: { type: String, required: true },
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'HomestayOwner', required: true },
+  ownerName: { type: String, required: true },
+  ownerMobile: { type: String, required: true },
+  ownerEmail: { type: String, required: true },
+  website: { type: String, default: '' },
+  gstNumber: { type: String, default: '' },
+  country: { type: String, default: 'India' },
+  state: { type: String, required: true },
+  city: { type: String, required: true },
+  address: { type: String, required: true },
+  googleMapUrl: { type: String, default: '' },
+  latitude: { type: Number, default: 0 },
+  longitude: { type: Number, default: 0 },
+  description: { type: String, required: true },
+  status: { 
+    type: String, 
+    enum: ['Draft', 'Submitted For Review', 'Changes Requested', 'Approved', 'Rejected', 'Published', 'Inactive', 'Deleted'], 
+    default: 'Draft' 
+  },
+  currentStep: { type: Number, default: 1 },
+  deleted: { type: Boolean, default: false },
+  deletedAt: { type: Date, default: null },
+  deletedBy: { type: String, default: null },
+  deletedReason: { type: String, default: '' }
+}, { timestamps: true });
+
+// Ensure unique property name per owner
+PropertySchema.index({ ownerId: 1, name: 1 }, { unique: true });
+
+const PropertyGallerySchema = new mongoose.Schema({
+  propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property', required: true, unique: true },
+  coverImage: { type: String, required: true },
+  images: [{
+    url: { type: String, required: true },
+    category: { 
+      type: String, 
+      enum: ['Lobby', 'Rooms', 'Restaurant', 'Reception', 'Bathroom', 'Balcony', 'Kitchen', 'Amenities', 'Garden', 'Parking', 'Swimming Pool', 'Conference Hall', 'Others'], 
+      required: true 
+    },
+    order: { type: Number, default: 0 }
+  }]
+}, { timestamps: true });
+
+const PropertyRoomsSchema = new mongoose.Schema({
+  propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property', required: true },
+  roomCategoryName: { type: String, required: true },
+  roomType: { type: String, required: true }, // from Global Settings NewRoomType
+  numberOfRooms: { type: Number, required: true, min: 1 },
+  roomNumbers: [{ type: String, required: true }],
+  maxOccupancyAdults: { type: Number, required: true, min: 1 },
+  maxOccupancyChildren: { type: Number, default: 0 },
+  extraPersonAllowed: { type: Number, default: 0 },
+  roomSize: { type: Number, required: true },
+  bedType: { type: String, required: true },
+  description: { type: String, default: '' },
+  images: [{ type: String }],
+  amenityIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'NewAmenity' }]
+}, { timestamps: true });
+
+const PropertyAmenitiesSchema = new mongoose.Schema({
+  propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property', required: true, unique: true },
+  amenityIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'NewAmenity' }]
+}, { timestamps: true });
+
+const PropertySeasonSchema = new mongoose.Schema({
+  propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property', required: true },
+  roomCategoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'PropertyRooms', required: true },
+  seasons: {
+    peak: [{ start: { type: Date }, end: { type: Date } }],
+    mid: [{ start: { type: Date }, end: { type: Date } }],
+    off: [{ start: { type: Date }, end: { type: Date } }]
+  }
+}, { timestamps: true });
+
+const PropertyPricingSchema = new mongoose.Schema({
+  propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property', required: true },
+  roomCategoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'PropertyRooms', required: true },
+  seasonType: { type: String, enum: ['peak', 'mid', 'off'], required: true },
+  mealPlan: { type: String, enum: ['EP', 'CP', 'MAP', 'AP'], required: true },
+  b2bRate: { type: Number, required: true, min: 0 },
+  b2cRate: { type: Number, required: true, min: 0 },
+  extraAdultB2B: { type: Number, default: 0 },
+  extraAdultB2C: { type: Number, default: 0 },
+  childB2B: { type: Number, default: 0 },
+  childB2C: { type: Number, default: 0 },
+  taxInclusive: { type: Boolean, default: false },
+  weekendPrice: { type: Number },
+  festivalPrice: { type: Number }
+}, { timestamps: true });
+
+const PropertyApprovalSchema = new mongoose.Schema({
+  propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property', required: true },
+  status: { type: String, enum: ['Pending Review', 'Approved', 'Changes Requested', 'Rejected'], default: 'Pending Review' },
+  comments: [{
+    step: { type: Number },
+    field: { type: String },
+    comment: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now }
+  }],
+  reviewedBy: { type: String },
+  reviewedAt: { type: Date }
+}, { timestamps: true });
+
+const PropertyAuditLogSchema = new mongoose.Schema({
+  propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property' },
+  action: { type: String, required: true }, // CREATE, EDIT, PUBLISH, APPROVAL, REJECT, REQUEST_CHANGES
+  user: { type: String, required: true },
+  role: { type: String, required: true },
+  ip: { type: String, default: '' },
+  browser: { type: String, default: '' },
+  previousValue: { type: String, default: '' },
+  newValue: { type: String, default: '' }
+}, { timestamps: true });
+
+export const Property = mongoose.model('Property', PropertySchema, 'properties');
+export const PropertyGallery = mongoose.model('PropertyGallery', PropertyGallerySchema, 'propertyGallery');
+export const PropertyRooms = mongoose.model('PropertyRooms', PropertyRoomsSchema, 'propertyRooms');
+export const PropertyAmenities = mongoose.model('PropertyAmenities', PropertyAmenitiesSchema, 'propertyAmenities');
+export const PropertySeason = mongoose.model('PropertySeason', PropertySeasonSchema, 'propertySeason');
+export const PropertyPricing = mongoose.model('PropertyPricing', PropertyPricingSchema, 'propertyPricing');
+export const PropertyApproval = mongoose.model('PropertyApproval', PropertyApprovalSchema, 'propertyApproval');
+export const PropertyAuditLog = mongoose.model('PropertyAuditLog', PropertyAuditLogSchema, 'propertyAuditLogs');
+
 
 
 

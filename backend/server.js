@@ -2,6 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import helmet from 'helmet';
+import mongoSanitize from 'express-mongo-sanitize';
+import cookieParser from 'cookie-parser';
 import dashboardRouter from './routes.js';
 
 dotenv.config();
@@ -10,13 +13,26 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/wow_gateways';
 
+// Apply security headers (allow cross-origin resources for image loading)
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// Prevent NoSQL query injection
+app.use(mongoSanitize());
+
+// Parse cookies securely
+app.use(cookieParser());
+
 // Allow CORS from typical local frontend ports
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173','https://wow-getway.netlify.app'],
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://wow-getway.netlify.app'],
   credentials: true
 }));
 
-app.use(express.json());
+// Standard JSON and URL-encoded body limit to prevent DOS
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Log incoming requests
 app.use((req, res, next) => {
@@ -24,8 +40,12 @@ app.use((req, res, next) => {
   next();
 });
 
+// Serve uploaded files statically
+app.use('/uploads', express.static('uploads'));
+
 // Setup api routes
 app.use('/api/dashboard', dashboardRouter);
+app.use('/api', dashboardRouter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -51,7 +71,11 @@ mongoose.connect(MONGO_URI, {
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled server error:', err);
-  res.status(500).json({ error: 'Internal server error', message: err.message });
+  const isProd = process.env.NODE_ENV === 'production';
+  res.status(err.status || 500).json({ 
+    error: err.name || 'InternalServerError', 
+    message: isProd ? 'An unexpected error occurred on the server.' : err.message 
+  });
 });
 
 app.listen(PORT, '0.0.0.0', () => {

@@ -544,7 +544,24 @@ export default function PropertySetupWizard() {
   const handlePublishProperty = async () => {
     try {
       const token = localStorage.getItem('homestayOwnerToken');
-      if (!token || !propertyDbId) return;
+      if (!token) {
+        Swal.fire({
+          title: 'Session Expired',
+          text: 'Your session has expired. Please log in again.',
+          icon: 'warning',
+          confirmButtonColor: '#be123c'
+        });
+        return;
+      }
+      if (!propertyDbId) {
+        Swal.fire({
+          title: 'Draft Not Found',
+          text: 'The property draft has not been initialized. Please refresh the page or step back to Step 1 to save first.',
+          icon: 'error',
+          confirmButtonColor: '#be123c'
+        });
+        return;
+      }
 
       // E2E validations audit on publish submission
       const step1Errors = validateStep(1, true);

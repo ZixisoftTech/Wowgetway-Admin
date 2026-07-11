@@ -2785,6 +2785,17 @@ const formatDateSafe = (dateVal) => {
   return '';
 };
 
+// Convert extra person dropdown string or number safely to numeric value
+const parseExtraPerson = (val) => {
+  if (!val || val === 'Not Allowed') return 0;
+  if (typeof val === 'number') return val;
+  const str = String(val);
+  if (str.includes('1')) return 1;
+  if (str.includes('2')) return 2;
+  const num = Number(str);
+  return isNaN(num) ? 0 : num;
+};
+
 // Multer storage setup for JPG, PNG, PDF document uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -10572,7 +10583,7 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
             roomNumbers: String(r.roomNumbers).split(',').map(n => n.trim()).filter(Boolean),
             maxOccupancyAdults: Number(r.occupancy),
             maxOccupancyChildren: Number(r.maxOccupancyChildren || 0),
-            extraPersonAllowed: Number(r.extraPerson || 0),
+            extraPersonAllowed: parseExtraPerson(r.extraPerson),
             roomSize: Number(r.roomSize || 300),
             bedType: r.bedType || 'Double Bed',
             description: r.description || '',
@@ -10831,7 +10842,7 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
                 roomNumbers: String(r.roomNumbers).split(',').map(n => n.trim()).filter(Boolean),
                 maxOccupancyAdults: Number(r.occupancy),
                 maxOccupancyChildren: Number(r.maxOccupancyChildren || 0),
-                extraPersonAllowed: Number(r.extraPerson || 0),
+                extraPersonAllowed: parseExtraPerson(r.extraPerson),
                 roomSize: Number(r.roomSize || 300),
                 bedType: r.bedType || 'Double Bed',
                 description: r.description || '',
@@ -10851,7 +10862,7 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
             roomNumbers: String(r.roomNumbers).split(',').map(n => n.trim()).filter(Boolean),
             maxOccupancyAdults: Number(r.occupancy),
             maxOccupancyChildren: Number(r.maxOccupancyChildren || 0),
-            extraPersonAllowed: Number(r.extraPerson || 0),
+            extraPersonAllowed: parseExtraPerson(r.extraPerson),
             roomSize: Number(r.roomSize || 300),
             bedType: r.bedType || 'Double Bed',
             description: r.description || '',

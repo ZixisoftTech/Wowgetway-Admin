@@ -347,6 +347,7 @@ export default function PropertySetupWizard() {
       }
     } catch (e) {
       console.error("Autosave backend update failed:", e.response?.data?.message || e.message);
+      throw e;
     }
   };
 
@@ -529,12 +530,22 @@ export default function PropertySetupWizard() {
 
   const handleNext = async () => {
     if (validateStep(currentStep)) {
-      await autoSave(formData, currentStep);
-      if (!completedSteps.includes(currentStep)) {
-        setCompletedSteps([...completedSteps, currentStep]);
+      try {
+        await autoSave(formData, currentStep);
+        if (!completedSteps.includes(currentStep)) {
+          setCompletedSteps([...completedSteps, currentStep]);
+        }
+        setCurrentStep(prev => Math.min(prev + 1, 8));
+        window.scrollTo(0, 0);
+      } catch (err) {
+        console.error(err);
+        Swal.fire({
+          title: 'Save Failed',
+          text: err.response?.data?.message || 'Failed to save progress to the server. Please check your connection and try again.',
+          icon: 'error',
+          confirmButtonColor: '#be123c'
+        });
       }
-      setCurrentStep(prev => Math.min(prev + 1, 8));
-      window.scrollTo(0, 0);
     } else {
       Swal.fire({
         title: 'Validation Errors',

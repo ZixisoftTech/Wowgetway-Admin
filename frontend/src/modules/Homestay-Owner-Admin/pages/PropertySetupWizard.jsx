@@ -314,7 +314,36 @@ export default function PropertySetupWizard() {
 
       if (stepNum === 4 && res.data.rooms) {
         // Sync generated database category IDs for pricing steps
-        setFormData(prev => ({ ...prev, rooms: res.data.rooms }));
+        const idMap = {};
+        formData.rooms.forEach((r, idx) => {
+          const newRoom = res.data.rooms[idx];
+          if (newRoom && r.id !== newRoom.id) {
+            idMap[r.id] = newRoom.id;
+          }
+        });
+
+        setFormData(prev => {
+          const updatedSeasons = { ...prev.seasons };
+          const updatedRates = { ...prev.rates };
+
+          Object.entries(idMap).forEach(([oldId, newId]) => {
+            if (updatedSeasons[oldId]) {
+              updatedSeasons[newId] = updatedSeasons[oldId];
+              delete updatedSeasons[oldId];
+            }
+            if (updatedRates[oldId]) {
+              updatedRates[newId] = updatedRates[oldId];
+              delete updatedRates[oldId];
+            }
+          });
+
+          return {
+            ...prev,
+            rooms: res.data.rooms,
+            seasons: updatedSeasons,
+            rates: updatedRates
+          };
+        });
       }
     } catch (e) {
       console.error("Autosave backend update failed:", e.response?.data?.message || e.message);
@@ -841,12 +870,19 @@ export default function PropertySetupWizard() {
             {/* Room Type & Info */}
             <div className="bg-slate-50/40 p-5 rounded-2xl border border-slate-150 space-y-4">
               <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest text-slate-400">Room Type & Basic Information</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Room Type</label>
                   <select
                     value={currentEditRoom.type}
-                    onChange={(e) => setCurrentEditRoom({...currentEditRoom, type: e.target.value})}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCurrentEditRoom({
+                        ...currentEditRoom,
+                        type: val,
+                        name: val || currentEditRoom.name
+                      });
+                    }}
                     className="w-full px-3 py-2 bg-white border border-slate-205 rounded-xl text-xs font-bold text-slate-707 focus:outline-none"
                   >
                     <option value="">Select Room Type</option>
@@ -855,6 +891,18 @@ export default function PropertySetupWizard() {
                     ))}
                   </select>
                 </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Room Category Name</label>
+                  <input
+                    type="text"
+                    value={currentEditRoom.name}
+                    onChange={(e) => setCurrentEditRoom({...currentEditRoom, name: e.target.value})}
+                    placeholder="e.g. Deluxe Room, Premium Suite"
+                    className="w-full px-3 py-2 bg-white border border-slate-205 rounded-xl text-xs font-bold text-slate-707 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total Number of Rooms</label>
                   <input

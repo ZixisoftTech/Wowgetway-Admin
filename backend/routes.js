@@ -10552,11 +10552,19 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
           }
         }
 
-        mockPropertyRoomsDatabase = mockPropertyRoomsDatabase.filter(r => r.propertyId !== propertyId);
+        const roomsToKeepIds = rooms.map(r => r.id).filter(id => id && id.startsWith('RM-'));
+        mockPropertyRoomsDatabase = mockPropertyRoomsDatabase.filter(r => r.propertyId !== propertyId || roomsToKeepIds.includes(r._id));
+        mockPropertySeasonsDatabase = mockPropertySeasonsDatabase.filter(s => s.propertyId !== propertyId || roomsToKeepIds.includes(s.roomCategoryId));
+        mockPropertyPricingDatabase = mockPropertyPricingDatabase.filter(p => p.propertyId !== propertyId || roomsToKeepIds.includes(p.roomCategoryId));
+
         const insertedRooms = [];
         for (const r of rooms) {
+          const existingIdx = mockPropertyRoomsDatabase.findIndex(room => room._id === r.id && room.propertyId === propertyId);
+          const isNew = existingIdx === -1;
+          const roomId = isNew ? 'RM-' + Math.floor(100000 + Math.random() * 900000) : r.id;
+
           const roomDoc = {
-            _id: r.id && r.id.startsWith('RM-') && !r.id.includes('test') ? r.id : 'RM-' + Math.floor(100000 + Math.random() * 900000),
+            _id: roomId,
             propertyId,
             roomCategoryName: r.name,
             roomType: r.type,
@@ -10571,7 +10579,12 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
             images: r.images || [],
             amenityIds: r.amenities || []
           };
-          mockPropertyRoomsDatabase.push(roomDoc);
+
+          if (isNew) {
+            mockPropertyRoomsDatabase.push(roomDoc);
+          } else {
+            mockPropertyRoomsDatabase[existingIdx] = roomDoc;
+          }
           insertedRooms.push(roomDoc);
         }
         prop.currentStep = Math.max(prop.currentStep, 5);
@@ -10793,28 +10806,61 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
 
       const existingRooms = await PropertyRooms.find({ propertyId });
       prevValue = JSON.stringify(existingRooms);
-      
-      await PropertyRooms.deleteMany({ propertyId });
+
+      const roomsToKeepIds = rooms
+        .map(r => r.id)
+        .filter(id => id && id.length === 24 && /^[0-9a-fA-F]{24}$/.test(id));
+
+      // Cascade delete deleted room categories, and their seasons/pricing
+      await PropertyRooms.deleteMany({ propertyId, _id: { $nin: roomsToKeepIds } });
+      await PropertySeason.deleteMany({ propertyId, roomCategoryId: { $nin: roomsToKeepIds } });
+      await PropertyPricing.deleteMany({ propertyId, roomCategoryId: { $nin: roomsToKeepIds } });
 
       const insertedRooms = [];
       for (const r of rooms) {
-        const roomDoc = new PropertyRooms({
-          propertyId,
-          roomCategoryName: r.name,
-          roomType: r.type,
-          numberOfRooms: Number(r.count),
-          roomNumbers: String(r.roomNumbers).split(',').map(n => n.trim()).filter(Boolean),
-          maxOccupancyAdults: Number(r.occupancy),
-          maxOccupancyChildren: Number(r.maxOccupancyChildren || 0),
-          extraPersonAllowed: Number(r.extraPerson || 0),
-          roomSize: Number(r.roomSize || 300),
-          bedType: r.bedType || 'Double Bed',
-          description: r.description || '',
-          images: r.images || [],
-          amenityIds: r.amenities || []
-        });
-        await roomDoc.save();
-        insertedRooms.push(roomDoc);
+        const isExisting = r.id && r.id.length === 24 && /^[0-9a-fA-F]{24}$/.test(r.id);
+        
+        if (isExisting) {
+          const updatedRoom = await PropertyRooms.findOneAndUpdate(
+            { _id: r.id, propertyId },
+            {
+              $set: {
+                roomCategoryName: r.name,
+                roomType: r.type,
+                numberOfRooms: Number(r.count),
+                roomNumbers: String(r.roomNumbers).split(',').map(n => n.trim()).filter(Boolean),
+                maxOccupancyAdults: Number(r.occupancy),
+                maxOccupancyChildren: Number(r.maxOccupancyChildren || 0),
+                extraPersonAllowed: Number(r.extraPerson || 0),
+                roomSize: Number(r.roomSize || 300),
+                bedType: r.bedType || 'Double Bed',
+                description: r.description || '',
+                images: r.images || [],
+                amenityIds: r.amenities || []
+              }
+            },
+            { new: true }
+          );
+          if (updatedRoom) insertedRooms.push(updatedRoom);
+        } else {
+          const roomDoc = new PropertyRooms({
+            propertyId,
+            roomCategoryName: r.name,
+            roomType: r.type,
+            numberOfRooms: Number(r.count),
+            roomNumbers: String(r.roomNumbers).split(',').map(n => n.trim()).filter(Boolean),
+            maxOccupancyAdults: Number(r.occupancy),
+            maxOccupancyChildren: Number(r.maxOccupancyChildren || 0),
+            extraPersonAllowed: Number(r.extraPerson || 0),
+            roomSize: Number(r.roomSize || 300),
+            bedType: r.bedType || 'Double Bed',
+            description: r.description || '',
+            images: r.images || [],
+            amenityIds: r.amenities || []
+          });
+          await roomDoc.save();
+          insertedRooms.push(roomDoc);
+        }
       }
 
       prop.currentStep = Math.max(prop.currentStep, 5);

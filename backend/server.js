@@ -36,14 +36,27 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Ensure database connection is active (needed for Serverless restarts/standbys)
 app.use(async (req, res, next) => {
-  if (mongoose.connection.readyState === 0 || mongoose.connection.readyState === 2) {
+  if (req.path === '/health') return next();
+
+  if (mongoose.connection.readyState !== 1) {
     try {
       console.log('[Database Middleware] Connecting/Reconnecting to MongoDB Atlas...');
-      await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 8000 });
+      await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 });
       console.log('[Database Middleware] Connection established successfully!');
     } catch (err) {
-      console.warn('[Database Middleware] Connection failed:', err.message);
+      console.error('[Database Middleware] Connection failed:', err.message);
+      return res.status(503).json({
+        error: 'DatabaseConnectionError',
+        message: 'Could not establish connection to live MongoDB Atlas. Please try again.'
+      });
     }
+  }
+
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      error: 'DatabaseConnectionError',
+      message: 'Database connection is currently unavailable.'
+    });
   }
   next();
 });

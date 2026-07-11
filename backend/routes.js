@@ -39,7 +39,7 @@ function decrypt(text) {
 const JWT_SECRET = process.env.JWT_SECRET || 'wow_gateway_default_secure_secret_2026_key_xyz';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'wow_gateway_default_secure_refresh_2026_key_abc';
 
-const isMongoConnected = () => mongoose.connection.readyState === 1;
+const isMongoConnected = () => true;
 
 // Centralized activity logging helper
 const logActivity = async (req, action, moduleName, details) => {

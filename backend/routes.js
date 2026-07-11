@@ -7697,18 +7697,37 @@ const handleAdminRefreshToken = async (req, res) => {
   try {
     const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
     
-    let admin = null;
-    if (!isMongoConnected()) {
-      admin = mockAdminsDatabase.find(a => a.email === decoded.email);
+    let user = null;
+    let role = 'Super Admin';
+    let fullName = 'Wow Admin';
+
+    // 1. Check if admin exists
+    const admin = await Admin.findOne({ email: decoded.email });
+    if (admin) {
+      if (admin.status === 'Suspended') {
+        return res.status(401).json({ error: 'Admin user is suspended.' });
+      }
+      user = admin;
+      role = admin.role;
+      fullName = admin.fullName;
     } else {
-      admin = await Admin.findOne({ email: decoded.email });
+      // 2. Check if owner exists
+      const owner = await HomestayOwner.findOne({ email: decoded.email });
+      if (owner) {
+        if (owner.status !== 'Active') {
+          return res.status(401).json({ error: 'Owner user is suspended or inactive.' });
+        }
+        user = owner;
+        role = 'Owner';
+        fullName = `${owner.firstName} ${owner.lastName}`;
+      }
     }
 
-    if (!admin || admin.status === 'Suspended') {
-      return res.status(401).json({ error: 'Admin user is suspended or invalid.' });
+    if (!user) {
+      return res.status(401).json({ error: 'User not found or invalid.' });
     }
 
-    const payload = { _id: admin._id, email: admin.email, fullName: admin.fullName, role: admin.role };
+    const payload = { _id: user._id, email: user.email, fullName, role };
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' });
 
     return res.json({ token: accessToken });
@@ -7719,6 +7738,8 @@ const handleAdminRefreshToken = async (req, res) => {
 
 router.post('/admin/auth/refresh-token', handleAdminRefreshToken);
 router.post('/auth/refresh-token', handleAdminRefreshToken);
+router.post('/admin/auth/refresh', handleAdminRefreshToken);
+router.post('/auth/refresh', handleAdminRefreshToken);
 
 // POST /api/admin/auth/logout
 const handleAdminLogout = async (req, res) => {

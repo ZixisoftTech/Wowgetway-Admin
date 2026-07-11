@@ -11434,7 +11434,9 @@ router.post('/admin/homestays-list/:id/review', authenticateToken, async (req, r
       const mappedRooms = rooms.map(r => ({
         roomType: r.roomType || 'Standard',
         totalRooms: r.numberOfRooms || 1,
-        extraPersonAllowed: r.extraPersonAllowed === 'Not Allowed' ? 0 : (r.extraPersonAllowed.includes('1') ? 1 : 2),
+        extraPersonAllowed: typeof r.extraPersonAllowed === 'string'
+          ? (r.extraPersonAllowed === 'Not Allowed' ? 0 : (r.extraPersonAllowed.includes('1') ? 1 : 2))
+          : (typeof r.extraPersonAllowed === 'number' ? r.extraPersonAllowed : 0),
         roomNumbers: r.roomNumbers || [],
         photos: r.images || [],
         description: r.description || ''

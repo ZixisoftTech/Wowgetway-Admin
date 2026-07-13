@@ -76,7 +76,7 @@ export default function ManageHomestays() {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('superAdminToken');
       await axios.post(getApiUrl(`/api/admin/homestays-list/${selectedId}/review`), {
         status: actionStatus,
         comment: reviewComment

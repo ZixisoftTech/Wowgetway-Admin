@@ -11394,7 +11394,13 @@ router.post('/admin/homestays-list/:id/review', authenticateToken, async (req, r
       return res.json({ success: true, message: `Property status updated to ${status}.` });
     }
 
-    const prop = await Property.findOne({ _id: id, deleted: false });
+    let prop = await Property.findOne({ _id: id, deleted: false });
+    if (!prop) {
+      const homestayObj = await Homestay.findById(id);
+      if (homestayObj) {
+        prop = await Property.findOne({ name: homestayObj.name, deleted: false });
+      }
+    }
     if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
 
     const prevStatus = prop.status;
@@ -11419,17 +11425,17 @@ router.post('/admin/homestays-list/:id/review', authenticateToken, async (req, r
     }
 
     await PropertyApproval.findOneAndUpdate(
-      { propertyId: id },
+      { propertyId: prop._id },
       updatePayload,
       { upsert: true, new: true }
     );
 
     if (status === 'Approved') {
-      const gallery = await PropertyGallery.findOne({ propertyId: id });
-      const rooms = await PropertyRooms.find({ propertyId: id });
-      const amenities = await PropertyAmenities.findOne({ propertyId: id });
-      const seasonsList = await PropertySeason.find({ propertyId: id });
-      const pricingList = await PropertyPricing.find({ propertyId: id });
+      const gallery = await PropertyGallery.findOne({ propertyId: prop._id });
+      const rooms = await PropertyRooms.find({ propertyId: prop._id });
+      const amenities = await PropertyAmenities.findOne({ propertyId: prop._id });
+      const seasonsList = await PropertySeason.find({ propertyId: prop._id });
+      const pricingList = await PropertyPricing.find({ propertyId: prop._id });
 
       const mappedRooms = rooms.map(r => ({
         roomType: r.roomType || 'Standard',
@@ -11476,6 +11482,7 @@ router.post('/admin/homestays-list/:id/review', authenticateToken, async (req, r
       });
 
       const homestayPayload = {
+        _id: prop._id,
         name: prop.name || 'Untitled Property',
         type: prop.type || 'Homestay',
         ownerName: prop.ownerName,
@@ -11492,15 +11499,17 @@ router.post('/admin/homestays-list/:id/review', authenticateToken, async (req, r
         status: 'Active'
       };
 
+      await Homestay.deleteOne({ name: prop.name, _id: { $ne: prop._id } });
+
       await Homestay.findOneAndUpdate(
-        { name: prop.name },
+        { _id: prop._id },
         homestayPayload,
         { upsert: true, new: true }
       );
     }
 
     const auditLog = new PropertyAuditLog({
-      propertyId: id,
+      propertyId: prop._id,
       action: 'REVIEW',
       user: req.user.email,
       role: 'Super Admin',

@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 import { authenticateToken, requirePermission } from './middleware/auth.js';
-import { Booking, Employee, Homestay, Role, Attendance, Salary, HomestayOwner, Ride, Rider, User, TourPackage, Admin, Coupon, ActivityLog, PasswordReset, SmtpSettings, StateCity, NewState, NewCity, NewAmenity, NewRoomType, Property, PropertyGallery, PropertyRooms, PropertyAmenities, PropertySeason, PropertyPricing, PropertyApproval, PropertyAuditLog } from './models.js';
+import { Booking, Employee, Homestay, Role, Attendance, Salary, HomestayOwner, Ride, Rider, User, TourPackage, Admin, Coupon, ActivityLog, PasswordReset, SmtpSettings, StateCity, NewState, NewCity, NewAmenity, NewRoomType, Property, PropertyGallery, PropertyRooms, PropertyAmenities, PropertySeason, PropertyPricing, PropertyApproval, PropertyAuditLog, Media } from './models.js';
 
 const router = express.Router();
 
@@ -8691,12 +8691,41 @@ router.delete('/admin/locations/:id', authenticateToken, async (req, res) => {
 });
 
 // POST /api/admin/upload (generic file upload)
-router.post('/admin/upload', authenticateToken, upload.single('file'), (req, res) => {
+router.post('/admin/upload', authenticateToken, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'NoFileUploaded', message: 'No file was uploaded.' });
   }
-  const fileUrl = getFileDataUrl(req.file);
-  res.json({ fileUrl });
+  try {
+    const dataUrl = getFileDataUrl(req.file);
+    const mediaDoc = new Media({
+      data: dataUrl,
+      mimeType: req.file.mimetype || 'image/png'
+    });
+    await mediaDoc.save();
+    res.json({ fileUrl: `/api/media/${mediaDoc._id}` });
+  } catch (err) {
+    res.status(500).json({ error: 'UploadError', message: err.message });
+  }
+});
+
+// GET /api/media/:id (serve file from DB)
+router.get('/media/:id', async (req, res) => {
+  try {
+    const mediaDoc = await Media.findById(req.params.id);
+    if (!mediaDoc) {
+      return res.status(404).send('Not Found');
+    }
+    const base64Data = mediaDoc.data.split(';base64,').pop();
+    const imgBuffer = Buffer.from(base64Data, 'base64');
+    res.writeHead(200, {
+      'Content-Type': mediaDoc.mimeType,
+      'Content-Length': imgBuffer.length,
+      'Cache-Control': 'public, max-age=31536000'
+    });
+    res.end(imgBuffer);
+  } catch (err) {
+    res.status(500).send('Error serving media: ' + err.message);
+  }
 });
 
 // Custom Multer Instance for Global Settings Module (Max 2MB limit, JPG/JPEG/PNG/WEBP only)
@@ -10278,10 +10307,17 @@ router.post('/homestay-owner/properties/upload-image', authenticateToken, upload
   }
   try {
     const dataUrl = getFileDataUrl(req.file);
+    const mediaDoc = new Media({
+      data: dataUrl,
+      mimeType: req.file.mimetype || 'image/png'
+    });
+    await mediaDoc.save();
+    
+    const fileUrl = `/api/media/${mediaDoc._id}`;
     res.json({
-      originalUrl: dataUrl,
-      optimizedUrl: dataUrl,
-      thumbUrl: dataUrl
+      originalUrl: fileUrl,
+      optimizedUrl: fileUrl,
+      thumbUrl: fileUrl
     });
   } catch (err) {
     res.status(500).json({ error: 'UploadError', message: err.message });

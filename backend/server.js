@@ -13,6 +13,29 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/wow_gateways';
 
+const allowedOrigins = [
+  "https://frontend-chi-three-zbs3ijk1gi.vercel.app",
+  "http://localhost:5173",
+  "http://localhost:3000"
+];
+
+// Allow CORS dynamically reflecting the incoming request's origin against a strict whitelist
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    const isAllowed = allowedOrigins.includes(origin) || 
+                      /^http:\/\/localhost:\d+$/.test(origin) ||
+                      /^http:\/\/127\.0\.0\.1:\d+$/.test(origin);
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
+  credentials: true,
+  optionsSuccessStatus: 200
+}));
+
 // Apply security headers (allow cross-origin resources for image loading)
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
@@ -23,12 +46,6 @@ app.use(mongoSanitize());
 
 // Parse cookies securely
 app.use(cookieParser());
-
-// Allow CORS dynamically reflecting the incoming request's origin
-app.use(cors({
-  origin: true,
-  credentials: true
-}));
 
 // Standard JSON and URL-encoded body limit to prevent DOS
 app.use(express.json({ limit: '10mb' }));

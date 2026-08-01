@@ -1,0 +1,4 @@
+- [x] Update frontend room category configuration inputs and ID sync mapping in `PropertySetupWizard.jsx`
+- [x] Implement Delta Updates for Step 4 (Rooms) in backend `routes.js`
+- [x] Deploy backend and frontend changes
+- [x] Verify publishing and data consistency end-to-end

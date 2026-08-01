@@ -1184,6 +1184,13 @@ export const PropertyPricing = mongoose.model('PropertyPricing', PropertyPricing
 export const PropertyApproval = mongoose.model('PropertyApproval', PropertyApprovalSchema, 'propertyApproval');
 export const PropertyAuditLog = mongoose.model('PropertyAuditLog', PropertyAuditLogSchema, 'propertyAuditLogs');
 
+const MediaSchema = new mongoose.Schema({
+  data: { type: String, required: true }, // base64 string
+  mimeType: { type: String, required: true }
+}, { timestamps: true });
+
+export const Media = mongoose.model('Media', MediaSchema, 'media');
+
 
 
 

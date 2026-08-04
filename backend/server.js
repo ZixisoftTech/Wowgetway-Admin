@@ -15,6 +15,7 @@ const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/wow_gatewa
 
 const allowedOrigins = [
   "https://frontend-chi-three-zbs3ijk1gi.vercel.app",
+  "https://wow-getway.netlify.app",
   "http://localhost:5173",
   "http://localhost:3000"
 ];
@@ -25,7 +26,9 @@ app.use(cors({
     if (!origin) return callback(null, true);
     const isAllowed = allowedOrigins.includes(origin) || 
                       /^http:\/\/localhost:\d+$/.test(origin) ||
-                      /^http:\/\/127\.0\.0\.1:\d+$/.test(origin);
+                      /^http:\/\/127\.0\.0\.1:\d+$/.test(origin) ||
+                      /\.netlify\.app$/.test(origin) ||
+                      /\.vercel\.app$/.test(origin);
     if (isAllowed) {
       callback(null, true);
     } else {

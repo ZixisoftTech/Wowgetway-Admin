@@ -3579,7 +3579,7 @@ router.get('/homestays-list', async (req, res) => {
           region: p.state || '',
           status: p.status === 'Submitted For Review' ? 'Pending Approval' : p.status,
           rooms: rooms.map(r => ({ roomType: r.roomType, totalRooms: r.numberOfRooms })),
-          images: gal ? [gal.coverImage, ...gal.images].filter(Boolean) : [],
+          images: gal ? [gal.coverImage, ...gal.images.map(img => typeof img === 'object' && img.url ? img.url : img)].filter(Boolean) : [],
           rates: pricingList.map(pr => ({ planRates: { EP: { b2cRate: pr.b2cRate } } }))
         });
       }
@@ -3672,6 +3672,16 @@ router.get('/homestays-list/:id', async (req, res) => {
 
   try {
     let item = await Homestay.findById(id).lean();
+    if (item) {
+      // Resolve amenities for Homestay
+      const amenityDocs = await NewAmenity.find({ _id: { $in: item.amenities || [] } });
+      item.resolvedAmenities = amenityDocs.map(a => ({
+        name: a.amenityName,
+        icon: a.amenityIcon
+      }));
+      item.amenities = item.resolvedAmenities.map(a => a.name);
+    }
+
     if (!item) {
       const p = await Property.findById(id).lean();
       if (!p) return res.status(404).json({ error: 'Homestay not found' });
@@ -3679,7 +3689,17 @@ router.get('/homestays-list/:id', async (req, res) => {
       const gal = await PropertyGallery.findOne({ propertyId: p._id });
       const rooms = await PropertyRooms.find({ propertyId: p._id });
       const pricingList = await PropertyPricing.find({ propertyId: p._id });
+      const propAmenitiesDoc = await PropertyAmenities.findOne({ propertyId: p._id });
       
+      let resolvedAmenities = [];
+      if (propAmenitiesDoc && propAmenitiesDoc.amenityIds && propAmenitiesDoc.amenityIds.length > 0) {
+        const amenityDocs = await NewAmenity.find({ _id: { $in: propAmenitiesDoc.amenityIds } });
+        resolvedAmenities = amenityDocs.map(a => ({
+          name: a.amenityName,
+          icon: a.amenityIcon
+        }));
+      }
+
       item = {
         _id: p._id,
         name: p.name || 'Untitled Property',
@@ -3696,7 +3716,7 @@ router.get('/homestays-list/:id', async (req, res) => {
           photos: r.images || [],
           description: r.description || ''
         })),
-        images: gal ? [gal.coverImage, ...gal.images].filter(Boolean) : [],
+        images: gal ? [gal.coverImage, ...gal.images.map(img => typeof img === 'object' && img.url ? img.url : img)].filter(Boolean) : [],
         rates: pricingList.map(pr => ({
           roomCategory: rooms.find(r => r._id.toString() === pr.roomCategoryId.toString())?.roomCategoryName || 'Standard',
           occupancy: 'Double Occupancy',
@@ -3711,7 +3731,9 @@ router.get('/homestays-list/:id', async (req, res) => {
               b2cChild: pr.childB2C
             }
           }
-        }))
+        })),
+        amenities: resolvedAmenities.map(a => a.name),
+        resolvedAmenities
       };
     }
     res.json(item);

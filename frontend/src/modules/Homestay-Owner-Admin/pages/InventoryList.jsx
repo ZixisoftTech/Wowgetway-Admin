@@ -23,7 +23,8 @@ import {
 
 const getApiUrl = (path) => {
   const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
-  return `${base}${path}`;
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${cleanPath}`;
 };
 
 const getImageUrl = (path) => {

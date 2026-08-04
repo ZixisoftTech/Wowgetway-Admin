@@ -38,7 +38,8 @@ import {
 
 const getApiUrl = (path) => {
   const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
-  return `${base}${path}`;
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${cleanPath}`;
 };
 
 const getImageUrl = (path) => {
@@ -681,27 +682,25 @@ export default function PropertySetupWizard() {
     const nextId = `RM-${Date.now()}`;
     const newCategory = {
       id: nextId,
-      name: 'Family Suite',
-      type: 'Family Room',
+      name: '',
+      type: '',
       plan: 'EP Plan (European Plan)',
-      count: 2,
-      occupancy: 4,
-      extraPerson: '2 Extra Person',
-      roomNumbers: '301, 302',
-      description: 'Spacious family room setup.',
+      count: '',
+      occupancy: '',
+      extraPerson: '',
+      roomNumbers: '',
+      description: '',
       images: []
     };
     
     const updatedRooms = [...formData.rooms, newCategory];
     const updatedSeasons = {
       ...formData.seasons,
-      [nextId]: { off: [{ start: '2025-04-01', end: '2025-06-30' }], mid: [], peak: [] }
+      [nextId]: { off: [], mid: [], peak: [] }
     };
     const updatedRates = {
       ...formData.rates,
-      [nextId]: {
-        off: { EP: { b2b: '3000', b2c: '3500', extraAdultB2B: '800', extraAdultB2C: '900', childB2b: '500', childB2c: '600' } }
-      }
+      [nextId]: {}
     };
 
     setFormData({
@@ -733,7 +732,28 @@ export default function PropertySetupWizard() {
   // Step 5 Season configuration subscreen
   const [currentEditSeasons, setCurrentEditSeasons] = useState(null);
   const handleOpenSeasonConfigure = (roomId) => {
-    setCurrentEditSeasons(JSON.parse(JSON.stringify(formData.seasons[roomId] || { off: [], mid: [], peak: [] })));
+    let seasonsData = formData.seasons[roomId];
+    const hasExistingSeasons = seasonsData && 
+      ((seasonsData.off && seasonsData.off.length > 0) || 
+       (seasonsData.mid && seasonsData.mid.length > 0) || 
+       (seasonsData.peak && seasonsData.peak.length > 0));
+
+    if (!hasExistingSeasons) {
+      const otherRoomId = Object.keys(formData.seasons).find(id => {
+        if (id === roomId) return false;
+        const otherSeasons = formData.seasons[id];
+        return otherSeasons && 
+          ((otherSeasons.off && otherSeasons.off.length > 0) || 
+           (otherSeasons.mid && otherSeasons.mid.length > 0) || 
+           (otherSeasons.peak && otherSeasons.peak.length > 0));
+      });
+      
+      if (otherRoomId) {
+        seasonsData = JSON.parse(JSON.stringify(formData.seasons[otherRoomId]));
+      }
+    }
+
+    setCurrentEditSeasons(JSON.parse(JSON.stringify(seasonsData || { off: [], mid: [], peak: [] })));
     setActiveConfigureSeasonRoomId(roomId);
   };
 
@@ -768,7 +788,22 @@ export default function PropertySetupWizard() {
   const [selectedSeasonTab, setSelectedSeasonTab] = useState('off'); // 'off', 'mid', 'peak'
   
   const handleOpenRateConfigure = (roomId) => {
-    setCurrentEditRates(JSON.parse(JSON.stringify(formData.rates[roomId] || {})));
+    let ratesData = formData.rates[roomId];
+    const hasExistingRates = ratesData && Object.keys(ratesData).length > 0;
+
+    if (!hasExistingRates) {
+      const otherRoomId = Object.keys(formData.rates).find(id => {
+        if (id === roomId) return false;
+        const otherRates = formData.rates[id];
+        return otherRates && Object.keys(otherRates).length > 0;
+      });
+
+      if (otherRoomId) {
+        ratesData = JSON.parse(JSON.stringify(formData.rates[otherRoomId]));
+      }
+    }
+
+    setCurrentEditRates(JSON.parse(JSON.stringify(ratesData || {})));
     setActiveConfigureRateRoomId(roomId);
   };
 
@@ -918,8 +953,8 @@ export default function PropertySetupWizard() {
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total Number of Rooms</label>
                   <input
                     type="number"
-                    value={currentEditRoom.count}
-                    onChange={(e) => setCurrentEditRoom({...currentEditRoom, count: parseInt(e.target.value) || 0})}
+                    value={currentEditRoom.count === 0 ? '' : currentEditRoom.count}
+                    onChange={(e) => setCurrentEditRoom({...currentEditRoom, count: e.target.value === '' ? '' : parseInt(e.target.value) || ''})}
                     className="w-full px-3 py-2 bg-white border border-slate-205 rounded-xl text-xs font-bold text-slate-707 focus:outline-none"
                   />
                 </div>
@@ -927,8 +962,8 @@ export default function PropertySetupWizard() {
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total Occupancy</label>
                   <input
                     type="number"
-                    value={currentEditRoom.occupancy}
-                    onChange={(e) => setCurrentEditRoom({...currentEditRoom, occupancy: parseInt(e.target.value) || 0})}
+                    value={currentEditRoom.occupancy === 0 ? '' : currentEditRoom.occupancy}
+                    onChange={(e) => setCurrentEditRoom({...currentEditRoom, occupancy: e.target.value === '' ? '' : parseInt(e.target.value) || ''})}
                     className="w-full px-3 py-2 bg-white border border-slate-205 rounded-xl text-xs font-bold text-slate-707 focus:outline-none"
                   />
                 </div>
@@ -955,6 +990,7 @@ export default function PropertySetupWizard() {
                 onChange={(e) => setCurrentEditRoom({...currentEditRoom, extraPerson: e.target.value})}
                 className="w-full px-3 py-2 bg-white border border-slate-205 rounded-xl text-xs font-bold text-slate-707 focus:outline-none cursor-pointer"
               >
+                <option value="">Select Option</option>
                 <option value="1 Extra Person">1 Extra Person</option>
                 <option value="2 Extra Person">2 Extra Person</option>
                 <option value="Not Allowed">Not Allowed</option>
@@ -1153,7 +1189,7 @@ export default function PropertySetupWizard() {
                   <div key={idx} className="flex items-center gap-3">
                     <input
                       type="date"
-                      value={range.start}
+                      value={range.start || ''}
                       onChange={(e) => {
                         const list = [...currentEditSeasons.off];
                         list[idx].start = e.target.value;
@@ -1164,7 +1200,7 @@ export default function PropertySetupWizard() {
                     <span className="text-[10px] font-bold text-slate-400">TO</span>
                     <input
                       type="date"
-                      value={range.end}
+                      value={range.end || ''}
                       onChange={(e) => {
                         const list = [...currentEditSeasons.off];
                         list[idx].end = e.target.value;
@@ -1204,7 +1240,7 @@ export default function PropertySetupWizard() {
                   <div key={idx} className="flex items-center gap-3">
                     <input
                       type="date"
-                      value={range.start}
+                      value={range.start || ''}
                       onChange={(e) => {
                         const list = [...currentEditSeasons.mid];
                         list[idx].start = e.target.value;
@@ -1215,7 +1251,7 @@ export default function PropertySetupWizard() {
                     <span className="text-[10px] font-bold text-slate-400">TO</span>
                     <input
                       type="date"
-                      value={range.end}
+                      value={range.end || ''}
                       onChange={(e) => {
                         const list = [...currentEditSeasons.mid];
                         list[idx].end = e.target.value;
@@ -1255,7 +1291,7 @@ export default function PropertySetupWizard() {
                   <div key={idx} className="flex items-center gap-3">
                     <input
                       type="date"
-                      value={range.start}
+                      value={range.start || ''}
                       onChange={(e) => {
                         const list = [...currentEditSeasons.peak];
                         list[idx].start = e.target.value;
@@ -1266,7 +1302,7 @@ export default function PropertySetupWizard() {
                     <span className="text-[10px] font-bold text-slate-400">TO</span>
                     <input
                       type="date"
-                      value={range.end}
+                      value={range.end || ''}
                       onChange={(e) => {
                         const list = [...currentEditSeasons.peak];
                         list[idx].end = e.target.value;

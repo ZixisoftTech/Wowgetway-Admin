@@ -40,7 +40,14 @@ import MetricCard from '../components/widgets/MetricCard.jsx';
 
 const getApiUrl = (path) => {
   const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
-  return `${base}${path}`;
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${cleanPath}`;
+};
+
+const getImageUrl = (path) => {
+  if (!path) return 'https://images.unsplash.com/photo-1542718610-a1d656d1884c?auto=format&fit=crop&w=400&q=80';
+  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return path;
+  return getApiUrl(path);
 };
 
 const API_HOMESTAYS_URL = getApiUrl('/api/dashboard/homestays-list');
@@ -459,13 +466,13 @@ export default function ManageHomestays() {
     setFormData(prev => ({
       ...prev,
       rooms: [...prev.rooms, { 
-        roomType: 'Standard', 
-        totalRooms: 2, 
-        totalOccupancy: 4, 
-        roomNumbers: ['201', '202'], 
+        roomType: '', 
+        totalRooms: '', 
+        totalOccupancy: '', 
+        roomNumbers: [], 
         extraPersonAllowedActive: false,
-        extraPersonCapacity: '2 Extra Persons',
-        extraPersonPrice: 0,
+        extraPersonCapacity: '',
+        extraPersonPrice: '',
         photos: [], 
         description: '' 
       }]
@@ -500,8 +507,34 @@ export default function ManageHomestays() {
           } else {
             // Create default plan rates
             const planRates = {};
+            
+            // Find another room category that has rates configured
+            const existingRoomWithRates = rooms.find(r => 
+              r.roomType !== room.roomType && 
+              formData.rates.some(rate => rate.roomCategory === r.roomType)
+            );
+
             plans.forEach(plan => {
-              planRates[plan] = { b2bRate: 0, b2cRate: 0, b2bExtraPerson: 0, b2cExtraPerson: 0, b2bChild: 0, b2cChild: 0 };
+              let copiedPlanRate = null;
+              if (existingRoomWithRates) {
+                const otherRate = formData.rates.find(rate => 
+                  rate.roomCategory === existingRoomWithRates.roomType &&
+                  rate.season === season.seasonName &&
+                  rate.occupancy === occupancy
+                );
+                if (otherRate && otherRate.planRates && otherRate.planRates[plan]) {
+                  copiedPlanRate = JSON.parse(JSON.stringify(otherRate.planRates[plan]));
+                }
+              }
+
+              planRates[plan] = copiedPlanRate || { 
+                b2bRate: '', 
+                b2cRate: '', 
+                b2bExtraPerson: '', 
+                b2cExtraPerson: '', 
+                b2bChild: '', 
+                b2cChild: '' 
+              };
             });
 
             newRates.push({
@@ -1317,7 +1350,7 @@ export default function ManageHomestays() {
                     <div className="grid grid-cols-2 gap-2 pt-2 max-h-60 overflow-y-auto pr-1">
                       {formData.images.map((url, i) => (
                         <div key={i} className="relative aspect-video rounded-xl border border-slate-150 overflow-hidden bg-slate-50 group">
-                          <img src={url} alt="Homestay thumbnail" className="w-full h-full object-cover" />
+                          <img src={getImageUrl(url)} alt="Homestay thumbnail" className="w-full h-full object-cover" />
                           <button
                             type="button"
                             onClick={() => setFormData(prev => ({ ...prev, images: prev.images.filter((_, idx) => idx !== i) }))}
@@ -1557,6 +1590,7 @@ export default function ManageHomestays() {
                               onChange={(e) => handleRoomChange(idx, 'roomType', e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-500 transition-all shadow-sm"
                             >
+                              <option value="">Select Room Type</option>
                               <option value="Deluxe Room">Deluxe Room</option>
                               <option value="Standard Room">Standard Room</option>
                               <option value="Super Deluxe Room">Super Deluxe Room</option>
@@ -1567,13 +1601,13 @@ export default function ManageHomestays() {
                             </select>
                           </div>
 
-                          <div>
+                           <div>
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">Total Number of Rooms *</label>
                             <input
                               type="number"
                               min="0"
-                              value={room.totalRooms || 0}
-                              onChange={(e) => handleTotalRoomsChange(idx, e.target.value)}
+                              value={room.totalRooms === 0 ? '' : (room.totalRooms || '')}
+                              onChange={(e) => handleTotalRoomsChange(idx, e.target.value === '' ? '' : e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-500 transition-all shadow-sm"
                             />
                             <span className="text-[9px] text-slate-400 mt-1 block">Total units available under this category</span>
@@ -1584,8 +1618,8 @@ export default function ManageHomestays() {
                             <input
                               type="number"
                               min="1"
-                              value={room.totalOccupancy || 0}
-                              onChange={(e) => handleRoomChange(idx, 'totalOccupancy', e.target.value)}
+                              value={room.totalOccupancy === 0 ? '' : (room.totalOccupancy || '')}
+                              onChange={(e) => handleRoomChange(idx, 'totalOccupancy', e.target.value === '' ? '' : e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-500 transition-all shadow-sm"
                             />
                             <span className="text-[9px] text-slate-400 mt-1 block">Maximum guests allowed in all rooms combined</span>
@@ -1646,10 +1680,11 @@ export default function ManageHomestays() {
                               <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">Capacity per room</label>
                                 <select
-                                  value={room.extraPersonCapacity || '2 Extra Persons'}
+                                  value={room.extraPersonCapacity || ''}
                                   onChange={(e) => handleRoomChange(idx, 'extraPersonCapacity', e.target.value)}
                                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-750 focus:outline-none focus:bg-white transition-all shadow-sm"
                                 >
+                                  <option value="">Select Option</option>
                                   <option value="1 Extra Person">1 Extra Person</option>
                                   <option value="2 Extra Persons">2 Extra Persons</option>
                                   <option value="3 Extra Persons">3 Extra Persons</option>
@@ -1664,8 +1699,8 @@ export default function ManageHomestays() {
                                   <input
                                     type="number"
                                     min="0"
-                                    value={room.extraPersonPrice || 0}
-                                    onChange={(e) => handleRoomChange(idx, 'extraPersonPrice', e.target.value)}
+                                    value={room.extraPersonPrice === 0 ? '' : (room.extraPersonPrice || '')}
+                                    onChange={(e) => handleRoomChange(idx, 'extraPersonPrice', e.target.value === '' ? '' : e.target.value)}
                                     className="w-full pl-6 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-750 focus:outline-none focus:bg-white transition-all shadow-sm"
                                   />
                                 </div>
@@ -1682,7 +1717,7 @@ export default function ManageHomestays() {
                           <div className="flex flex-wrap items-center gap-3 mt-2">
                             {(room.photos || []).map((img, imgIdx) => (
                               <div key={imgIdx} className="relative w-20 h-16 rounded-xl overflow-hidden border border-slate-200 group shadow-sm flex-shrink-0">
-                                <img src={img} alt="Room" className="w-full h-full object-cover" />
+                                <img src={getImageUrl(img)} alt="Room" className="w-full h-full object-cover" />
                                 <button
                                   type="button"
                                   onClick={() => removeRoomPhoto(idx, imgIdx)}
@@ -2150,10 +2185,10 @@ export default function ManageHomestays() {
                   {propertyDetails.images?.map((url, i) => (
                     <div 
                       key={i} 
-                      onClick={() => setLightboxPhoto(url)}
+                      onClick={() => setLightboxPhoto(getImageUrl(url))}
                       className="aspect-video rounded-xl overflow-hidden border border-slate-150 bg-slate-50 cursor-zoom-in"
                     >
-                      <img src={url} alt={`Gallery index ${i}`} className="w-full h-full object-cover hover:scale-105 transition-all" />
+                      <img src={getImageUrl(url)} alt={`Gallery index ${i}`} className="w-full h-full object-cover hover:scale-105 transition-all" />
                     </div>
                   ))}
                   {(!propertyDetails.images || propertyDetails.images.length === 0) && (
@@ -2184,16 +2219,34 @@ export default function ManageHomestays() {
                   Amenities & Facilities
                 </h3>
                 <div className="flex flex-wrap gap-2">
-                  {propertyDetails.amenities?.map((amenity) => (
-                    <span 
-                      key={amenity}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-750"
-                    >
-                      <Check size={12} className="text-emerald-500 stroke-[3.5]" />
-                      {amenity}
-                    </span>
-                  ))}
-                  {(!propertyDetails.amenities || propertyDetails.amenities.length === 0) && (
+                  {propertyDetails.resolvedAmenities?.map((amenity) => {
+                    const isImageIcon = amenity.icon && (amenity.icon.startsWith('/') || amenity.icon.startsWith('http'));
+                    return (
+                      <span 
+                        key={amenity.name}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-750"
+                      >
+                        {isImageIcon ? (
+                          <img src={getImageUrl(amenity.icon)} alt={amenity.name} className="w-3.5 h-3.5 object-contain rounded-md" onError={(e) => { e.target.style.display = 'none'; }} />
+                        ) : (
+                          <Check size={12} className="text-emerald-500 stroke-[3.5]" />
+                        )}
+                        {amenity.name}
+                      </span>
+                    );
+                  })}
+                  {(!propertyDetails.resolvedAmenities || propertyDetails.resolvedAmenities.length === 0) && 
+                    propertyDetails.amenities?.map((amenity) => (
+                      <span 
+                        key={amenity}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-750"
+                      >
+                        <Check size={12} className="text-emerald-500 stroke-[3.5]" />
+                        {amenity}
+                      </span>
+                    ))
+                  }
+                  {(!propertyDetails.amenities || propertyDetails.amenities.length === 0) && (!propertyDetails.resolvedAmenities || propertyDetails.resolvedAmenities.length === 0) && (
                     <span className="text-xs text-slate-400">No amenities registered.</span>
                   )}
                 </div>
@@ -2486,7 +2539,7 @@ export default function ManageHomestays() {
               >
                 <X size={16} />
               </button>
-              <img src={lightboxPhoto} alt="Lightbox Preview" className="w-full h-auto max-h-[80vh] object-contain" />
+              <img src={getImageUrl(lightboxPhoto)} alt="Lightbox Preview" className="w-full h-auto max-h-[80vh] object-contain" />
             </motion.div>
           </motion.div>
         )}

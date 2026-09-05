@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { 
   BedDouble, 
   CheckCircle, 
@@ -15,161 +16,350 @@ import {
   ArrowDownRight,
   LogIn,
   LogOut,
-  ChevronRight
+  ChevronRight,
+  Building2,
+  MoreVertical,
+  X,
+  FileText,
+  Receipt,
+  CalendarCheck,
+  CreditCard,
+  CheckCircle2,
+  Clock,
+  ExternalLink
 } from 'lucide-react';
 
+const getApiUrl = (path) => {
+  const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${cleanPath}`;
+};
+
+const getAuthToken = () => {
+  return localStorage.getItem('homestayOwnerToken') || localStorage.getItem('superAdminToken');
+};
+
 export default function Dashboard() {
+  const navigate = useNavigate();
+
+  const [loading, setLoading] = useState(true);
   const [activeTableTab, setActiveTableTab] = useState('Check-in Today');
   const [activeChartTab, setActiveChartTab] = useState('Weekly');
+  const [selectedPropertyId, setSelectedPropertyId] = useState('all');
 
-  // Summary Metrics data
-  const metrics = [
-    { 
-      title: 'Total Rooms Available', 
-      value: '24', 
-      icon: BedDouble, 
-      color: 'bg-rose-50 text-rose-500', 
-      linkText: 'View Details',
-      subtext: ''
-    },
-    { 
-      title: "Today's Available Rooms", 
-      value: '18', 
-      icon: CheckCircle, 
-      color: 'bg-emerald-50 text-emerald-500', 
-      linkText: 'View Details',
-      subtext: '75% Availability' 
-    },
-    { 
-      title: 'Unoccupied Rooms', 
-      value: '6', 
-      icon: BedDouble, 
-      color: 'bg-amber-50 text-amber-500', 
-      linkText: 'View Details',
-      subtext: '25% Vacancy' 
-    },
-    { 
-      title: "Today's Revenue", 
-      value: '₹12,500', 
-      icon: TrendingUp, 
-      color: 'bg-blue-50 text-blue-500', 
-      linkText: 'View Details',
-      subtext: '↑ 12.5%' 
+  const [ownerName, setOwnerName] = useState('Host');
+  const [properties, setProperties] = useState([]);
+  
+  // Dynamic KPIs
+  const [kpis, setKpis] = useState({
+    totalRooms: 0,
+    availableToday: 0,
+    unoccupiedToday: 0,
+    occupancyRate: 100,
+    vacancyRate: 0,
+    todayRevenue: 0,
+    todayRevenueRaw: 0,
+    todayRevenueChange: '+0%',
+    todayRevenuePositive: true,
+    checkInsCount: 0,
+    checkInsYesterday: 0,
+    checkOutsCount: 0,
+    checkOutsYesterday: 0
+  });
+
+  const [chartPoints, setChartPoints] = useState([]);
+  const [checkInsToday, setCheckInsToday] = useState([]);
+  const [checkOutsToday, setCheckOutsToday] = useState([]);
+  const [yesterdayBookings, setYesterdayBookings] = useState([]);
+  const [tomorrowBookings, setTomorrowBookings] = useState([]);
+  const [selectedBookingModal, setSelectedBookingModal] = useState(null);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [selectedPropertyId]);
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      const token = getAuthToken();
+      const res = await axios.get(getApiUrl(`/api/homestay-owner/dashboard?propertyId=${selectedPropertyId}`), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data?.success) {
+        if (res.data.ownerName) setOwnerName(res.data.ownerName);
+        if (res.data.properties) setProperties(res.data.properties);
+        
+        const m = res.data.metrics || {};
+        const checkIns = res.data.checkInsToday || res.data.todayCheckIns || [];
+        const checkOuts = res.data.checkOutsToday || res.data.todayCheckOuts || [];
+        const yesterday = res.data.yesterdayBookings || [];
+        const tomorrow = res.data.tomorrowBookings || [];
+
+        const rawRev = typeof m.todayRevenueRaw === 'number' 
+          ? m.todayRevenueRaw 
+          : (typeof m.todayRevenue === 'number' ? m.todayRevenue : 0);
+
+        setKpis({
+          ...m,
+          totalRooms: m.totalRooms ?? 0,
+          availableToday: m.availableToday ?? m.todayAvailableRooms ?? 0,
+          unoccupiedToday: m.unoccupiedToday ?? m.unoccupiedRooms ?? 0,
+          occupancyRate: m.occupancyRate ?? m.availabilityPercent ?? 100,
+          vacancyRate: m.vacancyRate ?? m.vacancyPercent ?? 0,
+          todayRevenue: rawRev,
+          todayRevenueRaw: rawRev,
+          todayRevenueChange: m.todayRevenueChange || '+0% vs yesterday',
+          todayRevenuePositive: m.todayRevenuePositive !== false,
+          checkInsCount: m.checkInsCount ?? checkIns.length,
+          checkOutsCount: m.checkOutsCount ?? checkOuts.length,
+          checkInsYesterday: m.checkInsYesterday ?? 0,
+          checkOutsYesterday: m.checkOutsYesterday ?? 0
+        });
+
+        if (res.data.chartPoints) setChartPoints(res.data.chartPoints);
+        setCheckInsToday(checkIns);
+        setCheckOutsToday(checkOuts);
+        setYesterdayBookings(yesterday);
+        setTomorrowBookings(tomorrow);
+      }
+    } catch (err) {
+      console.error('Failed to load dashboard data:', err);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
-  // Table Guests list
-  const guests = [
-    {
-      name: 'Rahul Sharma',
-      avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80',
-      room: '101',
-      roomType: 'Deluxe Room',
-      checkIn: '20 May 2025, 02:00 PM',
-      checkOut: '23 May 2025, 11:00 AM',
-      status: 'Checking In'
-    },
-    {
-      name: 'Priya Singh',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80',
-      room: '203',
-      roomType: 'Super Deluxe',
-      checkIn: '20 May 2025, 01:30 PM',
-      checkOut: '22 May 2025, 10:00 AM',
-      status: 'Checking In'
-    },
-    {
-      name: 'Amit Verma',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80',
-      room: '105',
-      roomType: 'Deluxe Room',
-      checkIn: '20 May 2025, 12:15 PM',
-      checkOut: '24 May 2025, 11:00 AM',
-      status: 'Checking In'
+  // Build SVG path strings from chartPoints
+  const getSvgPaths = () => {
+    if (!chartPoints || chartPoints.length === 0) {
+      return { linePath: '', areaPath: '', validPoints: [] };
     }
-  ];
 
-  // Revenue chart data points
-  // 14 May to Today
-  const chartPoints = [
-    { label: '14 May', value: 3450, x: 50, y: 150 },
-    { label: '15 May', value: 4320, x: 120, y: 135 },
-    { label: '16 May', value: 3200, x: 190, y: 155 },
-    { label: '17 May', value: 5800, x: 260, y: 110 },
-    { label: '18 May', value: 7200, x: 330, y: 85 },
-    { label: '19 May', value: 9500, x: 400, y: 45 },
-    { label: 'Today', value: 12500, x: 470, y: 10 }
-  ];
+    const count = chartPoints.length;
+    const maxVal = Math.max(...chartPoints.map(p => Number(p.value) || 0), 1000);
+
+    const validPoints = chartPoints.map((pt, idx) => {
+      const x = (typeof pt.x === 'number' && !isNaN(pt.x)) ? pt.x : (count > 1 ? Math.round(50 + (idx / (count - 1)) * 420) : 260);
+      const y = (typeof pt.y === 'number' && !isNaN(pt.y)) ? pt.y : Math.max(20, Math.min(150, Math.round(140 - ((Number(pt.value) || 0) / maxVal) * 110)));
+      return { ...pt, x, y };
+    });
+
+    const first = validPoints[0];
+    const last = validPoints[validPoints.length - 1];
+
+    const linePath = validPoints.reduce((acc, pt, idx) => {
+      return idx === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`;
+    }, '');
+
+    const areaPath = `M ${first.x} 170 L ${linePath.replace('M ', '')} L ${last.x} 170 Z`;
+
+    return { linePath, areaPath, validPoints };
+  };
+
+  const { linePath, areaPath, validPoints = [] } = getSvgPaths();
+
+  // Get active table data
+  const getActiveGuestsList = () => {
+    switch (activeTableTab) {
+      case 'Check-in Today':
+        return checkInsToday;
+      case 'Check-out Today':
+        return checkOutsToday;
+      case 'Yesterday':
+        return yesterdayBookings;
+      case 'Tomorrow':
+        return tomorrowBookings;
+      default:
+        return checkInsToday;
+    }
+  };
+
+  const activeGuests = getActiveGuestsList();
 
   return (
     <div className="space-y-6 select-none font-sans pb-12">
-      {/* Top Greeting Row */}
+      
+      {/* Top Greeting Row & Bird's-Eye View Selector */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white border border-slate-100 p-6 rounded-3xl shadow-sm gap-4">
         <div>
-          <h1 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-1">
-            Good Morning, Keshav 👋
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight flex items-center gap-1.5">
+              <span>Good Morning, {ownerName}</span>
+              <span>👋</span>
+            </h1>
+          </div>
+
           <div className="flex items-center gap-3 mt-1.5">
-            <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-              80% Profile Complete
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+              80% PROFILE COMPLETE
             </span>
-            <div className="w-40 h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div className="w-28 h-1.5 bg-slate-100 rounded-full overflow-hidden">
               <div className="h-full bg-rose-600 rounded-full" style={{ width: '80%' }}></div>
             </div>
           </div>
         </div>
 
-        <button
-          onClick={() => alert('Create Booking form will be integrated soon.')}
-          className="px-5 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer border-none shadow-sm shadow-rose-100"
-        >
-          <Plus size={14} className="stroke-[3]" />
-          <span>Create Booking</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          {/* Bird's Eye View Property Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3.5 py-2.5 rounded-2xl shadow-sm">
+            <Building2 size={14} className="text-rose-700" />
+            <select
+              value={selectedPropertyId}
+              onChange={(e) => setSelectedPropertyId(e.target.value)}
+              className="text-xs font-black text-slate-800 bg-transparent border-none focus:outline-none cursor-pointer"
+            >
+              <option value="all">All Properties (Bird's Eye View)</option>
+              {properties.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={() => navigate('/homestay-owner/bookings/create')}
+            className="px-5 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer border-none shadow-sm shadow-rose-100"
+          >
+            <Plus size={14} className="stroke-[3]" />
+            <span>Create Booking</span>
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {metrics.map((card, i) => (
-          <div key={i} className="bg-white border border-slate-100 p-5.5 rounded-3xl shadow-sm space-y-4 relative">
-            <div className="flex justify-between items-start">
-              <div className={`w-10 h-10 rounded-2xl ${card.color} flex items-center justify-center text-lg shadow-sm`}>
-                <card.icon size={18} className="stroke-[2.2]" />
-              </div>
-              <button className="text-slate-400 hover:text-slate-600 bg-transparent border-none cursor-pointer p-1">
-                ⋮
-              </button>
+        {/* Total Rooms */}
+        <div className="bg-white border border-slate-100 p-5.5 rounded-3xl shadow-sm space-y-4 relative">
+          <div className="flex justify-between items-start">
+            <div className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-500 flex items-center justify-center text-lg shadow-sm">
+              <BedDouble size={18} className="stroke-[2.2]" />
             </div>
-            
-            <div className="space-y-1">
-              <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
-                {card.title}
+            <MoreVertical size={15} className="text-slate-300 hover:text-slate-500 cursor-pointer" />
+          </div>
+          
+          <div className="space-y-1">
+            <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+              Total Rooms Available
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-slate-800 tracking-tight">
+                {kpis.totalRooms}
               </span>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-black text-slate-800 tracking-tight">
-                  {card.value}
-                </span>
-                {card.subtext && (
-                  <span className={`text-[10px] font-bold ${
-                    card.subtext.includes('↑') ? 'text-emerald-600' : 'text-slate-400'
-                  }`}>
-                    {card.subtext}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="border-t border-slate-50 pt-3">
-              <button 
-                onClick={() => alert(`Navigating to details for ${card.title}`)}
-                className="text-[10px] font-black text-rose-600 uppercase tracking-wider flex items-center gap-1 bg-transparent border-none cursor-pointer hover:underline p-0"
-              >
-                <span>{card.linkText}</span>
-                <span>➔</span>
-              </button>
             </div>
           </div>
-        ))}
+
+          <div className="border-t border-slate-50 pt-3">
+            <button 
+              onClick={() => navigate('/homestay-owner/inventory')}
+              className="text-[10px] font-black text-rose-600 uppercase tracking-wider flex items-center gap-1 bg-transparent border-none cursor-pointer hover:underline p-0"
+            >
+              <span>View Details</span>
+              <span>➔</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Today's Available Rooms */}
+        <div className="bg-white border border-slate-100 p-5.5 rounded-3xl shadow-sm space-y-4 relative">
+          <div className="flex justify-between items-start">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-500 flex items-center justify-center text-lg shadow-sm">
+              <CheckCircle size={18} className="stroke-[2.2]" />
+            </div>
+            <MoreVertical size={15} className="text-slate-300 hover:text-slate-500 cursor-pointer" />
+          </div>
+          
+          <div className="space-y-1">
+            <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+              Today's Available Rooms
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-slate-800 tracking-tight">
+                {kpis.availableToday ?? kpis.todayAvailableRooms ?? 0}
+              </span>
+              <span className="text-[10px] font-bold text-emerald-600">
+                {kpis.occupancyRate ?? kpis.availabilityPercent ?? 100}% Availability
+              </span>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-50 pt-3">
+            <button 
+              onClick={() => navigate('/homestay-owner/availability')}
+              className="text-[10px] font-black text-rose-600 uppercase tracking-wider flex items-center gap-1 bg-transparent border-none cursor-pointer hover:underline p-0"
+            >
+              <span>View Details</span>
+              <span>➔</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Unoccupied Rooms */}
+        <div className="bg-white border border-slate-100 p-5.5 rounded-3xl shadow-sm space-y-4 relative">
+          <div className="flex justify-between items-start">
+            <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center text-lg shadow-sm">
+              <BedDouble size={18} className="stroke-[2.2]" />
+            </div>
+            <MoreVertical size={15} className="text-slate-300 hover:text-slate-500 cursor-pointer" />
+          </div>
+          
+          <div className="space-y-1">
+            <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+              Unoccupied Rooms
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-slate-800 tracking-tight">
+                {kpis.unoccupiedToday ?? kpis.unoccupiedRooms ?? 0}
+              </span>
+              <span className="text-[10px] font-bold text-slate-400">
+                {kpis.vacancyRate ?? kpis.vacancyPercent ?? 0}% Vacancy
+              </span>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-50 pt-3">
+            <button 
+              onClick={() => navigate('/homestay-owner/availability')}
+              className="text-[10px] font-black text-rose-600 uppercase tracking-wider flex items-center gap-1 bg-transparent border-none cursor-pointer hover:underline p-0"
+            >
+              <span>View Details</span>
+              <span>➔</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Today's Revenue */}
+        <div className="bg-white border border-slate-100 p-5.5 rounded-3xl shadow-sm space-y-4 relative">
+          <div className="flex justify-between items-start">
+            <div className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-500 flex items-center justify-center text-lg shadow-sm">
+              <TrendingUp size={18} className="stroke-[2.2]" />
+            </div>
+            <MoreVertical size={15} className="text-slate-300 hover:text-slate-500 cursor-pointer" />
+          </div>
+          
+          <div className="space-y-1">
+            <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+              Today's Revenue
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-slate-800 tracking-tight font-mono">
+                ₹{Number(kpis.todayRevenueRaw ?? (typeof kpis.todayRevenue === 'number' ? kpis.todayRevenue : 0)).toLocaleString()}
+              </span>
+              <span className={`text-[10px] font-bold ${kpis.todayRevenuePositive ? 'text-emerald-600' : 'text-slate-400'}`}>
+                {kpis.todayRevenueChange}
+              </span>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-50 pt-3">
+            <button 
+              onClick={() => navigate('/homestay-owner/revenue')}
+              className="text-[10px] font-black text-rose-600 uppercase tracking-wider flex items-center gap-1 bg-transparent border-none cursor-pointer hover:underline p-0"
+            >
+              <span>View Details</span>
+              <span>➔</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Middle Grid Row: Revenue Overview & Check-ins summary */}
@@ -205,7 +395,7 @@ export default function Dashboard() {
           </div>
 
           {/* SVG Custom Line Chart matching client screenshot style */}
-          <div className="relative h-64 w-full border border-slate-100 rounded-2xl p-4 flex items-end">
+          <div className="relative h-64 w-full border border-slate-100 rounded-2xl p-4 flex items-end bg-slate-50/20">
             <svg className="absolute inset-0 w-full h-full p-4 overflow-visible" viewBox="0 0 520 180" preserveAspectRatio="none">
               <defs>
                 <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
@@ -221,44 +411,45 @@ export default function Dashboard() {
               <line x1="50" y1="130" x2="470" y2="130" stroke="#f1f5f9" strokeWidth="1" strokeDasharray="3 3" />
 
               {/* Area path */}
-              <path
-                d="M 50 170 L 50 150 L 120 135 L 190 155 L 260 110 L 330 85 L 400 45 L 470 10 L 470 170 Z"
-                fill="url(#chartGrad)"
-              />
+              {areaPath && (
+                <path d={areaPath} fill="url(#chartGrad)" />
+              )}
 
               {/* Main Line path */}
-              <path
-                d="M 50 150 L 120 135 L 190 155 L 260 110 L 330 85 L 400 45 L 470 10"
-                fill="none"
-                stroke="#d31e1e"
-                strokeWidth="3.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              {linePath && (
+                <path
+                  d={linePath}
+                  fill="none"
+                  stroke="#d31e1e"
+                  strokeWidth="3.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
 
               {/* Data Points */}
-              {chartPoints.map((pt, index) => (
+              {validPoints.map((pt, index) => (
                 <g key={index}>
                   <circle
                     cx={pt.x}
                     cy={pt.y}
-                    r={index === chartPoints.length - 1 ? "5.5" : "4.5"}
-                    fill="#white"
+                    r={index === validPoints.length - 1 ? "5.5" : "4.5"}
+                    fill="#ffffff"
                     stroke="#d31e1e"
-                    strokeWidth={index === chartPoints.length - 1 ? "3.5" : "2.5"}
+                    strokeWidth={index === validPoints.length - 1 ? "3.5" : "2.5"}
                   />
                 </g>
               ))}
             </svg>
 
             {/* Today Tooltip */}
-            <div className="absolute top-[8%] right-[8%] bg-rose-600 text-white font-black text-[9px] px-2 py-1 rounded-lg shadow-md flex items-center gap-1">
-              <span>₹12,500</span>
+            <div className="absolute top-[8%] right-[8%] bg-rose-600 text-white font-black text-[9px] px-2 py-1 rounded-lg shadow-md flex items-center gap-1 font-mono">
+              <span>₹{Number(kpis.todayRevenueRaw ?? (typeof kpis.todayRevenue === 'number' ? kpis.todayRevenue : 0)).toLocaleString()}</span>
             </div>
 
             {/* X Axis Labels */}
             <div className="absolute bottom-1.5 inset-x-0 px-4 flex justify-between text-[9px] font-bold text-slate-400">
-              {chartPoints.map((pt, i) => (
+              {validPoints.map((pt, i) => (
                 <span key={i} className={pt.label === 'Today' ? 'text-rose-600 font-extrabold' : ''}>
                   {pt.label}
                 </span>
@@ -279,11 +470,11 @@ export default function Dashboard() {
                 <span className="block text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">
                   Today's Check-ins
                 </span>
-                <span className="block text-2xl font-black text-slate-800 tracking-tight mt-1.5">
-                  06
+                <span className="block text-2xl font-black text-slate-800 tracking-tight mt-1.5 font-mono">
+                  {String(kpis.checkInsCount ?? checkInsToday.length ?? 0).padStart(2, '0')}
                 </span>
                 <span className="block text-[8px] font-bold text-slate-400 mt-1">
-                  Yesterday: 4
+                  Yesterday: {kpis.checkInsYesterday ?? 0}
                 </span>
               </div>
             </div>
@@ -293,7 +484,7 @@ export default function Dashboard() {
               <img className="w-6.5 h-6.5 rounded-full border-2 border-white object-cover" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="" />
               <img className="w-6.5 h-6.5 rounded-full border-2 border-white object-cover" src="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="" />
               <div className="w-6.5 h-6.5 rounded-full border-2 border-white bg-slate-100 flex items-center justify-center text-[8px] font-black text-slate-500">
-                +4
+                +{Math.max(0, (kpis.checkInsCount ?? checkInsToday.length ?? 0) - 2)}
               </div>
             </div>
           </div>
@@ -308,11 +499,11 @@ export default function Dashboard() {
                 <span className="block text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">
                   Today's Check-outs
                 </span>
-                <span className="block text-2xl font-black text-slate-800 tracking-tight mt-1.5">
-                  06
+                <span className="block text-2xl font-black text-slate-800 tracking-tight mt-1.5 font-mono">
+                  {String(kpis.checkOutsCount ?? checkOutsToday.length ?? 0).padStart(2, '0')}
                 </span>
                 <span className="block text-[8px] font-bold text-slate-400 mt-1">
-                  Yesterday: 3
+                  Yesterday: {kpis.checkOutsYesterday ?? 0}
                 </span>
               </div>
             </div>
@@ -322,14 +513,14 @@ export default function Dashboard() {
               <img className="w-6.5 h-6.5 rounded-full border-2 border-white object-cover" src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="" />
               <img className="w-6.5 h-6.5 rounded-full border-2 border-white object-cover" src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="" />
               <div className="w-6.5 h-6.5 rounded-full border-2 border-white bg-slate-100 flex items-center justify-center text-[8px] font-black text-slate-500">
-                +4
+                +{Math.max(0, (kpis.checkOutsCount ?? checkOutsToday.length ?? 0) - 2)}
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Bottom Section: Recent Check-in Table */}
+      {/* Bottom Section: Dynamic Check-in / Check-out Table */}
       <div className="bg-white border border-slate-100 rounded-3xl shadow-sm overflow-hidden space-y-4">
         {/* Table Header Controls */}
         <div className="p-6 pb-0 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -355,11 +546,11 @@ export default function Dashboard() {
 
           {/* Right Action controls */}
           <div className="flex items-center gap-2 w-full sm:w-auto">
-            <button className="flex-1 sm:flex-none px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-707 font-bold rounded-xl text-[10px] flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer">
-              <Calendar size={13} className="text-slate-400" />
-              <span>Select a Custom Date</span>
-            </button>
-            <button className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-500 rounded-xl transition-all cursor-pointer bg-white flex items-center justify-center">
+            <button 
+              onClick={() => fetchDashboardData()}
+              className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-500 rounded-xl transition-all cursor-pointer bg-white flex items-center justify-center"
+              title="Refresh Dashboard"
+            >
               <RefreshCw size={13} className="stroke-[2.5]" />
             </button>
           </div>
@@ -372,7 +563,7 @@ export default function Dashboard() {
               <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider">
                 <th className="pb-3 px-4">Guest Name</th>
                 <th className="pb-3 px-4">Contact</th>
-                <th className="pb-3 px-4">Room</th>
+                <th className="pb-3 px-4">Room & Property</th>
                 <th className="pb-3 px-4">Check-in Date</th>
                 <th className="pb-3 px-4">Check-out Date</th>
                 <th className="pb-3 px-4">Status</th>
@@ -380,54 +571,81 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 font-semibold text-slate-707">
-              {guests.map((guest, idx) => (
-                <tr key={idx} className="hover:bg-slate-50/20 transition-colors">
-                  <td className="py-3 px-4">
-                    <div className="flex items-center gap-3">
-                      <img 
-                        src={guest.avatar} 
-                        alt={guest.name} 
-                        className="w-7.5 h-7.5 rounded-full border border-slate-100 object-cover shadow-sm"
-                      />
-                      <span className="font-extrabold text-slate-800">{guest.name}</span>
-                    </div>
-                  </td>
-                  <td className="py-3 px-4">
-                    <div className="flex items-center gap-1.5">
-                      <button className="w-7 h-7 bg-rose-50 text-rose-500 rounded-lg flex items-center justify-center border-none cursor-pointer hover:bg-rose-100/50">
-                        <Phone size={11} className="stroke-[2.5]" />
-                      </button>
-                      <button className="w-7 h-7 bg-emerald-50 text-emerald-500 rounded-lg flex items-center justify-center border-none cursor-pointer hover:bg-emerald-100/50">
-                        <MessageSquare size={11} className="stroke-[2.5]" />
-                      </button>
-                    </div>
-                  </td>
-                  <td className="py-3 px-4">
-                    <div>
-                      <span className="block font-black text-slate-800 leading-none">{guest.room}</span>
-                      <span className="block text-[8px] text-slate-400 font-extrabold uppercase mt-1 leading-none">
-                        {guest.roomType}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-3 px-4 text-slate-600 font-mono text-[11px]">{guest.checkIn}</td>
-                  <td className="py-3 px-4 text-slate-600 font-mono text-[11px]">{guest.checkOut}</td>
-                  <td className="py-3 px-4">
-                    <span className="px-2.5 py-1 bg-emerald-50 text-emerald-600 font-bold rounded-lg text-[9px] uppercase tracking-wider inline-block">
-                      {guest.status}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <button
-                      onClick={() => alert(`View details of ${guest.name}`)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-707 font-bold rounded-lg text-[9px] uppercase tracking-wider transition-colors cursor-pointer bg-white"
-                    >
-                      <Eye size={10} className="stroke-[2.5]" />
-                      <span>View Details</span>
-                    </button>
+              {activeGuests.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-slate-400 text-xs font-bold">
+                    No reservations found for {activeTableTab.toLowerCase()}.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                activeGuests.map((guest, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50/20 transition-colors">
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-3">
+                        <img 
+                          src={guest.avatar || 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'} 
+                          alt={guest.name} 
+                          className="w-7.5 h-7.5 rounded-full border border-slate-100 object-cover shadow-sm"
+                        />
+                        <button
+                          onClick={() => navigate(`/homestay-owner/guests/${guest.dbId || guest.id}`)}
+                          className="font-extrabold text-slate-800 hover:text-rose-700 bg-transparent border-none cursor-pointer p-0 text-left"
+                        >
+                          {guest.name}
+                        </button>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-1.5">
+                        {guest.phone && (
+                          <>
+                            <a 
+                              href={`tel:${guest.phone}`}
+                              className="w-7 h-7 bg-rose-50 text-rose-500 rounded-lg flex items-center justify-center hover:bg-rose-100/50 transition-colors"
+                              title="Call Guest"
+                            >
+                              <Phone size={11} className="stroke-[2.5]" />
+                            </a>
+                            <a 
+                              href={`https://wa.me/${guest.phone.replace(/[^0-9]/g, '')}`}
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="w-7 h-7 bg-emerald-50 text-emerald-500 rounded-lg flex items-center justify-center hover:bg-emerald-100/50 transition-colors"
+                              title="WhatsApp Guest"
+                            >
+                              <MessageSquare size={11} className="stroke-[2.5]" />
+                            </a>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div>
+                        <span className="block font-black text-slate-800 leading-none">{guest.room}</span>
+                        <span className="block text-[8px] text-slate-400 font-extrabold uppercase mt-1 leading-none">
+                          {guest.propertyName || guest.roomType}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-slate-600 font-mono text-[11px]">{guest.checkIn}</td>
+                    <td className="py-3 px-4 text-slate-600 font-mono text-[11px]">{guest.checkOut}</td>
+                    <td className="py-3 px-4">
+                      <span className="px-2.5 py-1 bg-emerald-50 text-emerald-600 font-bold rounded-lg text-[9px] uppercase tracking-wider inline-block">
+                        {guest.status}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <button
+                        onClick={() => setSelectedBookingModal(guest)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-lg text-[10px] uppercase tracking-wider transition-colors cursor-pointer bg-white shadow-xs"
+                      >
+                        <Eye size={11} className="stroke-[2.5]" />
+                        <span>View Details</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -435,14 +653,154 @@ export default function Dashboard() {
         {/* View All Footer */}
         <div className="p-4.5 border-t border-slate-50 text-center">
           <button 
-            onClick={() => alert('Viewing all check-ins...')}
+            onClick={() => navigate('/homestay-owner/bookings/manage')}
             className="text-[10px] font-black text-rose-600 uppercase tracking-wider flex items-center justify-center gap-1 mx-auto bg-transparent border-none cursor-pointer hover:underline"
           >
-            <span>View All Check-ins</span>
+            <span>VIEW ALL BOOKINGS & SCHEDULE</span>
             <span>➔</span>
           </button>
         </div>
       </div>
+
+      {/* Booking Details Modal */}
+      {selectedBookingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 border border-slate-100 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex justify-between items-start border-b border-slate-100 pb-4">
+              <div>
+                <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest block">
+                  Reservation Summary
+                </span>
+                <h2 className="text-base font-black text-slate-800 tracking-tight mt-0.5">
+                  {selectedBookingModal.bookingId || selectedBookingModal.id || 'Booking Details'}
+                </h2>
+              </div>
+              <button 
+                onClick={() => setSelectedBookingModal(null)}
+                className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-600 cursor-pointer bg-transparent border-none transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Guest Header Info */}
+            <div className="flex items-center gap-3.5 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+              <img 
+                src={selectedBookingModal.avatar || 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'} 
+                alt="" 
+                className="w-12 h-12 rounded-2xl object-cover border border-white shadow-xs"
+              />
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-black text-slate-800 truncate">{selectedBookingModal.name}</h3>
+                <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 font-semibold">
+                  <span>{selectedBookingModal.phone || 'No phone'}</span>
+                  {selectedBookingModal.email && <span>• {selectedBookingModal.email}</span>}
+                </div>
+              </div>
+
+              {/* Direct Contact Icons */}
+              {selectedBookingModal.phone && (
+                <div className="flex items-center gap-1.5">
+                  <a 
+                    href={`tel:${selectedBookingModal.phone}`}
+                    className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-rose-600 flex items-center justify-center hover:bg-rose-50 transition-colors"
+                    title="Call Guest"
+                  >
+                    <Phone size={13} className="stroke-[2.5]" />
+                  </a>
+                  <a 
+                    href={`https://wa.me/${selectedBookingModal.phone.replace(/[^0-9]/g, '')}`}
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-emerald-600 flex items-center justify-center hover:bg-emerald-50 transition-colors"
+                    title="WhatsApp Guest"
+                  >
+                    <MessageSquare size={13} className="stroke-[2.5]" />
+                  </a>
+                </div>
+              )}
+            </div>
+
+            {/* Stay & Room Details */}
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Property & Room</span>
+                <span className="font-bold text-slate-800 block mt-1">{selectedBookingModal.propertyName || 'Homestay'}</span>
+                <span className="text-[11px] font-extrabold text-rose-600 block mt-0.5">{selectedBookingModal.room || selectedBookingModal.roomNumber || selectedBookingModal.roomType || 'Standard Room'}</span>
+              </div>
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Stay Duration</span>
+                <span className="font-bold text-slate-800 block mt-1 font-mono text-[11px]">In: {selectedBookingModal.checkIn}</span>
+                <span className="font-bold text-slate-800 block mt-0.5 font-mono text-[11px]">Out: {selectedBookingModal.checkOut}</span>
+              </div>
+            </div>
+
+            {/* Financial & Status Summary */}
+            <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-100 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-semibold">Booking Status</span>
+                <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-700 font-extrabold rounded-lg text-[10px] uppercase">
+                  {selectedBookingModal.status || 'Confirmed'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-semibold">Payment Status</span>
+                <span className="px-2.5 py-0.5 bg-rose-100 text-rose-700 font-extrabold rounded-lg text-[10px] uppercase">
+                  {selectedBookingModal.paymentStatus || 'Paid / Active'}
+                </span>
+              </div>
+              {selectedBookingModal.totalAmount != null && (
+                <div className="flex justify-between items-center pt-2 border-t border-slate-200">
+                  <span className="text-slate-800 font-black">Total Bill</span>
+                  <span className="text-sm font-black font-mono text-slate-800">
+                    ₹{Number(selectedBookingModal.totalAmount || 0).toLocaleString()}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="space-y-2 pt-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => {
+                    const id = selectedBookingModal.dbId || selectedBookingModal.id;
+                    setSelectedBookingModal(null);
+                    navigate(`/homestay-owner/bookings/confirmation-slip/${id}`);
+                  }}
+                  className="py-2.5 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Receipt size={13} />
+                  <span>Confirmation Slip</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const id = selectedBookingModal.dbId || selectedBookingModal.id;
+                    setSelectedBookingModal(null);
+                    navigate(`/homestay-owner/bookings/invoice/${id}`);
+                  }}
+                  className="py-2.5 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-707 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <FileText size={13} />
+                  <span>Tax Invoice</span>
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setSelectedBookingModal(null);
+                  navigate('/homestay-owner/bookings/manage');
+                }}
+                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-rose-200 flex items-center justify-center gap-2 transition-colors"
+              >
+                <CalendarCheck size={15} />
+                <span>Manage in Bookings Dashboard</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Global Footer */}
       <footer className="mt-8 flex flex-col sm:flex-row justify-between items-center text-[10px] font-bold text-slate-400 border-t border-slate-100 pt-6 gap-3">
@@ -459,3 +817,5 @@ export default function Dashboard() {
     </div>
   );
 }
+
+

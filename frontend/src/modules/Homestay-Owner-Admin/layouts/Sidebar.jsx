@@ -2,20 +2,15 @@ import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { 
-  Compass, 
   LayoutDashboard, 
   Calendar,
   Wallet, 
   Home, 
   Users, 
-  Settings, 
-  HelpCircle,
-  Plus,
   FileText,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  DollarSign
+  DollarSign,
+  LogOut,
+  CalendarCheck
 } from 'lucide-react';
 import { logout } from '../store/homestayOwnerAuthSlice.js';
 
@@ -25,7 +20,6 @@ export default function Sidebar() {
   const dispatch = useDispatch();
 
   const menuItems = [
-    { name: 'Discovery', icon: Compass, path: '/homestay-owner/discovery' },
     { name: 'Dashboard', icon: LayoutDashboard, path: '/homestay-owner/dashboard' },
     { name: 'Availability Schedule', icon: Calendar, path: '/homestay-owner/availability' },
     { name: 'Revenue', icon: Wallet, path: '/homestay-owner/revenue' },
@@ -34,15 +28,12 @@ export default function Sidebar() {
   ];
 
   const bookingsItems = [
+    { name: 'Manage Bookings', icon: CalendarCheck, path: '/homestay-owner/bookings/manage' },
     { name: 'Booking Requests', icon: FileText, path: '/homestay-owner/bookings/requests' },
-    { name: 'Confirmed Bookings', icon: CheckCircle2, path: '/homestay-owner/guests' },
-    { name: 'Hold Bookings', icon: Clock, path: '/homestay-owner/bookings/requests' },
-    { name: 'Cancelled Bookings', icon: XCircle, path: '/homestay-owner/bookings/requests' },
   ];
 
   const bottomItems = [
     { name: 'Manage Payments', icon: DollarSign, path: '/homestay-owner/settings/payments' },
-    { name: 'Support', icon: HelpCircle, path: '/homestay-owner/support' },
   ];
 
   const handleNavigation = (path) => {
@@ -112,6 +103,7 @@ export default function Sidebar() {
         {bookingsItems.map((item) => {
           const isActive = 
             location.pathname === item.path || 
+            (item.path === '/homestay-owner/bookings/manage' && (location.pathname === '/homestay-owner/bookings' || location.pathname.startsWith('/homestay-owner/bookings/manage'))) ||
             (item.path === '/homestay-owner/bookings/requests' && location.pathname.startsWith('/homestay-owner/bookings/requests'));
           return (
             <button
@@ -129,16 +121,6 @@ export default function Sidebar() {
           );
         })}
 
-        {/* Add Property Action Button */}
-        <div className="pt-4 px-2">
-          <button
-            onClick={() => navigate('/homestay-owner/inventory/setup-property?new=true')}
-            className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border-none shadow-sm shadow-rose-100"
-          >
-            <Plus size={14} className="stroke-[3]" />
-            <span>Add Property</span>
-          </button>
-        </div>
       </nav>
 
       {/* Bottom Footer Items */}
@@ -157,9 +139,9 @@ export default function Sidebar() {
         {/* Logout */}
         <button
           onClick={() => dispatch(logout())}
-          className="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-xs font-bold text-rose-600 hover:bg-rose-55 transition-all border-none bg-transparent cursor-pointer"
+          className="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-xs font-bold text-rose-600 hover:bg-rose-50/50 transition-all border-none bg-transparent cursor-pointer"
         >
-          <HelpCircle size={17} className="text-rose-500 stroke-[2]" />
+          <LogOut size={17} className="text-rose-600 stroke-[2]" />
           <span>Log Out</span>
         </button>
       </div>

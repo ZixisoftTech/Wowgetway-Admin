@@ -184,7 +184,7 @@ export default function AddEditHomestayOwner({ ownerDetails, onBack, onSave, isS
         email: ownerDetails.email || '',
         mobile: ownerDetails.mobile || '',
         whatsApp: ownerDetails.whatsApp || '',
-        password: ownerDetails.password || '',
+        password: (ownerDetails.passwordCopy && !ownerDetails.passwordCopy.startsWith('$2b$')) ? ownerDetails.passwordCopy : '',
         aadharNo: ownerDetails.aadharNo || '',
         panNo: ownerDetails.panNo || '',
         voterId: ownerDetails.voterId || '',
@@ -477,26 +477,51 @@ export default function AddEditHomestayOwner({ ownerDetails, onBack, onSave, isS
               </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Profile Photo Link URL</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={formData.profilePhoto}
-                  onChange={(e) => handleInputChange(null, 'profilePhoto', e.target.value)}
-                  placeholder="https://images.unsplash.com/photo-... or custom photo url"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-250 rounded-xl text-xs font-semibold text-slate-750 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
-                />
-                <label className="px-3 py-2 bg-slate-50 hover:bg-slate-150 border border-slate-200 rounded-xl text-[10px] font-bold text-slate-600 transition-all cursor-pointer flex items-center gap-1.5">
-                  <Upload size={12} />
-                  <span>Upload</span>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Profile Photo</label>
+              <div className="flex items-center gap-3">
+                {formData.profilePhoto ? (
+                  <div className="relative group w-14 h-14 rounded-2xl overflow-hidden border-2 border-blue-400 shadow-sm flex-shrink-0 bg-slate-100">
+                    <img
+                      src={getApiUrl(formData.profilePhoto)}
+                      alt="Profile Preview"
+                      className="w-full h-full object-cover"
+                      onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, profilePhoto: '' }))}
+                      className="absolute inset-0 bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-[9px] font-bold cursor-pointer"
+                      title="Remove profile photo"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-dashed border-slate-300 flex items-center justify-center text-slate-400 flex-shrink-0">
+                    <User size={22} />
+                  </div>
+                )}
+
+                <div className="flex-1 flex gap-2">
                   <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => handleRealUpload('profilePhoto', e.target.files[0])}
-                    className="hidden"
+                    type="text"
+                    value={formData.profilePhoto}
+                    onChange={(e) => handleInputChange(null, 'profilePhoto', e.target.value)}
+                    placeholder="Photo URL or upload image"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-250 rounded-xl text-xs font-semibold text-slate-750 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
                   />
-                </label>
+                  <label className="px-3.5 py-2 bg-slate-50 hover:bg-slate-150 border border-slate-200 rounded-xl text-[10px] font-bold text-slate-600 transition-all cursor-pointer flex items-center gap-1.5 flex-shrink-0">
+                    <Upload size={12} />
+                    <span>Upload</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleRealUpload('profilePhoto', e.target.files[0])}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -814,190 +839,87 @@ export default function AddEditHomestayOwner({ ownerDetails, onBack, onSave, isS
 
             <div className="border-t border-slate-50/50 pt-4 mt-3">
               <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-3">Attach File Documents Coordinates</span>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {/* Aadhaar Front */}
-                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-150 text-xs">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Aadhaar Card Front</span>
-                  <div className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      placeholder="Front scan URL"
-                      value={formData.aadharFront}
-                      onChange={(e) => handleInputChange(null, 'aadharFront', e.target.value)}
-                      className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold"
-                    />
-                    <label className="p-2 bg-white hover:bg-slate-105 border border-slate-200 rounded-lg text-slate-500 cursor-pointer flex items-center justify-center">
-                      <Upload size={13} />
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        onChange={(e) => handleRealUpload('aadharFront', e.target.files[0])}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                {/* Aadhaar Back */}
-                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-150 text-xs">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Aadhaar Card Back</span>
-                  <div className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      placeholder="Back scan URL"
-                      value={formData.aadharBack}
-                      onChange={(e) => handleInputChange(null, 'aadharBack', e.target.value)}
-                      className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold"
-                    />
-                    <label className="p-2 bg-white hover:bg-slate-105 border border-slate-200 rounded-lg text-slate-500 cursor-pointer flex items-center justify-center">
-                      <Upload size={13} />
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        onChange={(e) => handleRealUpload('aadharBack', e.target.files[0])}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                {/* PAN Front */}
-                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-150 text-xs">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">PAN Card Image</span>
-                  <div className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      placeholder="PAN Front URL"
-                      value={formData.panFront}
-                      onChange={(e) => handleInputChange(null, 'panFront', e.target.value)}
-                      className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold"
-                    />
-                    <label className="p-2 bg-white hover:bg-slate-105 border border-slate-200 rounded-lg text-slate-500 cursor-pointer flex items-center justify-center">
-                      <Upload size={13} />
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        onChange={(e) => handleRealUpload('panFront', e.target.files[0])}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                {/* Trade License Doc */}
-                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-150 text-xs">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Trade License Scan</span>
-                  <div className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      placeholder="Certificate URL"
-                      value={formData.tradeLicenseDoc}
-                      onChange={(e) => handleInputChange(null, 'tradeLicenseDoc', e.target.value)}
-                      className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold"
-                    />
-                    <label className="p-2 bg-white hover:bg-slate-105 border border-slate-200 rounded-lg text-slate-500 cursor-pointer flex items-center justify-center">
-                      <Upload size={13} />
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        onChange={(e) => handleRealUpload('tradeLicenseDoc', e.target.files[0])}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 5: Property Linking Section */}
-          <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4 lg:col-span-2">
-            <div className="flex justify-between items-center border-b border-slate-50 pb-2.5">
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest text-indigo-600 flex items-center gap-1.5">
-                <Building size={13} className="text-indigo-500" />
-                <span>Linked Homestay Properties ({formData.properties.length})</span>
-              </h3>
-              <button
-                type="button"
-                onClick={handleAddProperty}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-650 hover:text-slate-800 rounded-lg text-[10px] font-bold transition-all cursor-pointer"
-              >
-                <Plus size={11} className="stroke-[2.5]" />
-                <span>Link Property</span>
-              </button>
-            </div>
-
-            {formData.properties.length === 0 ? (
-              <div className="py-6 text-center text-slate-400 text-xs bg-slate-50 border border-dashed border-slate-200 rounded-xl font-medium">
-                No homestays linked yet. Click 'Link Property' above to add one.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {formData.properties.map((prop, idx) => (
-                  <div key={idx} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl relative">
-                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-4 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Property Name *</label>
-                        <input
-                          type="text"
-                          required
-                          value={prop.propertyName}
-                          onChange={(e) => handlePropertyChange(idx, 'propertyName', e.target.value)}
-                          placeholder="e.g. Hilltop Resort"
-                          className="w-full p-2 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-750 focus:outline-none"
-                        />
-                      </div>
-                      
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Location *</label>
-                        <input
-                          type="text"
-                          required
-                          value={prop.location}
-                          onChange={(e) => handlePropertyChange(idx, 'location', e.target.value)}
-                          placeholder="e.g. Manali, HP"
-                          className="w-full p-2 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-750 focus:outline-none"
-                        />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { field: 'aadharFront', label: 'Aadhaar Card Front', placeholder: 'Front scan URL' },
+                  { field: 'aadharBack', label: 'Aadhaar Card Back', placeholder: 'Back scan URL' },
+                  { field: 'panFront', label: 'PAN Card Image', placeholder: 'PAN Front URL' },
+                  { field: 'tradeLicenseDoc', label: 'Trade License Scan', placeholder: 'Certificate URL' }
+                ].map(({ field, label, placeholder }) => (
+                  <div key={field} className="p-3.5 bg-slate-50 rounded-xl border border-slate-150 text-xs flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">{label}</span>
+                        {formData[field] && (
+                          <span className="text-[8px] font-black uppercase text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                            Uploaded
+                          </span>
+                        )}
                       </div>
 
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Status</label>
-                        <select
-                          value={prop.status}
-                          onChange={(e) => handlePropertyChange(idx, 'status', e.target.value)}
-                          className="w-full p-2 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 focus:outline-none"
-                        >
-                          <option value="Active">Active</option>
-                          <option value="Inactive">Inactive</option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Bookings count</label>
-                        <input
-                          type="number"
-                          value={prop.bookings}
-                          onChange={(e) => handlePropertyChange(idx, 'bookings', e.target.value)}
-                          placeholder="0"
-                          className="w-full p-2 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-750 focus:outline-none"
-                        />
-                      </div>
+                      {formData[field] ? (
+                        <div className="relative group w-full h-24 rounded-lg overflow-hidden border border-slate-200 bg-white mb-2 shadow-inner">
+                          <img
+                            src={getApiUrl(formData[field])}
+                            alt={label}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex';
+                            }}
+                          />
+                          <div className="hidden w-full h-full bg-slate-100 flex-col items-center justify-center text-slate-500">
+                            <FileText size={22} className="text-blue-500 mb-1" />
+                            <span className="text-[9px] font-bold">Document Attached</span>
+                          </div>
+                          <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center gap-2">
+                            <a
+                              href={getApiUrl(formData[field])}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2 py-1 bg-white text-slate-700 rounded-md text-[9px] font-bold hover:bg-slate-100 transition-colors shadow-sm"
+                            >
+                              View
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => setFormData(prev => ({ ...prev, [field]: '' }))}
+                              className="px-2 py-1 bg-rose-500 text-white rounded-md text-[9px] font-bold hover:bg-rose-600 transition-colors shadow-sm cursor-pointer"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="w-full h-24 rounded-lg border-2 border-dashed border-slate-200 bg-white flex flex-col items-center justify-center text-slate-400 mb-2">
+                          <FileText size={20} className="mb-1 text-slate-300" />
+                          <span className="text-[9px] text-slate-400 font-medium">No document attached</span>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="flex items-end justify-end pl-2">
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveProperty(idx)}
-                        className="p-2 text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded-lg transition-colors cursor-pointer"
-                        title="Remove link"
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="text"
+                        placeholder={placeholder}
+                        value={formData[field]}
+                        onChange={(e) => handleInputChange(null, field, e.target.value)}
+                        className="w-full p-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700 focus:outline-none"
+                      />
+                      <label className="p-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-slate-600 cursor-pointer flex items-center justify-center transition-colors flex-shrink-0">
+                        <Upload size={13} />
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          onChange={(e) => handleRealUpload(field, e.target.files[0])}
+                          className="hidden"
+                        />
+                      </label>
                     </div>
                   </div>
                 ))}
               </div>
-            )}
+            </div>
           </div>
 
         </div>

@@ -33,6 +33,7 @@ import {
   Sun,
   Copy,
   AlertCircle,
+  ShieldAlert,
   Search
 } from 'lucide-react';
 
@@ -50,23 +51,42 @@ const getImageUrl = (path) => {
 };
 
 const validateSeasonsCoverage = (roomSeasons) => {
+  if (!roomSeasons) return { valid: false, error: 'No season dates configured.', totalDays: 0 };
   const ranges = [];
-  ['peak', 'mid', 'off'].forEach(seasonType => {
+  const errors = [];
+
+  ['off', 'mid', 'peak'].forEach(seasonType => {
     const list = roomSeasons[seasonType] || [];
-    list.forEach(r => {
-      if (r.start && r.end) {
-        ranges.push({
-          start: new Date(r.start),
-          end: new Date(r.end),
-          type: seasonType
-        });
+    list.forEach((r, idx) => {
+      if (!r.start || !r.end) {
+        errors.push(`Missing start or end date in ${seasonType.toUpperCase()} season (range #${idx + 1}).`);
+      } else {
+        const s = new Date(r.start);
+        const e = new Date(r.end);
+        if (isNaN(s.getTime()) || isNaN(e.getTime())) {
+          errors.push(`Invalid date format in ${seasonType.toUpperCase()} season.`);
+        } else if (s > e) {
+          errors.push(`Start date cannot be after End date in ${seasonType.toUpperCase()} season (${r.start} to ${r.end}).`);
+        } else {
+          ranges.push({
+            start: s,
+            end: e,
+            type: seasonType.toUpperCase(),
+            startStr: r.start,
+            endStr: r.end
+          });
+        }
       }
     });
   });
 
-  if (ranges.length === 0) return { valid: false, error: 'No season date ranges configured.' };
+  if (errors.length > 0) {
+    return { valid: false, error: errors[0], totalDays: 0 };
+  }
 
-  ranges.sort((a, b) => a.start - b.start);
+  if (ranges.length === 0) {
+    return { valid: false, error: 'Please configure date ranges across Off-Season, Mid-Season, and Peak Season to cover the entire 365-day calendar.', totalDays: 0 };
+  }
 
   // Check overlaps
   for (let i = 0; i < ranges.length; i++) {
@@ -74,11 +94,21 @@ const validateSeasonsCoverage = (roomSeasons) => {
       if (ranges[i].start <= ranges[j].end && ranges[j].start <= ranges[i].end) {
         return {
           valid: false,
-          error: `Date range overlap: ${ranges[i].type} (${ranges[i].start.toISOString().split('T')[0]} to ${ranges[i].end.toISOString().split('T')[0]}) overlaps with ${ranges[j].type}.`
+          error: `Date overlap detected: ${ranges[i].type} (${ranges[i].startStr} to ${ranges[i].endStr}) overlaps with ${ranges[j].type} (${ranges[j].startStr} to ${ranges[j].endStr}).`,
+          totalDays: 0
         };
       }
     }
   }
+
+  // Calculate unique days covered
+  let totalDays = 0;
+  ranges.forEach(r => {
+    const diff = Math.round((r.end.getTime() - r.start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+    totalDays += Math.max(0, diff);
+  });
+
+  ranges.sort((a, b) => a.start - b.start);
 
   // Check gaps
   for (let i = 0; i < ranges.length - 1; i++) {
@@ -87,28 +117,31 @@ const validateSeasonsCoverage = (roomSeasons) => {
     if (diff > oneDayMs + 1000) {
       return {
         valid: false,
-        error: `A calendar gap exists between ${ranges[i].end.toISOString().split('T')[0]} and ${ranges[i+1].start.toISOString().split('T')[0]}.`
+        error: `A calendar gap of unassigned dates exists between ${ranges[i].endStr} and ${ranges[i+1].startStr}. All days must be covered.`,
+        totalDays
       };
     }
   }
 
-  // Check year coverage length
-  const totalDiffDays = (ranges[ranges.length - 1].end - ranges[0].start) / (24 * 60 * 60 * 1000);
-  if (totalDiffDays < 360) {
+  if (totalDays < 365) {
     return {
       valid: false,
-      error: `All seasons combined must span a complete 12-month calendar year (currently covers ${Math.round(totalDiffDays)} days).`
+      error: `The 12-month calendar is incomplete. All 365 days of the year must be covered across Off-Season, Mid-Season, and Peak Season (currently covered: ${totalDays} / 365 days, missing: ${365 - totalDays} days).`,
+      totalDays
     };
   }
 
-  return { valid: true };
+  return { valid: true, totalDays };
 };
 
-export default function PropertySetupWizard() {
+export default function PropertySetupWizard({ propertyId: propPropertyId = null, isAdmin = false, onBack: propOnBack = null }) {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
   const [completedSteps, setCompletedSteps] = useState([1]);
   const [errors, setErrors] = useState({});
+  const [propertyStatus, setPropertyStatus] = useState('Draft');
+  const [seasonModalError, setSeasonModalError] = useState('');
+  const [masterOwners, setMasterOwners] = useState([]);
 
   // Active configurations inside Steps 4, 5, 6
   const [activeConfigureRoomId, setActiveConfigureRoomId] = useState(null); 
@@ -130,10 +163,29 @@ export default function PropertySetupWizard() {
   const [propertyDbId, setPropertyDbId] = useState(null);
   const [approvalComments, setApprovalComments] = useState([]);
 
+  const isReadOnly = !isAdmin && (propertyStatus === 'Submitted For Review' || propertyStatus === 'Pending Approval');
+
+  const getAuthToken = () => {
+    if (isAdmin) {
+      return localStorage.getItem('superAdminToken') || localStorage.getItem('homestayOwnerToken');
+    }
+    return localStorage.getItem('homestayOwnerToken') || localStorage.getItem('superAdminToken');
+  };
+
+  const handleExit = () => {
+    if (propOnBack) {
+      propOnBack();
+    } else if (isAdmin) {
+      navigate('/homestays');
+    } else {
+      navigate('/homestay-owner/inventory');
+    }
+  };
+
   // Wizard state data
   const [formData, setFormData] = useState({
     name: '',
-    type: '',
+    type: 'Homestay',
     category: '',
     ownerName: '',
     phone: '',
@@ -203,13 +255,13 @@ export default function PropertySetupWizard() {
   useEffect(() => {
     const loadDraft = async () => {
       try {
-        const token = localStorage.getItem('homestayOwnerToken');
+        const token = getAuthToken();
         if (!token) return;
         
         const searchParams = new URLSearchParams(window.location.search);
-        const isNew = searchParams.get('new') === 'true';
+        const isNew = (searchParams.get('new') === 'true' || (isAdmin && !propPropertyId)) && !propPropertyId;
         const isPreview = searchParams.get('preview') === 'true';
-        const propertyIdParam = searchParams.get('propertyId');
+        const propertyIdParam = propPropertyId || searchParams.get('propertyId');
 
         let draftUrl = '/api/homestay-owner/properties/draft';
         if (isNew) {
@@ -224,12 +276,24 @@ export default function PropertySetupWizard() {
         const { property, gallery, rooms, amenities, seasons, rates, approval } = res.data;
 
         setPropertyDbId(property._id);
+        setPropertyStatus(property.status || 'Draft');
         if (isPreview) {
           setCurrentStep(7);
         } else {
           setCurrentStep(property.currentStep || 1);
         }
         setApprovalComments(approval ? approval.comments || [] : []);
+
+        if (isAdmin) {
+          try {
+            const ownRes = await axios.get(getApiUrl('/api/dashboard/owners'), {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            setMasterOwners(ownRes.data || []);
+          } catch (e) {
+            console.error("Failed to load owners list", e);
+          }
+        }
 
         const initialGallery = {
           cover: gallery.coverImage || '',
@@ -276,9 +340,10 @@ export default function PropertySetupWizard() {
 
   // Save Progress step-by-step to MongoDB Atlas
   const autoSave = async (data, stepNum = currentStep) => {
+    if (isReadOnly) return;
     localStorage.setItem('propertySetupDraft', JSON.stringify(data));
     try {
-      const token = localStorage.getItem('homestayOwnerToken');
+      const token = getAuthToken();
       if (!token || !propertyDbId) return;
 
       let stepData = {};
@@ -530,6 +595,11 @@ export default function PropertySetupWizard() {
   };
 
   const handleNext = async () => {
+    if (isReadOnly) {
+      setCurrentStep(prev => Math.min(prev + 1, 8));
+      window.scrollTo(0, 0);
+      return;
+    }
     if (validateStep(currentStep)) {
       try {
         await autoSave(formData, currentStep);
@@ -563,17 +633,22 @@ export default function PropertySetupWizard() {
   };
 
   const handleSaveDraft = async () => {
+    if (isReadOnly) return;
     await autoSave(formData, currentStep);
     Swal.fire({
       title: 'Draft Saved',
-      text: 'Property setup progress has been saved successfully to MongoDB Atlas.',
+      text: 'Property setup progress has been saved successfully.',
       icon: 'success',
       confirmButtonColor: '#be123c'
     });
-    navigate('/homestay-owner/inventory');
+    handleExit();
   };
 
   const handleStepClick = async (stepNum) => {
+    if (isReadOnly) {
+      setCurrentStep(stepNum);
+      return;
+    }
     if (completedSteps.includes(stepNum) || stepNum <= Math.max(...completedSteps) + 1) {
       if (validateStep(currentStep)) {
         await autoSave(formData, currentStep);
@@ -583,8 +658,9 @@ export default function PropertySetupWizard() {
   };
 
   const handlePublishProperty = async () => {
+    if (isReadOnly) return;
     try {
-      const token = localStorage.getItem('homestayOwnerToken');
+      const token = getAuthToken();
       if (!token) {
         Swal.fire({
           title: 'Session Expired',
@@ -634,13 +710,22 @@ export default function PropertySetupWizard() {
       // Clear local storage draft
       localStorage.removeItem('propertySetupDraft');
 
-      Swal.fire({
-        title: 'Submitted For Review!',
-        text: 'Your property has been successfully submitted for review. It will become live on the public portal upon administrator approval.',
-        icon: 'success',
-        confirmButtonColor: '#be123c'
-      });
-      navigate('/homestay-owner/inventory');
+      if (isAdmin) {
+        Swal.fire({
+          title: 'Property Saved & Published!',
+          text: 'Property details have been saved successfully.',
+          icon: 'success',
+          confirmButtonColor: '#be123c'
+        });
+      } else {
+        Swal.fire({
+          title: 'Submitted For Review!',
+          text: 'Your property has been successfully submitted for review. It will become live on the public portal upon administrator approval.',
+          icon: 'success',
+          confirmButtonColor: '#be123c'
+        });
+      }
+      handleExit();
     } catch (err) {
       console.error(err);
       Swal.fire({
@@ -661,6 +746,42 @@ export default function PropertySetupWizard() {
   };
 
   const handleSaveRoomConfigure = () => {
+    const count = Number(currentEditRoom.count) || 0;
+    if (count <= 0) {
+      Swal.fire({
+        title: 'Room Count Required',
+        text: 'Total Number of Rooms must be at least 1.',
+        icon: 'warning',
+        confirmButtonColor: '#be123c'
+      });
+      return;
+    }
+
+    const nums = (currentEditRoom.roomNumbers || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    if (nums.length !== count) {
+      Swal.fire({
+        title: 'Room Numbers Incomplete',
+        text: `Please enter room numbers for all ${count} room boxes. Currently entered: ${nums.length}/${count}.`,
+        icon: 'warning',
+        confirmButtonColor: '#be123c'
+      });
+      return;
+    }
+
+    if (new Set(nums).size !== nums.length) {
+      Swal.fire({
+        title: 'Duplicate Room Numbers',
+        text: 'Each room number must be unique. Duplicate room numbers detected.',
+        icon: 'warning',
+        confirmButtonColor: '#be123c'
+      });
+      return;
+    }
+
     if (!currentEditRoom.images || currentEditRoom.images.length === 0) {
       Swal.fire({
         title: 'Room Images Required',
@@ -753,11 +874,18 @@ export default function PropertySetupWizard() {
       }
     }
 
+    setSeasonModalError('');
     setCurrentEditSeasons(JSON.parse(JSON.stringify(seasonsData || { off: [], mid: [], peak: [] })));
     setActiveConfigureSeasonRoomId(roomId);
   };
 
   const handleSaveSeasonConfigure = () => {
+    const coverage = validateSeasonsCoverage(currentEditSeasons);
+    if (!coverage.valid) {
+      setSeasonModalError(coverage.error);
+      return;
+    }
+    setSeasonModalError('');
     setFormData({
       ...formData,
       seasons: {
@@ -858,13 +986,24 @@ export default function PropertySetupWizard() {
             </p>
           </div>
           
-          <button 
-            onClick={handleSaveDraft}
-            className="flex items-center gap-1.5 px-4 py-2 border border-slate-205 hover:bg-slate-50 text-slate-707 text-[10px] font-black rounded-xl uppercase tracking-wider cursor-pointer bg-white"
-          >
-            <Save size={12} className="text-slate-400" />
-            <span>Save Draft</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExit}
+              className="flex items-center gap-1.5 px-3.5 py-2 border border-slate-205 hover:bg-slate-50 text-slate-600 text-[10px] font-black rounded-xl uppercase tracking-wider cursor-pointer bg-white"
+            >
+              <ArrowLeft size={12} className="text-slate-400" />
+              <span>Back to Properties</span>
+            </button>
+            {!isReadOnly && (
+              <button 
+                onClick={handleSaveDraft}
+                className="flex items-center gap-1.5 px-4 py-2 border border-slate-205 hover:bg-slate-50 text-slate-707 text-[10px] font-black rounded-xl uppercase tracking-wider cursor-pointer bg-white"
+              >
+                <Save size={12} className="text-slate-400" />
+                <span>Save Draft</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Setup Progress Steps */}
@@ -972,14 +1111,50 @@ export default function PropertySetupWizard() {
 
             {/* Room Numbers */}
             <div className="bg-slate-50/40 p-5 rounded-2xl border border-slate-150 space-y-3">
-              <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest text-slate-400">Specific Room Numbers</h3>
-              <input
-                type="text"
-                value={currentEditRoom.roomNumbers}
-                onChange={(e) => setCurrentEditRoom({...currentEditRoom, roomNumbers: e.target.value})}
-                placeholder="102, 103, 104, 105"
-                className="w-full px-4 py-3 bg-white border border-slate-205 rounded-xl text-xs font-bold text-slate-707 focus:outline-none"
-              />
+              <div className="flex justify-between items-center">
+                <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest text-slate-400">
+                  Specific Room Numbers ({currentEditRoom.count || 0} Rooms)
+                </h3>
+                <span className="text-[10px] text-slate-400 font-semibold">Enter a unique identifier for each room</span>
+              </div>
+
+              {(!currentEditRoom.count || Number(currentEditRoom.count) <= 0) ? (
+                <div className="p-4 bg-white border border-dashed border-slate-200 rounded-xl text-center text-xs text-slate-400 font-bold">
+                  Enter Total Number of Rooms above to configure individual room numbers.
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-3">
+                  {Array.from({ length: Number(currentEditRoom.count) }).map((_, idx) => {
+                    const rawNums = (currentEditRoom.roomNumbers || '').split(',').map(s => s.trim());
+                    const val = rawNums[idx] !== undefined ? rawNums[idx] : '';
+                    return (
+                      <div key={idx} className="space-y-1">
+                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">
+                          Room {idx + 1} Number *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={val}
+                          onChange={(e) => {
+                            const newNums = [...rawNums];
+                            while (newNums.length < Number(currentEditRoom.count)) {
+                              newNums.push('');
+                            }
+                            newNums[idx] = e.target.value.trim();
+                            setCurrentEditRoom({
+                              ...currentEditRoom,
+                              roomNumbers: newNums.slice(0, Number(currentEditRoom.count)).join(', ')
+                            });
+                          }}
+                          placeholder={`Room ${idx + 1}`}
+                          className="w-full px-3 py-2 bg-white border border-slate-205 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-rose-600 font-mono text-center"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Extra Person Allowed */}
@@ -1177,6 +1352,47 @@ export default function PropertySetupWizard() {
           </div>
 
           <div className="space-y-6">
+            {/* Calendar Coverage Tracker & Inline Error Banner */}
+            {(() => {
+              const coverage = validateSeasonsCoverage(currentEditSeasons);
+              return (
+                <div className="space-y-3">
+                  <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                    coverage.valid ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900' : 'bg-amber-50/80 border-amber-200 text-amber-900'
+                  }`}>
+                    <div className="flex items-center gap-2.5">
+                      <Calendar size={18} className={coverage.valid ? 'text-emerald-600' : 'text-amber-600'} />
+                      <div>
+                        <span className="font-extrabold text-xs uppercase tracking-wider block">
+                          365-Day / 12-Month Calendar Coverage
+                        </span>
+                        <span className="text-[11px] font-bold text-slate-600">
+                          {coverage.totalDays || 0} / 365 Days Assigned ({Math.min(100, Math.round(((coverage.totalDays || 0) / 365) * 100))}%)
+                        </span>
+                      </div>
+                    </div>
+                    <span className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider text-center ${
+                      coverage.valid ? 'bg-emerald-600 text-white' : 'bg-amber-500 text-white'
+                    }`}>
+                      {coverage.valid ? '✓ Full Year Covered' : '⚠️ Incomplete Coverage'}
+                    </span>
+                  </div>
+
+                  {seasonModalError && (
+                    <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-2xl flex items-start gap-2.5 shadow-sm">
+                      <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-black uppercase tracking-wider block text-[10px] text-rose-800">
+                          Calendar Coverage Error (Required on This Page)
+                        </span>
+                        <span className="text-rose-900">{seasonModalError}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Off Season */}
             <div className="bg-slate-50/30 p-5 rounded-2xl border border-slate-150 space-y-4">
               <h3 className="text-xs font-black text-rose-700 uppercase tracking-wider flex items-center gap-1.5">
@@ -1507,6 +1723,46 @@ export default function PropertySetupWizard() {
       {!activeConfigureRoomId && !activeConfigureSeasonRoomId && !activeConfigureRateRoomId && (
         <div className="space-y-6">
           
+          {/* Status & Review Banners */}
+          {propertyStatus === 'Submitted For Review' && !isAdmin && (
+            <div className="p-4 bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold rounded-2xl flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-2.5">
+                <AlertCircle size={18} className="text-blue-600 shrink-0" />
+                <span>This property has been <strong>Submitted For Review</strong> to Super Admin. All editing is locked until review is complete.</span>
+              </div>
+              <span className="px-2.5 py-1 bg-blue-600 text-white text-[10px] font-black uppercase rounded-lg">View Only</span>
+            </div>
+          )}
+
+          {(propertyStatus === 'Rejected' || propertyStatus === 'Changes Requested') && (
+            <div className="p-4 bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold rounded-2xl space-y-1.5 shadow-sm">
+              <div className="flex items-center gap-2 font-black uppercase tracking-wider text-[11px] text-rose-700">
+                <AlertCircle size={16} className="text-rose-600 shrink-0" />
+                <span>Super Admin Review Feedback ({propertyStatus})</span>
+              </div>
+              <p className="text-xs text-rose-900 font-semibold pl-6">
+                {approvalComments?.length > 0 ? approvalComments[approvalComments.length - 1]?.comment : 'Please update the requested details and re-submit for approval.'}
+              </p>
+            </div>
+          )}
+
+          {(propertyStatus === 'Approved' || propertyStatus === 'Active') && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-2xl flex items-center gap-2 shadow-sm">
+              <Check size={16} className="text-emerald-600 shrink-0" />
+              <span>This property is currently <strong>Approved & Active</strong>. Any modifications saved will automatically be sent for Super Admin re-approval.</span>
+            </div>
+          )}
+
+          {isAdmin && (
+            <div className="p-3.5 bg-purple-50 border border-purple-200 text-purple-900 text-xs font-bold rounded-2xl flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={16} className="text-purple-600 shrink-0" />
+                <span>Super Admin Property Editor Mode (Editing as Administrator)</span>
+              </div>
+              <span className="px-2.5 py-1 bg-purple-600 text-white text-[10px] font-black uppercase rounded-lg">Super Admin</span>
+            </div>
+          )}
+
           {/* STEP 1: PROPERTY DETAILS */}
           {currentStep === 1 && (
             <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm space-y-6.5">
@@ -1516,14 +1772,45 @@ export default function PropertySetupWizard() {
                 <p className="text-[10px] text-slate-400">Provide the baseline information, category, and map parameters of your homestay property.</p>
               </div>
 
+              {/* Admin Owner Selector */}
+              {isAdmin && masterOwners.length > 0 && (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">
+                    Link / Assign to Homestay Owner
+                  </label>
+                  <select
+                    onChange={(e) => {
+                      const selected = masterOwners.find(o => o._id === e.target.value);
+                      if (selected) {
+                        setFormData(prev => ({
+                          ...prev,
+                          ownerName: selected.name,
+                          phone: selected.phone || selected.mobile || prev.phone,
+                          email: selected.email || prev.email
+                        }));
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-white border border-slate-250 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                  >
+                    <option value="">-- Choose Existing Owner or Type Below --</option>
+                    {masterOwners.map(o => (
+                      <option key={o._id} value={o._id}>
+                        {o.name} ({o.email || o.phone || 'Owner'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 <div className="space-y-1.5">
                   <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider">Property Name *</label>
                   <input
                     type="text"
+                    disabled={isReadOnly}
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-slate-205 rounded-xl text-xs font-bold"
+                    className="w-full px-3 py-2 bg-white border border-slate-205 rounded-xl text-xs font-bold disabled:bg-slate-50 disabled:text-slate-500"
                   />
                   {errors.name && <span className="text-[9px] font-bold text-rose-500 block">{errors.name}</span>}
                 </div>
@@ -1531,14 +1818,11 @@ export default function PropertySetupWizard() {
                 <div className="space-y-1.5">
                   <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider">Property Type *</label>
                   <select
-                    value={formData.type}
-                    onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-slate-205 rounded-xl text-xs font-bold"
+                    value="Homestay"
+                    disabled
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-205 rounded-xl text-xs font-bold text-slate-700 cursor-not-allowed"
                   >
                     <option value="Homestay">Homestay</option>
-                    <option value="Lodge">Lodge</option>
-                    <option value="Cottage">Cottage</option>
-                    <option value="Villa">Villa</option>
                   </select>
                 </div>
 
@@ -2339,25 +2623,33 @@ export default function PropertySetupWizard() {
       {/* 4. STICKY FOOTER NAVIGATION */}
       {!activeConfigureRoomId && !activeConfigureSeasonRoomId && !activeConfigureRateRoomId && (
         <div className="fixed bottom-0 left-64 right-0 bg-white border-t border-slate-200 px-6 py-4.5 z-40 flex justify-between items-center shadow-lg">
-          {currentStep > 1 ? (
-            <button
-              onClick={handleBack}
-              className="px-5 py-3 border border-slate-200 hover:bg-slate-50 text-slate-707 font-bold rounded-2xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer bg-white"
-            >
-              <ArrowLeft size={13} />
-              <span>Back</span>
-            </button>
-          ) : (
-            <div></div>
-          )}
-
           <div className="flex items-center gap-2">
             <button
-              onClick={handleSaveDraft}
-              className="px-5 py-3 border border-slate-205 hover:bg-slate-50 text-slate-707 font-bold rounded-2xl text-xs transition-colors cursor-pointer bg-white"
+              onClick={handleExit}
+              className="px-4 py-3 border border-slate-200 hover:bg-slate-50 text-slate-500 font-bold rounded-2xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer bg-white"
             >
-              Save Draft
+              <span>Exit</span>
             </button>
+            {currentStep > 1 && (
+              <button
+                onClick={handleBack}
+                className="px-5 py-3 border border-slate-200 hover:bg-slate-50 text-slate-707 font-bold rounded-2xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer bg-white"
+              >
+                <ArrowLeft size={13} />
+                <span>Back</span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {!isReadOnly && (
+              <button
+                onClick={handleSaveDraft}
+                className="px-5 py-3 border border-slate-205 hover:bg-slate-50 text-slate-707 font-bold rounded-2xl text-xs transition-colors cursor-pointer bg-white"
+              >
+                Save Draft
+              </button>
+            )}
 
             {currentStep < 8 ? (
               <button
@@ -2367,12 +2659,16 @@ export default function PropertySetupWizard() {
                 <span>Continue</span>
                 <ArrowRight size={13} />
               </button>
+            ) : isReadOnly ? (
+              <span className="px-5 py-3 bg-blue-50 text-blue-700 font-bold rounded-2xl text-xs flex items-center gap-1.5">
+                🔒 Under Review — Locked
+              </span>
             ) : (
               <button
                 onClick={handlePublishProperty}
                 className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl text-xs transition-colors cursor-pointer border-none shadow-sm uppercase tracking-wider"
               >
-                Publish Property
+                {isAdmin ? 'Save & Publish Property' : 'Publish Property'}
               </button>
             )}
           </div>

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { 
   ArrowLeft,
   FileText,
@@ -10,74 +11,129 @@ import {
   Filter,
   Eye,
   Trash2,
-  RefreshCw
+  RefreshCw,
+  XCircle
 } from 'lucide-react';
+import Swal from 'sweetalert2';
+
+const getApiUrl = (path) => {
+  const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${cleanPath}`;
+};
 
 export default function BookingRequests() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('all');
+  const [loading, setLoading] = useState(false);
+  const [requests, setRequests] = useState([]);
 
-  // Booking requests mock database matching screenshot exactly
-  const [requests, setRequests] = useState([
-    {
-      id: 'BR-2505-00024',
-      qtnId: 'QTN-2505-00123',
-      source: 'Admin / WoW Gateways',
-      sourceType: 'admin',
-      guestName: 'Amit Sharma',
-      phone: '+91 98765 43210',
-      email: 'amit@gmail.com',
-      checkIn: '20 May 2024',
-      checkOut: '22 May 2024',
-      roomDetails: 'Deluxe Room x 2 Rooms',
-      guestsCount: '2 Adults, 1 Child',
-      totalAmount: '₹ 6,720',
-      advance: '₹ 2,016',
-      requestedOnDate: '09 May 2024',
-      requestedOnTime: '10:30 AM',
-      status: 'Pending'
-    },
-    {
-      id: 'BR-2505-00023',
-      qtnId: 'QTN-2505-00122',
-      source: 'Guest',
-      sourceType: 'guest',
-      guestName: 'Priya Singh',
-      phone: '+91 87654 32109',
-      email: 'priya.singh@gmail.com',
-      checkIn: '18 May 2024',
-      checkOut: '20 May 2024',
-      roomDetails: 'Super Deluxe x 1 Room',
-      guestsCount: '2 Adults',
-      totalAmount: '₹ 4,200',
-      advance: '₹ 1,260',
-      requestedOnDate: '09 May 2024',
-      requestedOnTime: '09:15 AM',
-      status: 'Pending'
-    },
-    {
-      id: 'BR-2505-00022',
-      qtnId: 'QTN-2505-00121',
-      source: 'Travel Agency',
-      sourceType: 'agent',
-      guestName: 'Travel World Pvt. Ltd.',
-      phone: '+91 98123 45678',
-      email: 'bookings@travelworld.com',
-      checkIn: '25 May 2024',
-      checkOut: '28 May 2024',
-      roomDetails: 'Deluxe Room x 3 Rooms',
-      guestsCount: '6 Adults, 2 Children',
-      totalAmount: '₹ 12,600',
-      advance: '₹ 3,780',
-      requestedOnDate: '08 May 2024',
-      requestedOnTime: '06:45 PM',
-      status: 'Pending'
+  const getAuthToken = () => {
+    return localStorage.getItem('homestayOwnerToken') || localStorage.getItem('superAdminToken');
+  };
+
+  const fetchRequests = async () => {
+    try {
+      setLoading(true);
+      const token = getAuthToken();
+      const res = await axios.get(getApiUrl('/api/homestay-owner/bookings?status=all'), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data?.bookings) {
+        // Filter pending / hold requests
+        const pendingBookings = res.data.bookings.filter(b => b.bookingStatus === 'Pending' || b.bookingStatus === 'Hold');
+        
+        const mapped = pendingBookings.map(b => {
+          const checkInStr = b.checkInDate ? new Date(b.checkInDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+          const checkOutStr = b.checkOutDate ? new Date(b.checkOutDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+          const reqDate = b.createdAt ? new Date(b.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+          const reqTime = b.createdAt ? new Date(b.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+
+          const isAgent = b.bookingMode === 'Travel Agent' || (b.bookingType && b.bookingType.toLowerCase().includes('agent'));
+          const isDirect = b.source === 'Public Availability Booking Link' || b.source === 'Public Availability Link';
+
+          const totAdults = b.guests?.adults || b.bookedRooms?.reduce((acc, r) => acc + (Number(r.adults) || 2), 0) || 2;
+          const totChildren = (b.guests?.children !== undefined && b.guests.children > 0)
+            ? b.guests.children 
+            : (b.bookedRooms?.reduce((acc, r) => acc + (Number(r.child5_9) || 0) + (Number(r.child0_4) || 0), 0) || 0);
+          const guestsText = `${totAdults} Adults${totChildren > 0 ? `, ${totChildren} Child` : ''}`;
+
+          return {
+            id: b.bookingId,
+            dbId: b._id,
+            qtnId: b.advancePayment?.transactionId ? `UTR: ${b.advancePayment.transactionId}` : `ID: ${b.bookingId}`,
+            source: isDirect ? (isAgent ? 'Travel Agent (Link)' : 'Guest (Public Link)') : (b.source || 'Direct Website'),
+            sourceType: isAgent ? 'agent' : 'guest',
+            guestName: b.customer?.name || 'Guest',
+            phone: b.customer?.mobile || '',
+            email: b.customer?.email || '',
+            checkIn: checkInStr,
+            checkOut: checkOutStr,
+            roomDetails: b.bookedRooms?.length ? b.bookedRooms.map(r => `Room ${r.roomNumber} (${r.categoryName || 'Standard'})`).join(', ') : 'Standard Room',
+            guestsCount: guestsText,
+            totalAmount: `₹ ${Number(b.pricing?.finalAmount || b.amount || 0).toLocaleString()}`,
+            advance: `₹ ${Number(b.advancePayment?.amount || b.pricing?.paidAmount || 0).toLocaleString()}`,
+            requestedOnDate: reqDate,
+            requestedOnTime: reqTime,
+            status: b.bookingStatus,
+            paymentProof: b.advancePayment?.proofUrl || b.paymentScreenshot || ''
+          };
+        });
+
+        setRequests(mapped);
+      }
+    } catch (err) {
+      console.error('Failed to load booking requests:', err);
+    } finally {
+      setLoading(false);
     }
-  ]);
+  };
 
-  const handleDeleteRequest = (id) => {
-    if (confirm(`Are you sure you want to delete request ${id}?`)) {
-      setRequests(prev => prev.filter(r => r.id !== id));
+  useEffect(() => {
+    fetchRequests();
+  }, []);
+
+  const handleRejectRequest = async (id, dbId) => {
+    const result = await Swal.fire({
+      title: `Reject Request #${id}?`,
+      text: 'This will cancel the booking request and release the dates on your availability calendar immediately.',
+      input: 'text',
+      inputPlaceholder: 'Reason for rejection (e.g., Invalid payment screenshot)',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Reject Request',
+      cancelButtonText: 'Keep Request',
+      confirmButtonColor: '#e11d48',
+      cancelButtonColor: '#64748b'
+    });
+
+    if (!result.isConfirmed) return;
+
+    try {
+      const token = getAuthToken();
+      const res = await axios.patch(
+        getApiUrl(`/api/homestay-owner/bookings/${dbId || id}/reject-request`),
+        { reason: result.value || 'Payment proof rejected by owner' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data?.success) {
+        Swal.fire({
+          icon: 'info',
+          title: 'Request Rejected',
+          text: 'The booking was cancelled and the dates have been reopened on the calendar.',
+          confirmButtonColor: '#be123c'
+        });
+        fetchRequests();
+      }
+    } catch (err) {
+      console.error('Failed to reject request:', err);
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: err.response?.data?.message || 'Failed to reject booking request.'
+      });
     }
   };
 
@@ -300,11 +356,11 @@ export default function BookingRequests() {
                       </button>
                       
                       <button
-                        onClick={() => handleDeleteRequest(req.id)}
+                        onClick={() => handleRejectRequest(req.id, req.dbId)}
                         className="px-3.5 py-1.5 border border-rose-200 hover:bg-rose-50 text-rose-600 font-bold rounded-lg text-[9px] uppercase tracking-wider cursor-pointer bg-white flex items-center gap-1 shadow-sm"
                       >
-                        <Trash2 size={11} />
-                        <span>Delete</span>
+                        <XCircle size={11} />
+                        <span>Reject</span>
                       </button>
                     </div>
                   </td>

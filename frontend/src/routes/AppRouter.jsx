@@ -10,6 +10,11 @@ import OwnerResetPassword from '../modules/Homestay-Owner-Admin/pages/ResetPassw
 
 import { getSuperAdminRoutes } from './superAdminRoutes.jsx';
 import { getHomestayOwnerRoutes } from './homestayOwnerRoutes.jsx';
+import PublicBookingCalendar from '../modules/Public-Booking/pages/PublicBookingCalendar.jsx';
+import BookingQuotation from '../modules/Homestay-Owner-Admin/pages/BookingQuotation.jsx';
+import BookingConfirmationSlip from '../modules/Homestay-Owner-Admin/pages/BookingConfirmationSlip.jsx';
+import BookingTaxInvoice from '../modules/Homestay-Owner-Admin/pages/BookingTaxInvoice.jsx';
+
 
 function RouteTabSyncer() {
   const location = useLocation();
@@ -61,6 +66,14 @@ export default function AppRouter() {
     <>
       {isSuperAuthenticated && !location.pathname.startsWith('/homestay-owner') && <RouteTabSyncer />}
       <Routes>
+        {/* Public / Standalone Booking Routes (NO LOGIN, NO SIDEBAR) */}
+        <Route path="/book/:token" element={<PublicBookingCalendar />} />
+        <Route path="/book/property/:propertyId" element={<PublicBookingCalendar />} />
+        <Route path="/quotation/:requestId" element={<BookingQuotation />} />
+        <Route path="/confirmation-slip/:requestId" element={<BookingConfirmationSlip />} />
+        <Route path="/invoice/:requestId" element={<BookingTaxInvoice />} />
+
+
         {/* Backward Compatibility Redirection */}
         <Route 
           path="/homestay-owner-login" 

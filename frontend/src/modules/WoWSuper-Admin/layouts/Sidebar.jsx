@@ -5,20 +5,10 @@ import {
   LayoutDashboard, 
   Users, 
   ShieldCheck, 
-  CircleDollarSign, 
   UserCheck, 
   Home, 
-  CalendarClock, 
-  MapPin, 
-  CreditCard, 
-  Contact, 
-  CarFront, 
-  Route, 
-  Globe, 
-  TicketPercent, 
   Trash2,
   X,
-  CalendarDays,
   Folder,
   ChevronDown,
   ChevronUp
@@ -29,18 +19,8 @@ const menuItems = [
   { name: 'Dashboard', icon: LayoutDashboard, color: 'text-blue-550', path: '/dashboard' },
   { name: 'Staff Management', icon: Users, color: 'text-emerald-500', path: '/staff-management' },
   { name: 'Manage Roles', icon: ShieldCheck, color: 'text-indigo-500', path: '/roles' },
-  { name: 'Attendance Management', icon: CalendarDays, color: 'text-sky-500', path: '/attendance' },
-  { name: 'Salary Management', icon: CircleDollarSign, color: 'text-rose-500', path: '/salary' },
   { name: 'Manage Homestay Owners', icon: UserCheck, color: 'text-sky-500', path: '/homestay-owners' },
   { name: 'Manage Homestays', icon: Home, color: 'text-green-500', path: '/homestays' },
-  { name: 'Manage Bookings', icon: CalendarClock, color: 'text-blue-500', path: '/bookings' },
-  { name: 'Manage Sightseeing', icon: MapPin, color: 'text-purple-500', path: '/sightseeing' },
-  { name: 'B2B Hotel / Homestay Payment', icon: CreditCard, color: 'text-amber-500', path: '/payments' },
-  { name: 'Manage Users', icon: Contact, color: 'text-orange-500', path: '/users' },
-  { name: 'Manage Riders', icon: CarFront, color: 'text-teal-500', path: '/riders' },
-  { name: 'Manage Rides', icon: Route, color: 'text-sky-600', path: '/rides' },
-  { name: 'Homestay / Hotel Web Apps', icon: Globe, color: 'text-violet-500', path: '/web-apps' },
-  { name: 'Manage Coupons', icon: TicketPercent, color: 'text-pink-500', path: '/coupons' },
   { name: 'Recycle Bin', icon: Trash2, color: 'text-slate-500', path: '/recycle-bin' },
 ];
 
@@ -107,8 +87,8 @@ export default function Sidebar() {
                 <span className="truncate">{item.name}</span>
               </button>
 
-              {/* Insert Global Settings expandable menu right after Manage Coupons (index 14) */}
-              {index === 14 && (
+              {/* Insert Global Settings expandable menu right after Manage Homestays */}
+              {item.name === 'Manage Homestays' && (
                 <div className="space-y-1 my-1">
                   <button
                     type="button"

@@ -9,7 +9,7 @@ const BookingSchema = new mongoose.Schema({
   },
   bookingStatus: { 
     type: String, 
-    enum: ['Confirmed', 'Pending', 'Upcoming', 'Checked In', 'Checked Out', 'Completed', 'Cancelled', 'No Show'], 
+    enum: ['Confirmed', 'Pending', 'Upcoming', 'Checked In', 'Checked Out', 'Completed', 'Cancelled', 'No Show', 'Hold'], 
     default: 'Pending' 
   },
   paymentStatus: { 
@@ -21,9 +21,25 @@ const BookingSchema = new mongoose.Schema({
   isRepeatCustomer: { type: Boolean, default: false },
   checkInDate: { type: Date, required: true },
   checkOutDate: { type: Date, required: true },
+  propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property' },
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'HomestayOwner' },
+  bookedRooms: [{
+    roomCategoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'PropertyRooms' },
+    roomCategoryName: { type: String, default: '' },
+    roomNumber: { type: String, required: true },
+    adults: { type: Number, default: 1 },
+    child5_9: { type: Number, default: 0 },
+    child0_4: { type: Number, default: 0 },
+    mealPlan: { type: String, default: 'EP' },
+    roomPrice: { type: Number, default: 0 }
+  }],
+  bookingMode: { type: String, enum: ['Guest', 'Travel Agent'], default: 'Guest' },
+  holdExpiresAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
   bookingDate: { type: Date, default: Date.now },
   bookingSource: { type: String, default: 'Direct Website' },
+  specialRequests: { type: String, default: '' },
+  notes: { type: String, default: '' },
 
   customer: {
     customerId: { type: String, default: '' },
@@ -79,6 +95,8 @@ const BookingSchema = new mongoose.Schema({
     discount: { type: Number, default: 0 },
     tax: { type: Number, default: 0 },
     convenienceFee: { type: Number, default: 0 },
+    addOns: { type: Number, default: 0 },
+    addOnsRemark: { type: String, default: '' },
     paidAmount: { type: Number, default: 0 },
     pendingAmount: { type: Number, default: 0 },
     refundAmount: { type: Number, default: 0 },
@@ -89,8 +107,30 @@ const BookingSchema = new mongoose.Schema({
     method: { type: String, default: 'UPI' },
     transactionId: { type: String, default: '' },
     paymentDate: { type: Date, default: null },
-    paymentStatus: { type: String, default: 'Pending' }
+    paymentStatus: { type: String, default: 'Pending' },
+    proofUrl: { type: String, default: '' }
   },
+
+  advancePayment: {
+    amount: { type: Number, default: 0 },
+    percentage: { type: Number, default: 0 },
+    advanceType: { type: String, default: 'percent' },
+    status: { type: String, default: 'Pending' },
+    transactionId: { type: String, default: '' },
+    proofUrl: { type: String, default: '' },
+    submittedAt: { type: Date }
+  },
+
+  paymentScreenshot: { type: String, default: '' },
+
+  paymentHistory: [{
+    amount: { type: Number, required: true },
+    method: { type: String, default: 'UPI' },
+    transactionId: { type: String, default: '' },
+    remark: { type: String, default: '' },
+    date: { type: Date, default: Date.now },
+    recordedBy: { type: String, default: 'Owner' }
+  }],
 
   createdBy: { type: String, default: 'Super Admin' },
   updatedBy: { type: String, default: 'Super Admin' }
@@ -555,6 +595,10 @@ const HomestayOwnerSchema = new mongoose.Schema({
     pinCode: { type: String, default: '' }
   },
   // Bank Details
+  accountHolderName: {
+    type: String,
+    default: ''
+  },
   bankName: {
     type: String,
     default: ''
@@ -567,9 +611,25 @@ const HomestayOwnerSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  branch: {
+    type: String,
+    default: ''
+  },
   upiId: {
     type: String,
     default: ''
+  },
+  upiQrCode: {
+    type: String,
+    default: ''
+  },
+  advancePercent: {
+    type: Number,
+    default: 30
+  },
+  advanceType: {
+    type: String,
+    default: 'percent'
   },
   // Verification Badges
   status: {
@@ -1084,7 +1144,19 @@ const PropertySchema = new mongoose.Schema({
   deleted: { type: Boolean, default: false },
   deletedAt: { type: Date, default: null },
   deletedBy: { type: String, default: null },
-  deletedReason: { type: String, default: '' }
+  deletedReason: { type: String, default: '' },
+  paymentSettings: {
+    accountHolderName: { type: String, default: '' },
+    bankName: { type: String, default: '' },
+    accountNumber: { type: String, default: '' },
+    ifscCode: { type: String, default: '' },
+    branch: { type: String, default: '' },
+    upiId: { type: String, default: '' },
+    upiQrCode: { type: String, default: '' },
+    advancePercent: { type: Number, default: 30 },
+    advanceType: { type: String, default: 'percent' },
+    advanceAmount: { type: Number, default: 0 }
+  }
 }, { timestamps: true });
 
 // Ensure unique property name per owner
@@ -1184,6 +1256,26 @@ export const PropertyPricing = mongoose.model('PropertyPricing', PropertyPricing
 export const PropertyApproval = mongoose.model('PropertyApproval', PropertyApprovalSchema, 'propertyApproval');
 export const PropertyAuditLog = mongoose.model('PropertyAuditLog', PropertyAuditLogSchema, 'propertyAuditLogs');
 
+const PropertyBlockedDateSchema = new mongoose.Schema({
+  propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property', required: true },
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'HomestayOwner', required: true },
+  roomCategoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'PropertyRooms', required: true },
+  roomNumber: { type: String, required: true },
+  startDate: { type: Date, required: true },
+  endDate: { type: Date, required: true },
+  reason: { 
+    type: String, 
+    enum: ['Maintenance', 'Owner Use', 'Repair', 'Renovation', 'Temporary Closure', 'Other'], 
+    default: 'Maintenance' 
+  },
+  blockedBy: { type: String, enum: ['Owner', 'Admin'], default: 'Owner' },
+  notes: { type: String, default: '' }
+}, { timestamps: true });
+
+PropertyBlockedDateSchema.index({ propertyId: 1, roomNumber: 1, startDate: 1, endDate: 1 });
+
+export const PropertyBlockedDate = mongoose.model('PropertyBlockedDate', PropertyBlockedDateSchema, 'propertyBlockedDates');
+
 const MediaSchema = new mongoose.Schema({
   data: { type: String, required: true }, // base64 string
   mimeType: { type: String, required: true }
@@ -1191,7 +1283,15 @@ const MediaSchema = new mongoose.Schema({
 
 export const Media = mongoose.model('Media', MediaSchema, 'media');
 
+const PublicShareLinkSchema = new mongoose.Schema({
+  token: { type: String, required: true, unique: true, index: true },
+  propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property', required: true },
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'HomestayOwner' },
+  linkType: { type: String, enum: ['guest', 'agent'], required: true },
+  isUsed: { type: Boolean, default: false },
+  usedByBookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Booking' },
+  usedAt: { type: Date },
+  createdAt: { type: Date, default: Date.now }
+});
 
-
-
-
+export const PublicShareLink = mongoose.model('PublicShareLink', PublicShareLinkSchema, 'publicShareLinks');

@@ -1,1 +1,4 @@
 .vercel
+.env*
+test_verify_issues.mjs
+

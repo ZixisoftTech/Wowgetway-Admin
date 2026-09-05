@@ -336,30 +336,57 @@ export default function InventoryList() {
                       </div>
                     </td>
                     <td className="py-4 px-4 text-center">
-                      <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider inline-block ${
-                        p.status === 'Active' || p.status === 'Approved' ? 'bg-emerald-50 text-emerald-600' :
-                        p.status === 'Submitted For Review' ? 'bg-blue-50 text-blue-600' :
-                        p.status === 'Changes Requested' ? 'bg-amber-50 text-amber-600' :
-                        p.status === 'Draft' ? 'bg-slate-100 text-slate-500' : 'bg-rose-50 text-rose-500'
-                      }`}>
-                        {p.status}
-                      </span>
+                      <div className="flex flex-col items-center gap-1">
+                        <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider inline-block ${
+                          p.status === 'Active' || p.status === 'Approved' ? 'bg-emerald-50 text-emerald-600' :
+                          p.status === 'Submitted For Review' ? 'bg-blue-50 text-blue-600' :
+                          p.status === 'Changes Requested' ? 'bg-amber-50 text-amber-600' :
+                          p.status === 'Draft' ? 'bg-slate-100 text-slate-500' : 'bg-rose-50 text-rose-500'
+                        }`}>
+                          {p.status}
+                        </span>
+                        {p.rejectionReason && (p.status === 'Rejected' || p.status === 'Changes Requested') && (
+                          <span className="text-[8px] font-bold text-rose-600 max-w-[130px] truncate block" title={p.rejectionReason}>
+                            ⚠️ {p.rejectionReason}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-4 px-4 text-center">
                       <div className="flex items-center justify-center gap-1.5">
-                        {p.status === 'Submitted For Review' ? (
-                          <button
-                            onClick={() => navigate(`/homestay-owner/inventory/setup-property?propertyId=${p._id}&preview=true`)}
-                            title="Preview Listing"
-                            className="w-7.5 h-7.5 border border-slate-200 hover:bg-slate-50 text-slate-500 rounded-lg flex items-center justify-center transition-colors bg-white cursor-pointer"
-                          >
-                            <Eye size={13} className="stroke-[2.5]" />
-                          </button>
-                        ) : (
+                        <button
+                          onClick={() => navigate(`/homestay-owner/inventory/property/${p._id}`)}
+                          title="View Homestay Details"
+                          className="w-7.5 h-7.5 border border-slate-200 hover:border-rose-300 hover:bg-rose-50 text-slate-600 hover:text-rose-600 rounded-lg flex items-center justify-center transition-colors bg-white cursor-pointer"
+                        >
+                          <Eye size={13} className="stroke-[2.5]" />
+                        </button>
+                        {p.status !== 'Submitted For Review' && (
                           <>
                             <button
-                              onClick={() => navigate(`/homestay-owner/inventory/setup-property?propertyId=${p._id}`)}
-                              title={p.status === 'Draft' ? 'Continue Draft' : 'Edit Property'}
+                              onClick={() => {
+                                if (p.status === 'Approved' || p.status === 'Active') {
+                                  Swal.fire({
+                                    title: 'Edit Approved Property?',
+                                    text: 'Changes will require re-approval from Super Admin.',
+                                    icon: 'info',
+                                    showCancelButton: true,
+                                    confirmButtonColor: '#be123c',
+                                    confirmButtonText: 'Proceed to Edit'
+                                  }).then((res) => {
+                                    if (res.isConfirmed) {
+                                      navigate(`/homestay-owner/inventory/setup-property?propertyId=${p._id}`);
+                                    }
+                                  });
+                                } else {
+                                  navigate(`/homestay-owner/inventory/setup-property?propertyId=${p._id}`);
+                                }
+                              }}
+                              title={
+                                p.status === 'Draft' ? 'Continue Draft' :
+                                p.status === 'Rejected' || p.status === 'Changes Requested' ? 'Edit & Resubmit' :
+                                'Edit Property'
+                              }
                               className="w-7.5 h-7.5 border border-slate-200 hover:bg-slate-50 text-slate-500 rounded-lg flex items-center justify-center transition-colors bg-white cursor-pointer"
                             >
                               <Edit size={13} className="stroke-[2.5]" />
@@ -453,19 +480,44 @@ export default function InventoryList() {
                     </button>
                   )}
                   <div className="flex gap-1.5 ml-auto">
+                    <button
+                      onClick={() => navigate(`/homestay-owner/inventory/property/${p._id}`)}
+                      title="View Homestay Details"
+                      className="p-2 border border-slate-200 hover:border-rose-300 hover:bg-rose-50 text-slate-600 hover:text-rose-600 rounded-xl transition-colors cursor-pointer bg-white"
+                    >
+                      <Eye size={13} className="stroke-[2.5]" />
+                    </button>
                     {p.status === 'Submitted For Review' ? (
                       <button
                         onClick={() => navigate(`/homestay-owner/inventory/setup-property?propertyId=${p._id}&preview=true`)}
-                        className="px-3.5 py-2 border border-slate-200 hover:bg-slate-50 text-slate-500 font-black rounded-xl text-[9px] uppercase tracking-wider transition-colors cursor-pointer bg-white"
+                        title="Under Review — Editing Locked"
+                        className="px-3.5 py-2 border border-blue-200 bg-blue-50/50 hover:bg-blue-100/50 text-blue-600 font-black rounded-xl text-[9px] uppercase tracking-wider transition-colors cursor-pointer"
                       >
                         Preview
                       </button>
                     ) : (
                       <button
-                        onClick={() => navigate(`/homestay-owner/inventory/setup-property?propertyId=${p._id}`)}
+                        onClick={() => {
+                          if (p.status === 'Approved' || p.status === 'Active') {
+                            Swal.fire({
+                              title: 'Edit Approved Property?',
+                              text: 'Changes will require re-approval from Super Admin.',
+                              icon: 'info',
+                              showCancelButton: true,
+                              confirmButtonColor: '#be123c',
+                              confirmButtonText: 'Proceed to Edit'
+                            }).then((res) => {
+                              if (res.isConfirmed) {
+                                navigate(`/homestay-owner/inventory/setup-property?propertyId=${p._id}`);
+                              }
+                            });
+                          } else {
+                            navigate(`/homestay-owner/inventory/setup-property?propertyId=${p._id}`);
+                          }
+                        }}
                         className="px-3.5 py-2 border border-slate-200 hover:bg-slate-50 text-slate-500 font-black rounded-xl text-[9px] uppercase tracking-wider transition-colors cursor-pointer bg-white"
                       >
-                        {p.status === 'Draft' ? 'Continue' : 'Edit'}
+                        {p.status === 'Draft' ? 'Continue' : p.status === 'Rejected' || p.status === 'Changes Requested' ? 'Edit & Resubmit' : 'Edit'}
                       </button>
                     )}
                     <button

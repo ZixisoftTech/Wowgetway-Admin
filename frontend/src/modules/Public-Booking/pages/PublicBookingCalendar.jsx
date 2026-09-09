@@ -35,7 +35,17 @@ import {
   Copy,
   QrCode,
   ArrowRight,
-  X
+  X,
+  Camera,
+  Search,
+  Wifi,
+  Car,
+  Utensils,
+  Mountain,
+  Flame,
+  Waves,
+  Coffee,
+  Tag
 } from 'lucide-react';
 import { generatePdfFromElement } from '../../../utils/pdfExporter';
 
@@ -124,12 +134,21 @@ export default function PublicBookingCalendar() {
     finalAmount: 0
   });
   const [calculatingPrice, setCalculatingPrice] = useState(false);
+  // Coupon States
+  const [couponCodeInput, setCouponCodeInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [availableCoupons, setAvailableCoupons] = useState([]);
+  const [validatingCoupon, setValidatingCoupon] = useState(false);
+  const [couponError, setCouponError] = useState('');
+  const [couponSuccess, setCouponSuccess] = useState('');
 
   // Booking Submission state
   const [submittingBooking, setSubmittingBooking] = useState(false);
   const [submittedBooking, setSubmittedBooking] = useState(null);
   const [showSlipModal, setShowSlipModal] = useState(false);
   const slipPrintRef = useRef(null);
+  const calendarSectionRef = useRef(null);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
 
   // 1. Fetch Link Verification and Owner Payment Settings on mount
   useEffect(() => {
@@ -273,12 +292,34 @@ export default function PublicBookingCalendar() {
     fetchRooms();
   }, [propertyId, checkInDate, checkOutDate, linkType]);
 
-  // 4. Calculate Price whenever selected rooms or dates change
+  // Fetch available coupons for this property and audience tier
+  useEffect(() => {
+    const fetchAvailableCoupons = async () => {
+      if (!propertyId) return;
+      try {
+        const res = await axios.get(getApiUrl('/api/public/coupons/available'), {
+          params: {
+            propertyId,
+            bookingType: linkType
+          }
+        });
+        if (res.data?.success) {
+          setAvailableCoupons(res.data.data || []);
+        }
+      } catch (err) {
+        console.error('Error fetching public coupons:', err);
+      }
+    };
+    fetchAvailableCoupons();
+  }, [propertyId, linkType]);
+
+  // 4. Calculate Price whenever selected rooms, dates, or coupon changes
   useEffect(() => {
     if (!propertyId || !checkInDate || !checkOutDate || selectedRooms.length === 0) {
       setCalculatedPricing({
         nights: 1,
         roomCost: 0,
+        discount: 0,
         tax: 0,
         finalAmount: 0
       });
@@ -297,10 +338,18 @@ export default function PublicBookingCalendar() {
           checkIn: checkInDate,
           checkOut: checkOutDate,
           rooms: selectedRooms,
-          bookingType: linkType
+          bookingType: linkType,
+          couponCode: appliedCoupon?.code || '',
+          guestMobile,
+          guestEmail
         });
         if (res.data) {
           setCalculatedPricing(res.data);
+          if (appliedCoupon && !res.data.appliedCoupon) {
+            setAppliedCoupon(null);
+            setCouponError('Coupon conditions no longer met for current booking.');
+            setCouponSuccess('');
+          }
         }
       } catch (err) {
         console.error('Price calculation error:', err);
@@ -310,7 +359,52 @@ export default function PublicBookingCalendar() {
     };
 
     calcPrice();
-  }, [propertyId, checkInDate, checkOutDate, selectedRooms, linkType]);
+  }, [propertyId, checkInDate, checkOutDate, selectedRooms, linkType, appliedCoupon]);
+
+  // Coupon Action Handlers
+  const handleApplyCoupon = async (codeToApply) => {
+    const code = (codeToApply || couponCodeInput).trim().toUpperCase();
+    if (!code) {
+      setCouponError('Please enter a coupon code.');
+      setCouponSuccess('');
+      return;
+    }
+
+    try {
+      setValidatingCoupon(true);
+      setCouponError('');
+      setCouponSuccess('');
+
+      const res = await axios.post(getApiUrl('/api/public/coupons/validate'), {
+        code,
+        propertyId,
+        subtotal: calculatedPricing.roomCost || 0,
+        bookingType: linkType,
+        guestMobile,
+        guestEmail
+      });
+
+      if (res.data?.valid) {
+        setAppliedCoupon(res.data.coupon);
+        setCouponCodeInput(code);
+        setCouponSuccess(`Coupon "${code}" applied! Savings: ₹${Number(res.data.discountAmount).toLocaleString()}`);
+      } else {
+        setCouponError(res.data?.message || 'Invalid coupon code.');
+      }
+    } catch (err) {
+      console.error('Coupon validation error:', err);
+      setCouponError(err.response?.data?.message || 'Invalid or expired coupon code.');
+    } finally {
+      setValidatingCoupon(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponCodeInput('');
+    setCouponError('');
+    setCouponSuccess('');
+  };
 
   // Calculate Required Advance Payment from Owner Settings
   const finalTotal = calculatedPricing.finalAmount || 0;
@@ -620,7 +714,8 @@ export default function PublicBookingCalendar() {
         bookingType: linkType,
         advanceAmount,
         paymentProof: paymentProofPreview,
-        transactionId: transactionId.trim()
+        transactionId: transactionId.trim(),
+        couponCode: appliedCoupon?.code || ''
       };
 
       const res = await axios.post(getApiUrl('/api/public/create-booking'), payload);
@@ -633,11 +728,13 @@ export default function PublicBookingCalendar() {
           checkOutDate,
           nights: calculatedPricing.nights,
           bookedRooms: selectedRooms,
+          couponCode: appliedCoupon?.code || '',
           pricing: {
             finalAmount: calculatedPricing.finalAmount,
             paidAmount: advanceAmount,
             pendingAmount: remainingBalance,
             basePrice: calculatedPricing.roomCost,
+            discount: calculatedPricing.discount || 0,
             tax: calculatedPricing.tax
           },
           advancePayment: {
@@ -746,6 +843,60 @@ export default function PublicBookingCalendar() {
 
   // Calculate nights
   const calcNights = Math.max(1, Math.round((new Date(checkOutDate) - new Date(checkInDate)) / (1000 * 60 * 60 * 24))) || 1;
+
+  const formatDateDDMMYYYY = (isoDateStr) => {
+    if (!isoDateStr) return '';
+    const parts = isoDateStr.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return isoDateStr;
+  };
+
+  const fallbackPropertyImages = [
+    'https://images.unsplash.com/photo-1542718610-a1d656d1884c?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1587061949409-02df41d5e562?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1566665797739-1674de7a421a?auto=format&fit=crop&w=800&q=80'
+  ];
+
+  const getImageUrl = (path) => {
+    if (!path) return fallbackPropertyImages[0];
+    if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return path;
+    return getApiUrl(path);
+  };
+
+  const rawImages = property?.images && property.images.length > 0 ? property.images : [];
+  const displayImages = rawImages.length >= 6 
+    ? rawImages 
+    : [...rawImages, ...fallbackPropertyImages.slice(rawImages.length)];
+
+  const defaultAmenities = [
+    { name: 'WiFi', icon: Wifi, color: 'text-sky-500' },
+    { name: 'Parking', icon: Car, color: 'text-rose-500' },
+    { name: 'Home Food', icon: Utensils, color: 'text-amber-600' },
+    { name: 'Mountain View', icon: Mountain, color: 'text-emerald-600' },
+    { name: 'Bonfire', icon: Flame, color: 'text-orange-500' }
+  ];
+
+  const displayAmenities = (property?.amenities && property.amenities.length > 0)
+    ? property.amenities.map(a => {
+        const name = typeof a === 'string' ? a : (a.name || 'Amenity');
+        const n = name.toLowerCase();
+        if (n.includes('wifi') || n.includes('internet')) return { name, icon: Wifi, color: 'text-sky-500' };
+        if (n.includes('park')) return { name, icon: Car, color: 'text-rose-500' };
+        if (n.includes('food') || n.includes('restaurant') || n.includes('dining') || n.includes('kitchen')) return { name, icon: Utensils, color: 'text-amber-600' };
+        if (n.includes('mountain') || n.includes('view') || n.includes('garden') || n.includes('nature')) return { name, icon: Mountain, color: 'text-emerald-600' };
+        if (n.includes('bonfire') || n.includes('fire') || n.includes('heater')) return { name, icon: Flame, color: 'text-orange-500' };
+        if (n.includes('pool') || n.includes('swim')) return { name, icon: Waves, color: 'text-cyan-500' };
+        if (n.includes('breakfast') || n.includes('coffee') || n.includes('tea')) return { name, icon: Coffee, color: 'text-amber-700' };
+        return { name, icon: CheckCircle2, color: 'text-emerald-500' };
+      })
+    : defaultAmenities;
 
   return (
     <div className="min-h-screen bg-slate-100/60 font-sans text-slate-900 pb-20 select-none">
@@ -886,74 +1037,177 @@ export default function PublicBookingCalendar() {
         /* MAIN BOOKING CONTENT */
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
           
-          {/* PROPERTY HERO CARD */}
-          <div className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                  {property?.name || 'Homestay Property'}
-                </h1>
-                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                  linkType === 'agent' 
-                    ? 'bg-sky-100 text-sky-800 border-sky-300' 
-                    : 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                }`}>
-                  {linkType === 'agent' ? 'B2B Wholesale Rates' : 'Standard Direct Rates'}
-                </span>
+          {/* PROPERTY HERO & HIGHLIGHTS CARD */}
+          <div className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-7 shadow-sm space-y-5">
+            {/* Top Sub-container: Featured Photo, Property Info, and Stay Dates Selector */}
+            <div className="flex flex-col lg:flex-row gap-6 items-start justify-between">
+              
+              {/* Left Sub-container: Featured Photo + Property Details */}
+              <div className="flex flex-col sm:flex-row gap-5 flex-1 items-start">
+                {/* Featured Photo with [📷 View Photos (N)] badge */}
+                <div 
+                  onClick={() => setLightboxIndex(0)}
+                  className="relative w-full sm:w-64 md:w-72 h-48 sm:h-52 rounded-2xl overflow-hidden border border-slate-150 shrink-0 bg-slate-100 cursor-pointer group shadow-xs"
+                >
+                  <img 
+                    src={getImageUrl(displayImages[0])} 
+                    alt={property?.name || 'Property'} 
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+                  />
+                  <div className="absolute bottom-3 left-3 bg-black/75 backdrop-blur-xs text-white text-[11px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm group-hover:bg-black/90 transition-colors">
+                    <Camera size={13} />
+                    <span>View Photos ({displayImages.length})</span>
+                  </div>
+                </div>
+
+                {/* Property Details */}
+                <div className="flex-1 space-y-2.5">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                      {property?.name || 'Homestay Property'}
+                    </h1>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                      linkType === 'agent' 
+                        ? 'bg-sky-50 text-sky-700 border-sky-200' 
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    }`}>
+                      {linkType === 'agent' ? 'B2B WHOLESALE RATES' : 'STANDARD DIRECT RATES'}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-600 font-bold flex items-center gap-1.5">
+                    <MapPin size={14} className="text-rose-600 shrink-0" />
+                    <span>{[property?.address, property?.city, property?.state].filter(Boolean).join(', ')}</span>
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-slate-500">
+                    <span>Check-in: <strong className="text-slate-800 font-black">{property?.checkInTime || '12:00 PM'}</strong></span>
+                    <span>Check-out: <strong className="text-slate-800 font-black">{property?.checkOutTime || '11:00 AM'}</strong></span>
+                    <span>Advance Required: <strong className="text-rose-600 font-black">{paymentSettings.advanceType === 'fixed' ? `₹${paymentSettings.advanceAmount} Flat` : `${paymentSettings.advancePercent || 30}% of Total`}</strong></span>
+                  </div>
+
+                  {/* Description */}
+                  <p className="text-xs text-slate-600 font-normal leading-relaxed line-clamp-3">
+                    {property?.description || `${property?.name || 'This homestay'} is a cozy and peaceful property nestled in the lap of nature, offering stunning mountain views, comfortable rooms and warm hospitality. Perfect for families, couples and solo travellers looking for a relaxing getaway.`}
+                  </p>
+
+                  {/* Property Amenities */}
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-xs font-black text-slate-800 block">Property Amenities</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {displayAmenities.map((amenity, aIdx) => {
+                        const IconComp = amenity.icon;
+                        return (
+                          <div key={aIdx} className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 flex items-center gap-1.5 shadow-2xs">
+                            <IconComp size={14} className={amenity.color || 'text-slate-600'} />
+                            <span>{amenity.name}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5">
-                <MapPin size={13} className="text-rose-600 shrink-0" />
-                <span>{property?.address ? `${property.address}, ` : ''}{property?.city}, {property?.state}</span>
-              </p>
-              <div className="flex flex-wrap gap-4 text-[11px] font-bold text-slate-500 pt-1">
-                <span>Check-in: <strong className="text-slate-800">{property?.checkInTime || '12:00 PM'}</strong></span>
-                <span>Check-out: <strong className="text-slate-800">{property?.checkOutTime || '11:00 AM'}</strong></span>
-                <span>Advance Required: <strong className="text-rose-700 font-black">{paymentSettings.advanceType === 'fixed' ? `₹${paymentSettings.advanceAmount} Flat` : `${paymentSettings.advancePercent || 30}% of Total`}</strong></span>
+
+              {/* Right Sub-container: SELECT STAY DATES Card */}
+              <div className="w-full lg:w-80 bg-slate-50 border border-slate-200/90 rounded-2xl p-4 shrink-0 space-y-3.5 shadow-xs">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                  SELECT STAY DATES
+                </span>
+                <div className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-5 space-y-1">
+                    <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">CHECK IN</label>
+                    <div className="relative bg-white border border-slate-200 rounded-xl px-2.5 py-2 flex items-center justify-between shadow-2xs hover:border-slate-300 transition-colors">
+                      <span className="text-[11px] font-bold text-slate-800 font-mono">
+                        {formatDateDDMMYYYY(checkInDate)}
+                      </span>
+                      <CalendarIcon size={13} className="text-slate-400 shrink-0 ml-1 pointer-events-none" />
+                      <input
+                        type="date"
+                        min={todayStr}
+                        value={checkInDate}
+                        onChange={(e) => {
+                          setCheckInDate(e.target.value);
+                          setSelectionStart(e.target.value);
+                        }}
+                        className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="col-span-5 space-y-1">
+                    <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">CHECK OUT</label>
+                    <div className="relative bg-white border border-slate-200 rounded-xl px-2.5 py-2 flex items-center justify-between shadow-2xs hover:border-slate-300 transition-colors">
+                      <span className="text-[11px] font-bold text-slate-800 font-mono">
+                        {formatDateDDMMYYYY(checkOutDate)}
+                      </span>
+                      <CalendarIcon size={13} className="text-slate-400 shrink-0 ml-1 pointer-events-none" />
+                      <input
+                        type="date"
+                        min={checkInDate || todayStr}
+                        value={checkOutDate}
+                        onChange={(e) => {
+                          setCheckOutDate(e.target.value);
+                          setSelectionEnd(e.target.value);
+                        }}
+                        className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="col-span-2 space-y-1 text-center">
+                    <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">DURATION</label>
+                    <div className="bg-rose-50 border border-rose-150 text-rose-700 py-2 rounded-xl text-xs font-black">
+                      {calcNights}N
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    calendarSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="w-full py-2.5 bg-[#D80032] hover:bg-[#b00028] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer border-none shadow-sm shadow-rose-200 tracking-wide"
+                >
+                  <Search size={14} className="stroke-[2.5]" />
+                  <span>Check Availability</span>
+                </button>
               </div>
             </div>
 
-            {/* Quick Stay Date Picker */}
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shrink-0 space-y-3">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Select Stay Dates</span>
-              <div className="flex items-center gap-3">
-                <div>
-                  <label className="text-[9px] font-bold text-slate-400 block uppercase">Check In</label>
-                  <input
-                    type="date"
-                    min={todayStr}
-                    value={checkInDate}
-                    onChange={(e) => {
-                      setCheckInDate(e.target.value);
-                      setSelectionStart(e.target.value);
-                    }}
-                    className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-rose-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-[9px] font-bold text-slate-400 block uppercase">Check Out</label>
-                  <input
-                    type="date"
-                    min={checkInDate || todayStr}
-                    value={checkOutDate}
-                    onChange={(e) => {
-                      setCheckOutDate(e.target.value);
-                      setSelectionEnd(e.target.value);
-                    }}
-                    className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-rose-500"
-                  />
-                </div>
-                <div className="text-center pl-1">
-                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Duration</span>
-                  <span className="inline-block px-2 py-1 rounded bg-rose-50 text-rose-700 text-xs font-black">
-                    {calcNights}N
-                  </span>
-                </div>
-              </div>
+            {/* Bottom Row: Thumbnail Gallery Strip (6 items) */}
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2.5 pt-1">
+              {displayImages.slice(0, 6).map((img, idx) => {
+                const isLast = idx === 5 && displayImages.length > 6;
+                const extraCount = displayImages.length - 6;
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => setLightboxIndex(idx)}
+                    className="relative h-20 sm:h-24 rounded-xl overflow-hidden border border-slate-200/80 bg-slate-100 cursor-pointer group shadow-2xs"
+                  >
+                    <img
+                      src={getImageUrl(img)}
+                      alt={`Thumbnail ${idx + 1}`}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                    {isLast ? (
+                      <div className="absolute inset-0 bg-black/65 backdrop-blur-2xs flex flex-col items-center justify-center text-white text-center p-1 group-hover:bg-black/75 transition-colors">
+                        <span className="text-sm font-black leading-none">+{extraCount + 1}</span>
+                        <span className="text-[9px] font-bold uppercase tracking-wider mt-0.5">More Photos</span>
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
           {/* INTERACTIVE CALENDAR AVAILABILITY SECTION (Requirement 4) */}
-          <div className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+          <div ref={calendarSectionRef} className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
@@ -1554,12 +1808,145 @@ export default function PublicBookingCalendar() {
                   </div>
                 </div>
 
+                {/* Coupon / Promo Code Section */}
+                <div className="pt-3 border-t border-slate-100 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Tag size={13} className="text-rose-600" />
+                      <span>Promo / Coupon Code</span>
+                    </span>
+                    {appliedCoupon && (
+                      <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                        Code Applied
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Input Form */}
+                  {appliedCoupon ? (
+                    <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 truncate">
+                        <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+                        <div className="truncate">
+                          <span className="font-mono font-black text-xs text-emerald-950 uppercase block">
+                            {appliedCoupon.code}
+                          </span>
+                          <span className="text-[10px] text-emerald-700 font-bold block">
+                            {appliedCoupon.discountType === 'percentage'
+                              ? `${appliedCoupon.discountValue}% OFF`
+                              : `₹${Number(appliedCoupon.discountValue).toLocaleString()} Flat OFF`}
+                            {calculatedPricing.discount > 0 && ` (Saved ₹${Number(calculatedPricing.discount).toLocaleString()})`}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRemoveCoupon}
+                        className="px-2 py-1 bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-rose-200 rounded-xl text-[10px] font-bold cursor-pointer transition-all shrink-0"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          placeholder="ENTER CODE"
+                          value={couponCodeInput}
+                          onChange={(e) => {
+                            setCouponCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ''));
+                            if (couponError) setCouponError('');
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleApplyCoupon();
+                            }
+                          }}
+                          className="flex-1 min-w-0 font-mono uppercase bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-rose-500 focus:bg-white"
+                        />
+                        <button
+                          type="button"
+                          disabled={validatingCoupon || !couponCodeInput.trim() || selectedRooms.length === 0}
+                          onClick={() => handleApplyCoupon()}
+                          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 text-white font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer transition-all shrink-0"
+                        >
+                          {validatingCoupon ? <RefreshCw size={12} className="animate-spin" /> : 'Apply'}
+                        </button>
+                      </div>
+
+                      {couponError && (
+                        <div className="text-[11px] font-bold text-rose-600 flex items-center gap-1 animate-in fade-in">
+                          <AlertCircle size={11} className="shrink-0" />
+                          <span>{couponError}</span>
+                        </div>
+                      )}
+                      {couponSuccess && (
+                        <div className="text-[11px] font-bold text-emerald-700 flex items-center gap-1 animate-in fade-in">
+                          <CheckCircle2 size={11} className="shrink-0" />
+                          <span>{couponSuccess}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Available Public Offers Clickable Chips */}
+                  {!appliedCoupon && availableCoupons.length > 0 && (
+                    <div className="space-y-1 pt-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                        Available Offers
+                      </span>
+                      <div className="space-y-1.5 max-h-32 overflow-y-auto pr-0.5">
+                        {availableCoupons.map((c) => (
+                          <div
+                            key={c._id || c.code}
+                            className="p-2 rounded-xl bg-slate-50 hover:bg-rose-50/50 border border-dashed border-slate-200 hover:border-rose-300 flex items-center justify-between gap-2 transition-all group"
+                          >
+                            <div className="truncate">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono font-black text-[11px] text-slate-800 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                                  {c.code}
+                                </span>
+                                <span className="text-[10px] font-black text-rose-600">
+                                  {c.discountType === 'percentage'
+                                    ? `${c.discountValue}% OFF`
+                                    : `₹${c.discountValue} OFF`}
+                                </span>
+                              </div>
+                              <span className="text-[9px] text-slate-500 font-medium block truncate mt-0.5">
+                                {c.minCartAmount > 0 ? `On bookings ₹${c.minCartAmount.toLocaleString()}+` : 'No minimum booking'}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleApplyCoupon(c.code)}
+                              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer shadow-xs transition-all shrink-0"
+                            >
+                              Apply
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Bill Breakdown */}
                 <div className="pt-3 border-t border-slate-100 space-y-2 text-xs">
                   <div className="flex justify-between">
                     <span className="text-slate-500 font-medium">Room Tariff & Meals:</span>
                     <span className="font-bold text-slate-800">₹{Number(calculatedPricing.roomCost).toLocaleString()}</span>
                   </div>
+                  {Number(calculatedPricing.discount) > 0 && (
+                    <div className="flex justify-between text-emerald-700 font-black">
+                      <span className="flex items-center gap-1">
+                        <Tag size={12} />
+                        <span>Discount ({appliedCoupon?.code || 'COUPON'}):</span>
+                      </span>
+                      <span>-₹{Number(calculatedPricing.discount).toLocaleString()}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-slate-500 font-medium">GST / Taxes (12%):</span>
                     <span className="font-bold text-slate-800">₹{Number(calculatedPricing.tax).toLocaleString()}</span>
@@ -1707,6 +2094,16 @@ export default function PublicBookingCalendar() {
               {/* Advance Payment Details */}
               <div className="border-t border-slate-200 pt-3 space-y-1.5 text-xs">
                 <div className="flex justify-between text-slate-600">
+                  <span>Room Tariff:</span>
+                  <span className="font-bold">₹{Number(calculatedPricing.roomCost).toLocaleString()}</span>
+                </div>
+                {Number(calculatedPricing.discount) > 0 && (
+                  <div className="flex justify-between text-emerald-700 font-bold">
+                    <span>Discount ({appliedCoupon?.code || submittedBooking.couponCode || 'Coupon'}):</span>
+                    <span>-₹{Number(calculatedPricing.discount).toLocaleString()}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-slate-600">
                   <span>Total Stay Cost:</span>
                   <span className="font-bold">₹{Number(calculatedPricing.finalAmount).toLocaleString()}</span>
                 </div>
@@ -1731,6 +2128,59 @@ export default function PublicBookingCalendar() {
 
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Photo Lightbox Modal */}
+      {lightboxIndex !== null && (
+        <div 
+          onClick={() => setLightboxIndex(null)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div className="relative max-w-5xl max-h-[90vh] w-full flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full flex items-center justify-between text-white pb-3 px-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                Photo {lightboxIndex + 1} of {displayImages.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => setLightboxIndex(null)}
+                className="text-white/80 hover:text-white cursor-pointer bg-transparent border-none p-1 transition-colors"
+              >
+                <X size={26} />
+              </button>
+            </div>
+
+            <div className="relative w-full flex items-center justify-center">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightboxIndex((prev) => (prev > 0 ? prev - 1 : displayImages.length - 1));
+                }}
+                className="absolute left-2 sm:left-4 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center border border-white/20 cursor-pointer transition-all"
+              >
+                <ChevronLeft size={22} />
+              </button>
+
+              <img 
+                src={getImageUrl(displayImages[lightboxIndex])} 
+                alt={`Photo ${lightboxIndex + 1}`} 
+                className="max-h-[75vh] w-auto max-w-full object-contain rounded-2xl shadow-2xl" 
+              />
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightboxIndex((prev) => (prev < displayImages.length - 1 ? prev + 1 : 0));
+                }}
+                className="absolute right-2 sm:right-4 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center border border-white/20 cursor-pointer transition-all"
+              >
+                <ChevronRight size={22} />
+              </button>
+            </div>
           </div>
         </div>
       )}

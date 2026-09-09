@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 
 export function SuperAdminProtectedRoute({ children }) {
@@ -8,6 +8,27 @@ export function SuperAdminProtectedRoute({ children }) {
 }
 
 export function HomestayOwnerProtectedRoute({ children }) {
-  const isAuthenticated = useSelector((state) => state.homestayOwnerAuth.isAuthenticated);
-  return isAuthenticated ? children : <Navigate to="/homestay-owner/login" replace />;
+  const location = useLocation();
+  const { isAuthenticated, user } = useSelector((state) => state.homestayOwnerAuth);
+
+  if (!isAuthenticated) {
+    return <Navigate to="/homestay-owner/login" replace />;
+  }
+
+  // Check subscription status
+  const sub = user?.subscription;
+  const isExpired = sub && (sub.status === 'Expired' || (sub.expiresAt && new Date(sub.expiresAt) < new Date()));
+  const isNone = !sub || sub.status === 'None';
+
+  // Allow access to subscription page and profile even if expired/none
+  const isSubscriptionRoute = location.pathname === '/homestay-owner/subscription' || 
+                              location.pathname.startsWith('/homestay-owner/subscription') ||
+                              location.pathname === '/homestay-owner/profile';
+
+  if ((isExpired || isNone) && !isSubscriptionRoute) {
+    return <Navigate to="/homestay-owner/subscription" replace />;
+  }
+
+  return children;
 }
+

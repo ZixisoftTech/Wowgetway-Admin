@@ -28,7 +28,8 @@ import {
   User,
   BedDouble,
   ExternalLink,
-  Ban
+  Ban,
+  Filter
 } from 'lucide-react';
 
 const getApiUrl = (path) => {
@@ -41,6 +42,24 @@ const getAuthToken = () => {
   return localStorage.getItem('homestayOwnerToken') || localStorage.getItem('superAdminToken');
 };
 
+const monthsList = [
+  { value: '1', name: 'January' },
+  { value: '2', name: 'February' },
+  { value: '3', name: 'March' },
+  { value: '4', name: 'April' },
+  { value: '5', name: 'May' },
+  { value: '6', name: 'June' },
+  { value: '7', name: 'July' },
+  { value: '8', name: 'August' },
+  { value: '9', name: 'September' },
+  { value: '10', name: 'October' },
+  { value: '11', name: 'November' },
+  { value: '12', name: 'December' }
+];
+
+const currentYear = new Date().getFullYear();
+const yearsList = [currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
+
 export default function ManageBookings() {
   const navigate = useNavigate();
 
@@ -52,6 +71,8 @@ export default function ManageBookings() {
   const [searchQuery, setSearchQuery] = useState('');
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState('');
+  const [selectedYearFilter, setSelectedYearFilter] = useState('');
 
   const [stats, setStats] = useState({
     totalBookings: 0,
@@ -106,13 +127,25 @@ export default function ManageBookings() {
     fetchBookings();
   }, [selectedPropertyId, activeStatusTab]);
 
-  const fetchBookings = async () => {
+  const fetchBookings = async (overrideFilters = {}) => {
     try {
       setLoading(true);
       const token = getAuthToken();
       let url = `/api/homestay-owner/bookings?propertyId=${selectedPropertyId}`;
       if (activeStatusTab !== 'all') url += `&status=${activeStatusTab}`;
-      if (startDateFilter && endDateFilter) url += `&startDate=${startDateFilter}&endDate=${endDateFilter}`;
+
+      const sDate = overrideFilters.startDate !== undefined ? overrideFilters.startDate : startDateFilter;
+      const eDate = overrideFilters.endDate !== undefined ? overrideFilters.endDate : endDateFilter;
+      const mFilter = overrideFilters.month !== undefined ? overrideFilters.month : selectedMonthFilter;
+      const yFilter = overrideFilters.year !== undefined ? overrideFilters.year : selectedYearFilter;
+
+      if (sDate && eDate) {
+        url += `&startDate=${sDate}&endDate=${eDate}`;
+      } else if (mFilter && yFilter) {
+        url += `&month=${mFilter}&year=${yFilter}`;
+      } else if (yFilter && !mFilter) {
+        url += `&year=${yFilter}`;
+      }
 
       const res = await axios.get(getApiUrl(url), {
         headers: { Authorization: `Bearer ${token}` }
@@ -128,6 +161,18 @@ export default function ManageBookings() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleApplyFilter = () => {
+    fetchBookings();
+  };
+
+  const handleClearFilter = () => {
+    setStartDateFilter('');
+    setEndDateFilter('');
+    setSelectedMonthFilter('');
+    setSelectedYearFilter('');
+    fetchBookings({ startDate: '', endDate: '', month: '', year: '' });
   };
 
   // Helper date formatter
@@ -499,111 +544,53 @@ export default function ManageBookings() {
   });
 
   return (
-    <div className="space-y-6 select-none font-sans pb-12">
+    <div className="space-y-5 select-none font-sans pb-12">
       
-      {/* Top Header Card */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white border border-slate-100 p-6 rounded-3xl shadow-sm gap-4">
-        <div className="space-y-1">
-          <button 
-            onClick={() => navigate('/homestay-owner/dashboard')}
-            className="flex items-center gap-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-transparent border-none cursor-pointer hover:text-slate-600 mb-1 p-0"
-          >
-            <ArrowLeft size={12} className="stroke-[2.5]" />
-            <span>Back to Dashboard</span>
-          </button>
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shadow-xs">
-              <CalendarCheck size={20} className="stroke-[2.5]" />
-            </div>
-            <div>
-              <h1 className="text-xl font-black text-slate-800 tracking-tight">
-                Manage Bookings & Reservations
-              </h1>
-              <p className="text-[10px] font-semibold text-slate-400">
-                Full lifecycle management: confirm hold, reschedule, collect payments, edit details, and invoices.
-              </p>
-            </div>
-          </div>
+      {/* 1. TOP METRIC CARDS (Exact match to screenshot) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
+        {/* TOTAL BOOKINGS */}
+        <div className="bg-white border border-slate-100/90 p-4 rounded-3xl shadow-sm flex flex-col justify-between">
+          <span className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">TOTAL BOOKINGS</span>
+          <span className="text-2xl font-black text-slate-800 block mt-2 font-mono">{stats.totalBookings}</span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
-          {/* Property Dropdown */}
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3.5 py-2 rounded-2xl shadow-sm">
-            <Building2 size={14} className="text-rose-700" />
-            <select
-              value={selectedPropertyId}
-              onChange={(e) => setSelectedPropertyId(e.target.value)}
-              className="text-xs font-black text-slate-800 bg-transparent border-none focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Homestays (Consolidated)</option>
-              {properties.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
+        {/* CONFIRMED */}
+        <div className="bg-white border border-slate-100/90 p-4 rounded-3xl shadow-sm flex flex-col justify-between">
+          <span className="block text-[10px] font-black text-emerald-500 uppercase tracking-wider">CONFIRMED</span>
+          <span className="text-2xl font-black text-emerald-500 block mt-2 font-mono">{stats.confirmedCount}</span>
+        </div>
 
-          <button
-            onClick={() => navigate('/homestay-owner/availability')}
-            className="px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold rounded-2xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
-          >
-            <Calendar size={13} />
-            <span>Calendar Grid</span>
-          </button>
+        {/* ON HOLD */}
+        <div className="bg-white border border-slate-100/90 p-4 rounded-3xl shadow-sm flex flex-col justify-between">
+          <span className="block text-[10px] font-black text-amber-500 uppercase tracking-wider">ON HOLD</span>
+          <span className="text-2xl font-black text-amber-500 block mt-2 font-mono">{stats.holdCount}</span>
+        </div>
 
-          <button
-            onClick={() => navigate('/homestay-owner/bookings/create')}
-            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer border-none shadow-sm shadow-rose-100"
-          >
-            <Plus size={14} className="stroke-[3]" />
-            <span>New Booking</span>
-          </button>
+        {/* CHECKED IN */}
+        <div className="bg-white border border-slate-100/90 p-4 rounded-3xl shadow-sm flex flex-col justify-between">
+          <span className="block text-[10px] font-black text-indigo-600 uppercase tracking-wider">CHECKED IN</span>
+          <span className="text-2xl font-black text-indigo-600 block mt-2 font-mono">{stats.checkedInCount}</span>
+        </div>
+
+        {/* TOTAL BILLED */}
+        <div className="bg-white border border-slate-100/90 p-4 rounded-3xl shadow-sm flex flex-col justify-between">
+          <span className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">TOTAL BILLED</span>
+          <span className="text-2xl font-black text-slate-900 block mt-2 font-mono">₹{stats.totalRevenue.toLocaleString()}</span>
+        </div>
+
+        {/* PENDING DUES */}
+        <div className="bg-white border border-slate-100/90 p-4 rounded-3xl shadow-sm flex flex-col justify-between">
+          <span className="block text-[10px] font-black text-rose-600 uppercase tracking-wider">PENDING DUES</span>
+          <span className="text-2xl font-black text-rose-600 block mt-2 font-mono">₹{stats.totalPending.toLocaleString()}</span>
         </div>
       </div>
 
-      {/* KPI Stats Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        {/* Total Bookings */}
-        <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-xs">
-          <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Total Bookings</span>
-          <span className="text-xl font-black text-slate-800 block mt-1 font-mono">{stats.totalBookings}</span>
-        </div>
-
-        {/* Confirmed */}
-        <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-xs">
-          <span className="block text-[9px] font-black text-emerald-600 uppercase tracking-wider">Confirmed</span>
-          <span className="text-xl font-black text-emerald-600 block mt-1 font-mono">{stats.confirmedCount}</span>
-        </div>
-
-        {/* Hold */}
-        <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-xs">
-          <span className="block text-[9px] font-black text-amber-600 uppercase tracking-wider">On Hold</span>
-          <span className="text-xl font-black text-amber-600 block mt-1 font-mono">{stats.holdCount}</span>
-        </div>
-
-        {/* Checked In */}
-        <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-xs">
-          <span className="block text-[9px] font-black text-indigo-600 uppercase tracking-wider">Checked In</span>
-          <span className="text-xl font-black text-indigo-600 block mt-1 font-mono">{stats.checkedInCount}</span>
-        </div>
-
-        {/* Revenue Billed */}
-        <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-xs">
-          <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Total Billed</span>
-          <span className="text-lg font-black text-slate-800 block mt-1 font-mono">₹{stats.totalRevenue.toLocaleString()}</span>
-        </div>
-
-        {/* Pending */}
-        <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-xs">
-          <span className="block text-[9px] font-black text-rose-600 uppercase tracking-wider">Pending Dues</span>
-          <span className="text-lg font-black text-rose-600 block mt-1 font-mono">₹{stats.totalPending.toLocaleString()}</span>
-        </div>
-      </div>
-
-      {/* Filter and Search Bar */}
-      <div className="bg-white border border-slate-100 p-5 rounded-3xl shadow-sm space-y-4">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3.5">
-          {/* Status Segmented Tabs */}
-          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+      {/* 2. FILTER & TABS CARD (Exact match to screenshot) */}
+      <div className="bg-white border border-slate-100 p-5 sm:p-6 rounded-3xl shadow-sm space-y-5">
+        {/* Row 1: Status Tabs, Property Selector, Search & Refresh in ONE SINGLE ROW - No Scroll Needed */}
+        <div className="flex items-center justify-between gap-2 flex-nowrap w-full">
+          {/* Status Capsule Tabs */}
+          <div className="bg-slate-100/70 p-1 rounded-xl flex items-center gap-0.5 border border-slate-200/50 flex-nowrap shrink-0">
             {[
               { id: 'all', label: 'All Bookings' },
               { id: 'Confirmed', label: 'Confirmed' },
@@ -614,8 +601,9 @@ export default function ManageBookings() {
             ].map(tab => (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setActiveStatusTab(tab.id)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border-none ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${
                   activeStatusTab === tab.id
                     ? 'bg-rose-600 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 bg-transparent'
@@ -626,41 +614,146 @@ export default function ManageBookings() {
             ))}
           </div>
 
-          {/* Refresh & Search */}
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            <div className="relative flex-1 md:w-72">
-              <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          {/* Right Side: Compact Property Selector, Search & Refresh */}
+          <div className="flex items-center gap-1.5 shrink-0 flex-nowrap">
+            {/* Compact Property Selector Dropdown */}
+            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-1 rounded-xl shadow-2xs shrink-0 max-w-[130px]">
+              <Building2 size={12} className="text-rose-600 shrink-0" />
+              <select
+                value={selectedPropertyId}
+                onChange={(e) => setSelectedPropertyId(e.target.value)}
+                className="text-xs font-bold text-slate-700 bg-transparent border-none focus:outline-none cursor-pointer truncate"
+              >
+                <option value="all">All Homestays</option>
+                {properties.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Compact Search Input */}
+            <div className="relative w-36 sm:w-44 lg:w-52 shrink-0">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search guest, phone, room, or ID..."
+                placeholder="Search guest / ID..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:bg-white focus:border-rose-500"
+                className="w-full pl-7 pr-2.5 py-1 bg-slate-50 border border-slate-200/80 rounded-xl text-xs font-semibold focus:outline-none focus:bg-white focus:border-rose-400"
               />
             </div>
 
+            {/* Compact Refresh Button */}
             <button
               onClick={() => fetchBookings()}
-              className="p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200 transition-colors cursor-pointer"
+              className="w-7 h-7 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200/80 transition-colors cursor-pointer shrink-0"
               title="Refresh List"
             >
-              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+              <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
+            </button>
+          </div>
+        </div>
+
+        {/* Row 2: Filter by Date Range OR Filter by Month & Year */}
+        <div className="pt-4 border-t border-slate-100 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-5">
+          <div className="flex flex-col md:flex-row items-start md:items-center gap-4 xl:gap-8 flex-1">
+            {/* Filter by Date Range */}
+            <div className="space-y-1.5 flex-1 w-full">
+              <div className="flex items-center gap-1.5 text-xs font-black text-slate-700">
+                <Calendar size={13} className="text-rose-600" />
+                <span>Filter by Date Range</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="flex-1">
+                  <span className="block text-[10px] font-bold text-slate-400 mb-0.5">From Date</span>
+                  <input
+                    type="date"
+                    value={startDateFilter}
+                    onChange={(e) => setStartDateFilter(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-rose-400 cursor-pointer"
+                  />
+                </div>
+                <div className="flex-1">
+                  <span className="block text-[10px] font-bold text-slate-400 mb-0.5">To Date</span>
+                  <input
+                    type="date"
+                    value={endDateFilter}
+                    onChange={(e) => setEndDateFilter(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-rose-400 cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* OR text */}
+            <div className="hidden md:flex items-center justify-center pt-5">
+              <span className="text-xs font-black text-slate-300 uppercase tracking-widest">OR</span>
+            </div>
+
+            {/* Filter by Month & Year */}
+            <div className="space-y-1.5 flex-1 w-full">
+              <div className="flex items-center gap-1.5 text-xs font-black text-slate-700">
+                <span>Filter by Month & Year</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="flex-1">
+                  <span className="block text-[10px] font-bold text-slate-400 mb-0.5">Select Month</span>
+                  <select
+                    value={selectedMonthFilter}
+                    onChange={(e) => setSelectedMonthFilter(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-rose-400 cursor-pointer"
+                  >
+                    <option value="">Select month</option>
+                    {monthsList.map(m => (
+                      <option key={m.value} value={m.value}>{m.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <span className="block text-[10px] font-bold text-slate-400 mb-0.5">Select Year</span>
+                  <select
+                    value={selectedYearFilter}
+                    onChange={(e) => setSelectedYearFilter(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-rose-400 cursor-pointer"
+                  >
+                    <option value="">Select year</option>
+                    {yearsList.map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2.5 pt-2 xl:pt-5 self-end xl:self-center">
+            <button
+              onClick={handleApplyFilter}
+              className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm shadow-rose-200 transition-colors border-none cursor-pointer"
+            >
+              <Filter size={13} />
+              <span>Apply Filter</span>
+            </button>
+            <button
+              onClick={handleClearFilter}
+              className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 transition-colors cursor-pointer"
+            >
+              Clear
             </button>
           </div>
         </div>
       </div>
 
-      {/* Bookings Data Table */}
+      {/* 3. BOOKINGS DATA TABLE (Exact match to screenshot) */}
       <div className="bg-white border border-slate-100 rounded-3xl shadow-sm overflow-hidden space-y-4">
-        <div className="p-6 pb-0 flex justify-between items-center">
-          <div>
-            <h3 className="text-sm font-black text-slate-800 tracking-tight">
-              All Bookings Records ({filteredBookings.length})
-            </h3>
-            <span className="text-[10px] text-slate-400 font-semibold">
-              Click "View" to open full booking drawer with PMS actions
-            </span>
-          </div>
+        <div className="p-6 pb-0">
+          <h3 className="text-sm font-black text-slate-800 tracking-tight">
+            {activeStatusTab === 'all' ? 'All Bookings Records' : `${activeStatusTab} Bookings Records`} ({filteredBookings.length})
+          </h3>
+          <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">
+            Click "View" to open full booking drawer with PMS actions
+          </span>
         </div>
 
         <div className="overflow-x-auto px-6">
@@ -671,17 +764,17 @@ export default function ManageBookings() {
                 <th className="pb-3 px-3">Guest Information</th>
                 <th className="pb-3 px-3">Property & Room</th>
                 <th className="pb-3 px-3">Stay Dates</th>
-                <th className="pb-3 px-3 text-right">Total Bill</th>
-                <th className="pb-3 px-3 text-right">Paid</th>
-                <th className="pb-3 px-3 text-right">Balance</th>
-                <th className="pb-3 px-3 text-center">Status</th>
-                <th className="pb-3 px-3 text-center">Quick Actions</th>
+                <th className="pb-3 px-3">Total Bill</th>
+                <th className="pb-3 px-3">Paid</th>
+                <th className="pb-3 px-3">Balance</th>
+                <th className="pb-3 px-3">Status</th>
+                <th className="pb-3 px-3">Quick Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 font-semibold text-slate-700">
               {filteredBookings.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-10 text-center text-slate-400 font-bold text-xs">
+                  <td colSpan={9} className="py-12 text-center text-slate-400 font-bold text-xs">
                     {loading ? 'Loading bookings...' : 'No reservations found matching the filters.'}
                   </td>
                 </tr>
@@ -693,103 +786,107 @@ export default function ManageBookings() {
 
                   return (
                     <tr key={b._id} className="hover:bg-slate-50/40 transition-colors">
-                      {/* Booking ID */}
-                      <td className="py-3.5 px-3">
-                        <span className="font-mono text-[11px] font-extrabold text-slate-800 block">
+                      {/* 1. Booking ID */}
+                      <td className="py-4 px-3 align-middle">
+                        <span className="font-mono text-xs font-black text-slate-800 block">
                           {b.bookingId || b._id?.slice(-8).toUpperCase()}
                         </span>
-                        <span className="text-[9px] text-slate-400 block font-mono">
+                        <span className="text-[10px] text-slate-400 block font-mono mt-0.5">
                           {formatDateDisplay(b.createdAt)}
                         </span>
                       </td>
 
-                      {/* Guest Info */}
-                      <td className="py-3.5 px-3">
-                        <div className="font-extrabold text-slate-800">{b.customer?.name || 'Guest'}</div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] text-slate-400">{b.customer?.mobile || 'No mobile'}</span>
+                      {/* 2. Guest Information */}
+                      <td className="py-4 px-3 align-middle">
+                        <div className="font-bold text-xs text-slate-800 capitalize">{b.customer?.name || 'Guest'}</div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[10px] text-slate-400 font-mono">{b.customer?.mobile || 'No phone'}</span>
                           {b.customer?.mobile && (
                             <div className="flex items-center gap-1">
                               <a 
                                 href={`tel:${b.customer.mobile}`}
-                                className="w-5 h-5 rounded bg-rose-50 text-rose-600 flex items-center justify-center hover:bg-rose-100"
+                                className="w-5 h-5 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center hover:bg-rose-100 transition-colors"
                                 title="Call Guest"
                               >
-                                <Phone size={10} />
+                                <Phone size={9} />
                               </a>
                               <a 
                                 href={`https://wa.me/${b.customer.mobile.replace(/[^0-9]/g, '')}`}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="w-5 h-5 rounded bg-emerald-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-100"
+                                className="w-5 h-5 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center hover:bg-emerald-100 transition-colors"
                                 title="WhatsApp Guest"
                               >
-                                <MessageSquare size={10} />
+                                <MessageSquare size={9} />
                               </a>
                             </div>
                           )}
                         </div>
                       </td>
 
-                      {/* Property & Room */}
-                      <td className="py-3.5 px-3">
-                        <div className="font-bold text-slate-800">{b.propertyId?.name || 'Homestay'}</div>
-                        <div className="text-[10px] text-rose-600 font-extrabold">
-                          {b.roomDetails?.roomNumber || 'Room'} • {b.roomDetails?.categoryName || 'Standard'}
+                      {/* 3. Property & Room */}
+                      <td className="py-4 px-3 align-middle">
+                        <div className="font-bold text-xs text-slate-800">{b.propertyId?.name || 'Homestay'}</div>
+                        <div className="text-[10px] text-rose-500 font-bold mt-0.5">
+                          {b.roomDetails?.roomNumber ? `Room • ${b.roomDetails.roomNumber}` : (b.roomDetails?.categoryName ? `Room • ${b.roomDetails.categoryName}` : 'Room • Standard')}
                         </div>
                       </td>
 
-                      {/* Dates */}
-                      <td className="py-3.5 px-3 font-mono text-[11px] text-slate-600">
-                        <div>In: {formatDateDisplay(b.checkInDate)}</div>
-                        <div className="text-slate-400">Out: {formatDateDisplay(b.checkOutDate)}</div>
+                      {/* 4. Stay Dates */}
+                      <td className="py-4 px-3 align-middle font-mono text-[11px]">
+                        <div className="text-slate-700 font-medium">In: {formatDateDisplay(b.checkInDate)}</div>
+                        <div className="text-slate-400 font-medium mt-0.5">Out: {formatDateDisplay(b.checkOutDate)}</div>
                       </td>
 
-                      {/* Financials */}
-                      <td className="py-3.5 px-3 text-right font-mono font-bold text-slate-800">
+                      {/* 5. Total Bill */}
+                      <td className="py-4 px-3 align-middle font-mono font-bold text-xs text-slate-800">
                         ₹{amt.toLocaleString()}
                       </td>
-                      <td className="py-3.5 px-3 text-right font-mono font-bold text-emerald-600">
+
+                      {/* 6. Paid */}
+                      <td className="py-4 px-3 align-middle font-mono font-bold text-xs text-emerald-600">
                         ₹{paid.toLocaleString()}
                       </td>
-                      <td className="py-3.5 px-3 text-right font-mono font-bold text-rose-600">
+
+                      {/* 7. Balance */}
+                      <td className={`py-4 px-3 align-middle font-mono font-bold text-xs ${pend > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
                         ₹{pend.toLocaleString()}
                       </td>
 
-                      {/* Status */}
-                      <td className="py-3.5 px-3 text-center">
-                        <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider inline-block ${
+                      {/* 8. Status */}
+                      <td className="py-4 px-3 align-middle">
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider inline-block ${
                           b.bookingStatus === 'Confirmed'
-                            ? 'bg-emerald-50 text-emerald-700'
+                            ? 'bg-[#dcfce7] text-[#16a34a]'
                             : b.bookingStatus === 'Hold'
-                            ? 'bg-amber-50 text-amber-700'
+                            ? 'bg-[#fef9c3] text-[#ca8a04]'
                             : b.bookingStatus === 'Checked In'
-                            ? 'bg-indigo-50 text-indigo-700'
+                            ? 'bg-[#e0e7ff] text-[#4f46e5]'
                             : b.bookingStatus === 'Checked Out'
                             ? 'bg-slate-100 text-slate-600'
-                            : 'bg-rose-50 text-rose-700'
+                            : 'bg-[#ffe4e6] text-[#e11d48]'
                         }`}>
-                          {b.bookingStatus}
+                          {b.bookingStatus === 'Hold' ? 'HOLD' : b.bookingStatus}
                         </span>
                       </td>
 
-                      {/* Quick Actions */}
-                      <td className="py-3.5 px-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
+                      {/* 9. Quick Actions */}
+                      <td className="py-4 px-3 align-middle">
+                        <div className="flex items-center gap-1.5">
                           {/* View Detail button */}
                           <button
                             onClick={() => setSelectedBooking(b)}
-                            className="p-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition-colors cursor-pointer"
+                            className="w-7 h-7 rounded-full bg-white border border-slate-200/80 hover:bg-slate-50 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
                             title="View Full Booking Drawer"
                           >
-                            <Eye size={12} className="stroke-[2.5]" />
+                            <Eye size={12} />
                           </button>
 
                           {/* If Hold, Quick Confirm Button */}
                           {b.bookingStatus === 'Hold' && (
                             <button
                               onClick={() => handleConfirmHold(b)}
-                              className="p-1.5 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-700 rounded-lg transition-colors cursor-pointer"
+                              className="w-7 h-7 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 hover:bg-emerald-100 flex items-center justify-center transition-colors cursor-pointer"
                               title="Confirm Hold Booking"
                             >
                               <CheckCircle size={12} />
@@ -800,7 +897,7 @@ export default function ManageBookings() {
                           {b.bookingStatus !== 'Cancelled' && b.bookingStatus !== 'Checked Out' && (
                             <button
                               onClick={() => handleOpenReschedule(b)}
-                              className="p-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition-colors cursor-pointer"
+                              className="w-7 h-7 rounded-full bg-white border border-slate-200/80 hover:bg-slate-50 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
                               title="Reschedule Stay Dates"
                             >
                               <CalendarDays size={12} />
@@ -811,7 +908,7 @@ export default function ManageBookings() {
                           {pend > 0 && b.bookingStatus !== 'Cancelled' && (
                             <button
                               onClick={() => handleOpenPayment(b)}
-                              className="p-1.5 bg-amber-50 border border-amber-200 hover:bg-amber-100 text-amber-700 rounded-lg transition-colors cursor-pointer"
+                              className="w-7 h-7 rounded-full bg-amber-50 border border-amber-200 text-amber-600 hover:bg-amber-100 flex items-center justify-center transition-colors cursor-pointer"
                               title="Record Payment"
                             >
                               <CreditCard size={12} />
@@ -821,7 +918,7 @@ export default function ManageBookings() {
                           {/* Confirmation Slip */}
                           <button
                             onClick={() => navigate(`/homestay-owner/bookings/confirmation-slip/${b._id}`)}
-                            className="p-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition-colors cursor-pointer"
+                            className="w-7 h-7 rounded-full bg-white border border-slate-200/80 hover:bg-slate-50 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
                             title="Confirmation Slip"
                           >
                             <Receipt size={12} />

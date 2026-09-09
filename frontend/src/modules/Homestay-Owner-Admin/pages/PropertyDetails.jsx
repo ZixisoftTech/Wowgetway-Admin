@@ -19,17 +19,16 @@ import {
   Trash2,
   Calendar,
   Grid,
-  Percent,
   TrendingUp,
   Image as ImageIcon,
   Building2,
-  Phone,
-  User,
   X,
   ExternalLink,
   BedDouble,
   CheckCircle2,
-  Clock
+  Waves,
+  Coffee,
+  Camera
 } from 'lucide-react';
 
 const getApiUrl = (path) => {
@@ -51,6 +50,7 @@ export default function PropertyDetails() {
   const [loading, setLoading] = useState(true);
   const [property, setProperty] = useState(null);
   const [lightboxImage, setLightboxImage] = useState(null);
+  const [deleteRoomId, setDeleteRoomId] = useState(null);
 
   useEffect(() => {
     fetchPropertyDetails();
@@ -64,7 +64,7 @@ export default function PropertyDetails() {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data) {
-        setProperty(res.data);
+        setProperty(res.data.data || res.data);
       }
     } catch (err) {
       console.error('Failed to load property details:', err);
@@ -73,9 +73,23 @@ export default function PropertyDetails() {
     }
   };
 
+  const handleDeleteRoom = (roomId) => {
+    setDeleteRoomId(roomId);
+  };
+
+  const handleConfirmDeleteRoom = async () => {
+    if (!deleteRoomId) return;
+    setProperty(prev => ({
+      ...prev,
+      rooms: (prev.rooms || []).filter(r => (r._id || r.id) !== deleteRoomId)
+    }));
+    setDeleteRoomId(null);
+  };
+
   const amenityIcons = {
     'Wifi': Wifi,
     'Free Wifi': Wifi,
+    'WIFI': Wifi,
     'Parking': Car,
     'Free Parking': Car,
     'Restaurant': Utensils,
@@ -84,7 +98,11 @@ export default function PropertyDetails() {
     'Mountain View': Mountain,
     'Room Heater': Flame,
     'Kitchen': ChefHat,
-    'Laundry': Shirt
+    'Laundry': Shirt,
+    'Pool': Waves,
+    'Swimming Pool': Waves,
+    'Free Breakfast': Coffee,
+    'Breakfast': Coffee
   };
 
   if (loading) {
@@ -104,7 +122,7 @@ export default function PropertyDetails() {
         <p className="text-xs font-bold text-slate-400">Unable to retrieve details for property ID: {propertyId}</p>
         <button
           onClick={() => navigate('/homestay-owner/inventory')}
-          className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs cursor-pointer border-none shadow-sm"
+          className="px-5 py-2.5 bg-[#D80032] hover:bg-[#b00028] text-white font-bold rounded-xl text-xs cursor-pointer border-none shadow-sm"
         >
           Back to Inventory
         </button>
@@ -112,16 +130,31 @@ export default function PropertyDetails() {
     );
   }
 
+  const fallbackHomestayImages = [
+    'https://images.unsplash.com/photo-1542718610-a1d656d1884c?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1587061949409-02df41d5e562?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?auto=format&fit=crop&w=800&q=80'
+  ];
+
   const allImages = property.images && property.images.length > 0
     ? property.images
-    : ['https://images.unsplash.com/photo-1542718610-a1d656d1884c?auto=format&fit=crop&w=1200&q=80'];
+    : fallbackHomestayImages;
 
-  const coverImage = allImages[0];
-  const gallery = allImages.slice(1);
+  const defaultRoomImages = [
+    'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1566665797739-1674de7a421a?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=800&q=80'
+  ];
 
   const roomsList = property.rooms || [];
-  const amenitiesList = property.amenities || [];
+  const amenitiesList = property.amenities && property.amenities.length > 0
+    ? property.amenities
+    : ['WIFI', 'Pool', 'Free Breakfast'];
   const status = property.status || 'Active';
+  const totalRoomsConfigured = roomsList.reduce((sum, r) => sum + (r.totalRooms || r.numberOfRooms || (r.roomNumbers?.length || 1)), 0);
 
   return (
     <div className="space-y-6 select-none font-sans pb-12">
@@ -170,7 +203,7 @@ export default function PropertyDetails() {
 
           <button
             onClick={() => navigate(`/homestay-owner/inventory/setup-property?propertyId=${property._id}`)}
-            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border-none shadow-sm shadow-rose-100 uppercase tracking-wider"
+            className="px-5 py-2.5 bg-[#D80032] hover:bg-[#b00028] text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border-none shadow-sm uppercase tracking-wider"
           >
             <Edit size={13} />
             <span>Edit Property</span>
@@ -182,47 +215,54 @@ export default function PropertyDetails() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Section: Details & Photos */}
         <div className="lg:col-span-8 space-y-6">
-          {/* Cover & Gallery Card */}
-          <div className="bg-white border border-slate-100 rounded-3xl overflow-hidden shadow-sm p-6 space-y-5">
-            <div 
-              onClick={() => setLightboxImage(getImageUrl(coverImage))}
-              className="relative h-64 md:h-80 w-full rounded-2xl overflow-hidden border border-slate-100 shadow-inner cursor-pointer group"
-            >
-              <img 
-                src={getImageUrl(coverImage)} 
-                alt={property.name} 
-                className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300" 
-              />
-              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                <span className="opacity-0 group-hover:opacity-100 bg-black/70 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition-opacity">
-                  <Eye size={13} /> Click to Expand
-                </span>
-              </div>
+          
+          {/* Property Photos Showcase (Matching Reference Image 3) */}
+          <div className="bg-white border border-slate-100 rounded-3xl overflow-hidden shadow-sm p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider text-slate-400 leading-none">
+                Property Photos ({allImages.length})
+              </h3>
+              <button
+                onClick={() => setLightboxImage(getImageUrl(allImages[0]))}
+                className="text-xs font-bold text-[#D80032] hover:underline flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
+              >
+                <Eye size={12} />
+                <span>View Full Gallery</span>
+              </button>
             </div>
 
-            {/* Gallery Grid */}
-            {gallery.length > 0 && (
-              <div>
-                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2.5">
-                  Property Gallery ({gallery.length + 1} Photos)
-                </span>
-                <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
-                  {gallery.map((img, idx) => (
-                    <div 
-                      key={idx} 
-                      onClick={() => setLightboxImage(getImageUrl(img))}
-                      className="relative aspect-video rounded-xl overflow-hidden border border-slate-100 shadow-sm cursor-pointer hover:opacity-90 group"
-                    >
-                      <img 
-                        src={getImageUrl(img)} 
-                        alt={`Gallery ${idx + 1}`} 
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform" 
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Gallery Grid (4 items side by side) */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+              {allImages.slice(0, 4).map((img, idx) => {
+                const isLast = idx === 3 && allImages.length > 4;
+                const remaining = allImages.length - 4;
+                return (
+                  <div 
+                    key={idx} 
+                    onClick={() => setLightboxImage(getImageUrl(img))}
+                    className="relative h-44 md:h-52 rounded-2xl overflow-hidden border border-slate-100 shadow-sm cursor-pointer group bg-slate-50"
+                  >
+                    <img 
+                      src={getImageUrl(img)} 
+                      alt={`Property Gallery ${idx + 1}`} 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+                    />
+                    {isLast ? (
+                      <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white p-2 text-center transition-colors group-hover:bg-black/70">
+                        <span className="text-lg font-black leading-none">+{remaining + 1}</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider mt-1">Photos</span>
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                        <span className="opacity-0 group-hover:opacity-100 bg-black/70 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-opacity">
+                          <Eye size={11} /> Expand
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Description Card */}
@@ -230,91 +270,175 @@ export default function PropertyDetails() {
             <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider text-slate-400 leading-none">
               Overview & Description
             </h3>
-            <p className="text-xs font-bold text-slate-600 leading-relaxed whitespace-pre-line">
-              {property.description || `${property.name} offers authentic local hospitality, scenic surroundings, and comfortable guest accommodation in ${property.city || 'the region'}.`}
+            <p className="text-xs font-medium text-slate-600 leading-relaxed whitespace-pre-line">
+              {property.description || `${property.name} offers authentic local hospitality, scenic surroundings, and comfortable guest accommodation in ${property.city || 'the region'}. Perfect for families, couples and solo travellers looking for a peaceful getaway.`}
             </p>
           </div>
 
           {/* Amenities Card */}
-          {amenitiesList.length > 0 && (
-            <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-4">
-              <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider text-slate-400 leading-none">
-                Property Amenities ({amenitiesList.length})
-              </h3>
-              <div className="flex flex-wrap gap-2.5">
-                {amenitiesList.map((item) => {
-                  const name = typeof item === 'string' ? item : (item.name || 'Amenity');
-                  const IconComp = amenityIcons[name] || CheckCircle2;
-                  return (
-                    <div key={name} className="px-3.5 py-2 border border-slate-150 rounded-xl bg-slate-50/50 text-slate-707 flex items-center gap-2 text-xs font-bold shadow-sm">
-                      <IconComp size={14} className="text-rose-600 stroke-[2.2]" />
-                      <span>{name}</span>
-                    </div>
-                  );
-                })}
-              </div>
+          <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm space-y-3.5">
+            <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider text-slate-400 leading-none">
+              Property Amenities ({amenitiesList.length})
+            </h3>
+            <div className="flex flex-wrap gap-2.5">
+              {amenitiesList.map((item) => {
+                const name = typeof item === 'string' ? item : (item.name || 'Amenity');
+                const IconComp = amenityIcons[name] || CheckCircle2;
+                return (
+                  <div key={name} className="px-4 py-2 border border-slate-200 rounded-2xl bg-white text-slate-800 flex items-center gap-2 text-xs font-bold shadow-xs">
+                    <IconComp size={15} className="text-[#D80032] stroke-[2.2]" />
+                    <span>{name}</span>
+                  </div>
+                );
+              })}
             </div>
-          )}
+          </div>
 
-          {/* Rooms Configuration Card */}
-          <div className="bg-white border border-slate-100 rounded-3xl shadow-sm overflow-hidden space-y-4 p-6">
-            <div className="flex justify-between items-center pb-1 border-b border-slate-50">
+          {/* Rooms Configuration Card (Matching Reference Image 3) */}
+          <div className="bg-white border border-slate-100 rounded-3xl shadow-sm overflow-hidden space-y-5 p-6">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-50">
               <div>
-                <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider text-slate-400 leading-none">
+                <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider leading-none">
                   Rooms Configuration
                 </h3>
-                <p className="text-[10px] text-slate-400 font-semibold mt-1">
-                  Total {roomsList.reduce((sum, r) => sum + (r.totalRooms || r.numberOfRooms || r.roomNumbers?.length || 1), 0)} Rooms Configured
+                <p className="text-xs text-slate-400 font-medium mt-1">
+                  Total {totalRoomsConfigured} Rooms Configured
                 </p>
               </div>
               <button 
-                onClick={() => navigate(`/homestay-owner/inventory/setup-property?propertyId=${property._id}`)}
-                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-[9px] uppercase tracking-wider transition-colors cursor-pointer border-none flex items-center gap-1 shadow-sm"
+                onClick={() => navigate(`/homestay-owner/inventory/setup-property?propertyId=${property._id}&step=4`)}
+                className="px-4 py-2 bg-[#D80032] hover:bg-[#b00028] text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-colors cursor-pointer border-none flex items-center gap-1.5 shadow-sm"
               >
-                <Plus size={11} />
+                <Plus size={13} className="stroke-[3]" />
                 <span>Configure Rooms</span>
               </button>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               {roomsList.length === 0 ? (
-                <div className="p-6 text-center text-slate-400 font-bold text-xs">
-                  No rooms configured yet. Click "Configure Rooms" to add rooms.
+                <div className="p-8 text-center text-slate-400 font-bold text-xs space-y-2">
+                  <BedDouble size={28} className="mx-auto text-slate-300" />
+                  <p className="text-slate-600">No rooms configured yet.</p>
+                  <p className="text-slate-400 text-[10px]">Click "Configure Rooms" to add your property room categories.</p>
                 </div>
               ) : (
                 roomsList.map((room, idx) => {
                   const roomNos = room.roomNumbers?.length > 0 
-                    ? (Array.isArray(room.roomNumbers) ? room.roomNumbers.join(', ') : room.roomNumbers)
-                    : '101';
+                    ? (Array.isArray(room.roomNumbers) ? room.roomNumbers : String(room.roomNumbers).split(',').map(n => n.trim()))
+                    : ['101'];
                   const roomCount = room.totalRooms || room.numberOfRooms || (room.roomNumbers?.length || 1);
+                  const roomCategoryName = room.roomCategoryName || room.roomType || 'Deluxe Room';
+
+                  // Room photos from create time or fallback
+                  const rawRoomImages = (Array.isArray(room.images) && room.images.length > 0)
+                    ? room.images
+                    : (Array.isArray(room.photos) && room.photos.length > 0 ? room.photos : []);
+
+                  const roomPhotos = rawRoomImages.length > 0 ? rawRoomImages : defaultRoomImages;
+                  const mainPhoto = roomPhotos[0];
+                  const thumbnails = roomPhotos.slice(0, 4);
+
                   return (
-                    <div key={idx} className="border border-slate-150 rounded-2xl p-4.5 bg-slate-50/30 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <BedDouble size={16} className="text-rose-600" />
-                          <span className="text-xs font-black text-slate-800">{room.roomType || room.roomCategoryName || 'Standard Room'}</span>
-                          <span className="text-[9px] px-2 py-0.5 bg-rose-50 text-rose-700 font-black uppercase rounded-full">
-                            {roomCount} Rooms
-                          </span>
-                        </div>
-                        {room.description && (
-                          <p className="text-[10px] text-slate-500 font-semibold">{room.description}</p>
-                        )}
-                        <div className="flex flex-wrap gap-1.5 pt-1">
-                          <span className="text-[9px] font-bold text-slate-400">Room Numbers:</span>
-                          <span className="text-[9px] font-black text-slate-700 font-mono bg-white px-2 py-0.5 border border-slate-200 rounded-md">
-                            {roomNos}
-                          </span>
+                    <div 
+                      key={room._id || room.id || idx} 
+                      className="border border-slate-150 rounded-2xl p-4 bg-white flex flex-col md:flex-row gap-5 shadow-sm hover:border-slate-200 transition-colors"
+                    >
+                      {/* Left: Featured Room Image */}
+                      <div 
+                        onClick={() => setLightboxImage(getImageUrl(mainPhoto))}
+                        className="relative w-full md:w-56 h-40 rounded-2xl overflow-hidden border border-slate-100 shrink-0 bg-slate-100 cursor-pointer group"
+                      >
+                        <img 
+                          src={getImageUrl(mainPhoto)} 
+                          alt={roomCategoryName}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                        <div className="absolute bottom-2.5 left-2.5 bg-black/75 backdrop-blur-xs text-white text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
+                          <Camera size={11} />
+                          <span>{roomPhotos.length} Photos</span>
                         </div>
                       </div>
 
-                      <div className="flex gap-2 w-full sm:w-auto justify-end">
-                        <button
-                          onClick={() => navigate(`/homestay-owner/inventory/property/${property._id}/rate-chart`)}
-                          className="px-3 py-1.5 border border-slate-205 hover:bg-slate-50 text-slate-707 font-bold rounded-xl text-[9px] uppercase tracking-wider cursor-pointer bg-white"
-                        >
-                          Rate Chart
-                        </button>
+                      {/* Right: Details, badges, actions, and thumbnails */}
+                      <div className="flex-1 flex flex-col justify-between space-y-3">
+                        {/* Header Row: Room Title, Room Count, and Action Buttons */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <BedDouble size={18} className="text-[#D80032] shrink-0" />
+                            <span className="text-base font-bold text-slate-900">{roomCategoryName}</span>
+                            <span className="text-[10px] font-black px-2.5 py-0.5 bg-rose-50 text-[#E11D48] rounded-full uppercase tracking-wider">
+                              {roomCount} ROOMS
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => navigate(`/homestay-owner/inventory/property/${property._id}/rate-chart`)}
+                              className="px-3.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-707 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer bg-white transition-colors"
+                            >
+                              RATE CHART
+                            </button>
+                            <button
+                              onClick={() => navigate(`/homestay-owner/inventory/setup-property?propertyId=${property._id}&step=4`)}
+                              className="px-3.5 py-1.5 border border-sky-200 hover:bg-sky-50 text-sky-600 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer bg-white flex items-center gap-1 transition-colors"
+                            >
+                              <Edit size={12} />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRoom(room._id || room.id)}
+                              className="px-3.5 py-1.5 border border-rose-200 hover:bg-rose-50 text-rose-600 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer bg-white flex items-center gap-1 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                              <span>Delete</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Room Numbers Row */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-slate-400">Room Numbers:</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {roomNos.map((no, i) => (
+                              <span key={i} className="text-xs font-bold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-md font-mono">
+                                {no}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Description if any */}
+                        {room.description && (
+                          <p className="text-xs text-slate-500 font-normal line-clamp-1">{room.description}</p>
+                        )}
+
+                        {/* Room Thumbnails Row (Matching Reference Image 3) */}
+                        {thumbnails.length > 0 && (
+                          <div className="flex items-center gap-2.5 pt-1">
+                            {thumbnails.map((thumb, tIdx) => {
+                              const isFourth = tIdx === 3 && roomPhotos.length > 4;
+                              const extraCount = roomPhotos.length - 4;
+                              return (
+                                <div 
+                                  key={tIdx}
+                                  onClick={() => setLightboxImage(getImageUrl(thumb))}
+                                  className="relative w-16 h-14 rounded-xl overflow-hidden border border-slate-100 shadow-xs cursor-pointer hover:opacity-90 transition-opacity bg-slate-50 shrink-0 group"
+                                >
+                                  <img 
+                                    src={getImageUrl(thumb)} 
+                                    alt={`Room thumbnail ${tIdx + 1}`} 
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                  />
+                                  {isFourth && (
+                                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-xs font-black">
+                                      +{extraCount + 1}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -333,7 +457,7 @@ export default function PropertyDetails() {
             </h3>
             
             <div className="flex items-start gap-2.5 text-xs font-bold text-slate-707">
-              <MapPin size={16} className="text-rose-600 mt-0.5 shrink-0" />
+              <MapPin size={16} className="text-[#D80032] mt-0.5 shrink-0" />
               <div>
                 <span className="block font-black text-slate-800">{property.address || property.city || 'Location Details'}</span>
                 <span className="block text-[10px] text-slate-400 mt-0.5">
@@ -347,7 +471,7 @@ export default function PropertyDetails() {
                 href={property.googleMapsLink}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 text-[10px] font-black text-rose-600 hover:underline uppercase tracking-wider pt-1"
+                className="inline-flex items-center gap-1 text-[10px] font-black text-[#D80032] hover:underline uppercase tracking-wider pt-1"
               >
                 <span>View on Google Maps</span>
                 <ExternalLink size={10} />
@@ -388,7 +512,7 @@ export default function PropertyDetails() {
 
             <button
               onClick={() => navigate(`/homestay-owner/bookings/create?propertyId=${property._id}`)}
-              className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer border-none shadow-sm shadow-rose-100"
+              className="w-full py-3 bg-[#D80032] hover:bg-[#b00028] text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer border-none shadow-sm shadow-rose-100"
             >
               <Plus size={14} className="stroke-[3]" />
               <span>Create Booking For This Property</span>
@@ -412,6 +536,32 @@ export default function PropertyDetails() {
           </div>
         </div>
       </div>
+
+      {/* Delete Room Confirmation Modal */}
+      {deleteRoomId && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-100 rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4">
+            <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">Delete Room Category</h4>
+            <p className="text-xs font-medium text-slate-500 leading-relaxed">
+              Are you sure you want to remove this room category from the property?
+            </p>
+            <div className="flex justify-end gap-2.5 pt-2">
+              <button
+                onClick={() => setDeleteRoomId(null)}
+                className="px-4 py-2 border border-slate-200 text-slate-700 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer bg-white hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDeleteRoom}
+                className="px-4 py-2 bg-[#D80032] hover:bg-[#b00028] text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Lightbox Modal */}
       {lightboxImage && (
@@ -437,3 +587,4 @@ export default function PropertyDetails() {
     </div>
   );
 }
+

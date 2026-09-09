@@ -48,6 +48,35 @@ export default function Revenue() {
   const [properties, setProperties] = useState([]);
   const [propertyBreakdown, setPropertyBreakdown] = useState([]);
 
+  // Month & Year & Day selectors
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1); // 1-12
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear()); // 2026
+  const [selectedDay, setSelectedDay] = useState('all'); // 'all' or 1..31
+  const [selectedWeek, setSelectedWeek] = useState('all'); // 'all' or 1..4
+  const [revenueTimeframe, setRevenueTimeframe] = useState(null);
+  const [hoveredPoint, setHoveredPoint] = useState(null);
+
+  const monthsList = [
+    { value: 1, name: 'January', short: 'Jan' },
+    { value: 2, name: 'February', short: 'Feb' },
+    { value: 3, name: 'March', short: 'Mar' },
+    { value: 4, name: 'April', short: 'Apr' },
+    { value: 5, name: 'May', short: 'May' },
+    { value: 6, name: 'June', short: 'Jun' },
+    { value: 7, name: 'July', short: 'Jul' },
+    { value: 8, name: 'August', short: 'Aug' },
+    { value: 9, name: 'September', short: 'Sep' },
+    { value: 10, name: 'October', short: 'Oct' },
+    { value: 11, name: 'November', short: 'Nov' },
+    { value: 12, name: 'December', short: 'Dec' }
+  ];
+
+  const currentYear = now.getFullYear();
+  const yearsList = [currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
+  const daysInSelectedMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+  const daysList = Array.from({ length: daysInSelectedMonth }, (_, i) => i + 1);
+
   // Search and filter states for booking tables
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState('all');
@@ -76,13 +105,21 @@ export default function Revenue() {
 
   useEffect(() => {
     fetchRevenueData();
-  }, [selectedPropertyId, activeChartTab]);
+  }, [selectedPropertyId, activeChartTab, selectedMonth, selectedYear, selectedDay, selectedWeek]);
 
   const fetchRevenueData = async () => {
     try {
       setLoading(true);
       const token = getAuthToken();
-      const res = await axios.get(getApiUrl(`/api/homestay-owner/revenue?propertyId=${selectedPropertyId}&timeframe=${activeChartTab}`), {
+      const params = new URLSearchParams({
+        propertyId: selectedPropertyId,
+        timeframe: activeChartTab,
+        year: String(selectedYear),
+        month: String(selectedMonth),
+        day: String(selectedDay),
+        week: String(selectedWeek)
+      });
+      const res = await axios.get(getApiUrl(`/api/homestay-owner/revenue?${params.toString()}`), {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -93,6 +130,7 @@ export default function Revenue() {
         if (res.data.detailsTable) setDailyDetails(res.data.detailsTable);
         if (res.data.chartPoints) setChartPoints(res.data.chartPoints);
         if (res.data.transactions) setTransactions(res.data.transactions);
+        if (res.data.revenueTimeframe) setRevenueTimeframe(res.data.revenueTimeframe);
       }
     } catch (err) {
       console.error('Failed to load revenue data:', err);
@@ -105,29 +143,44 @@ export default function Revenue() {
     window.print();
   };
 
-  // Build SVG path strings from chartPoints
+  // Build SVG path strings from chartPoints (Smooth Bezier Spline)
   const getSvgPaths = () => {
     if (!chartPoints || chartPoints.length === 0) {
       return { linePath: '', areaPath: '', validPoints: [] };
     }
 
     const count = chartPoints.length;
-    const maxVal = Math.max(...chartPoints.map(p => Number(p.value) || 0), 1000);
+    const maxVal = revenueTimeframe?.niceMax || Math.max(...chartPoints.map(p => Number(p.value) || 0), 1000);
 
     const validPoints = chartPoints.map((pt, idx) => {
-      const x = (typeof pt.x === 'number' && !isNaN(pt.x)) ? pt.x : (count > 1 ? Math.round(50 + (idx / (count - 1)) * 420) : 260);
-      const y = (typeof pt.y === 'number' && !isNaN(pt.y)) ? pt.y : Math.max(20, Math.min(150, Math.round(140 - ((Number(pt.value) || 0) / maxVal) * 110)));
+      const x = (typeof pt.x === 'number' && !isNaN(pt.x)) ? pt.x : (count > 1 ? Math.round(50 + (idx / (count - 1)) * 430) : 260);
+      const y = (typeof pt.y === 'number' && !isNaN(pt.y)) ? pt.y : Math.max(20, Math.min(145, Math.round(145 - ((Number(pt.value) || 0) / maxVal) * 120)));
       return { ...pt, x, y };
     });
 
     const first = validPoints[0];
     const last = validPoints[validPoints.length - 1];
 
-    const linePath = validPoints.reduce((acc, pt, idx) => {
-      return idx === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`;
-    }, '');
+    if (validPoints.length === 1) {
+      return { linePath: `M ${first.x} ${first.y}`, areaPath: '', validPoints };
+    }
 
-    const areaPath = `M ${first.x} 170 L ${linePath.replace('M ', '')} L ${last.x} 170 Z`;
+    let linePath = `M ${first.x} ${first.y}`;
+    for (let i = 0; i < validPoints.length - 1; i++) {
+      const p0 = validPoints[i === 0 ? 0 : i - 1];
+      const p1 = validPoints[i];
+      const p2 = validPoints[i + 1];
+      const p3 = validPoints[i + 2 < validPoints.length ? i + 2 : i + 1];
+
+      const cp1x = Math.round(p1.x + (p2.x - p0.x) / 6);
+      const cp1y = Math.round(p1.y + (p2.y - p0.y) / 6);
+      const cp2x = Math.round(p2.x - (p3.x - p1.x) / 6);
+      const cp2y = Math.round(p2.y - (p3.y - p1.y) / 6);
+
+      linePath += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+    }
+
+    const areaPath = `${linePath} L ${last.x} 150 L ${first.x} 150 Z`;
 
     return { linePath, areaPath, validPoints };
   };
@@ -381,56 +434,214 @@ export default function Revenue() {
           )}
 
           {/* Chart Section */}
-          <div className="bg-white border border-slate-100 rounded-3xl shadow-sm overflow-hidden">
+          <div className="bg-white border border-slate-100 rounded-3xl shadow-sm overflow-hidden space-y-4">
             <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-wider leading-none">
-                  {activeChartTab} Revenue Performance Curve
+                  {activeChartTab === 'Weekly' ? 'Revenue Overview (Weekly)' : 
+                   activeChartTab === 'Day-wise' ? 'DAY-WISE REVENUE PERFORMANCE CURVE' :
+                   activeChartTab === 'Monthly' ? 'MONTHLY REVENUE PERFORMANCE CURVE' :
+                   'YEARLY REVENUE PERFORMANCE CURVE'}
                 </h2>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-2xl font-black text-rose-600 tracking-tight leading-none font-mono">
-                    ₹ {Number(summary.today || 0).toLocaleString()}
-                  </span>
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                    Today's Earnings
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xs sm:text-sm font-black text-rose-600 tracking-tight leading-tight font-mono">
+                    {revenueTimeframe?.periodSubtitle || (
+                      activeChartTab === 'Day-wise' ? `₹ ${Number(summary.today || 0).toLocaleString()} TODAY'S EARNINGS` :
+                      activeChartTab === 'Monthly' ? `₹ ${Number(summary.thisMonth || 0).toLocaleString()} TOTAL EARNINGS (${selectedYear})` :
+                      `₹ ${Number(summary.totalRevenue || 0).toLocaleString()}`
+                    )}
                   </span>
                 </div>
               </div>
 
-              {/* Timeframe Selector */}
-              <div className="bg-slate-100 p-1 rounded-2xl flex gap-1 border border-slate-200">
-                {['Day-wise', 'Weekly', 'Monthly', 'Yearly'].map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveChartTab(tab)}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${
-                      activeChartTab === tab
-                        ? 'bg-white text-slate-800 shadow-sm'
-                        : 'text-slate-400 hover:text-slate-600 bg-transparent'
-                    }`}
-                  >
-                    {tab}
-                  </button>
-                ))}
+              {/* Timeframe Selector & Badge */}
+              <div className="flex items-center gap-2.5 flex-wrap">
+                {activeChartTab === 'Weekly' && (
+                  <div className="px-3 py-1 bg-rose-600 text-white font-black text-xs rounded-xl shadow-xs font-mono">
+                    {revenueTimeframe?.periodTotalFormatted || "₹0"}
+                  </div>
+                )}
+                <div className="bg-slate-100 p-1 rounded-2xl flex gap-1 border border-slate-200">
+                  {['Day-wise', 'Weekly', 'Monthly', 'Yearly'].map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => {
+                        setActiveChartTab(tab);
+                        setSelectedDay('all');
+                        setSelectedWeek('all');
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${
+                        activeChartTab === tab
+                          ? 'bg-white text-slate-800 shadow-sm'
+                          : 'text-slate-400 hover:text-slate-600 bg-transparent'
+                      }`}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
+            {/* Filter Bar: Aligned to the RIGHT side and strictly on ONE row */}
+            <div className="px-6 flex items-center justify-end gap-2 pt-2.5 border-t border-slate-100 flex-nowrap overflow-x-auto no-scrollbar">
+              {/* 1. Day-wise Tab Filter: Calendar Date Picker Only */}
+              {activeChartTab === 'Day-wise' && (
+                <div className="flex items-center gap-1.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 px-2.5 py-1.5 rounded-xl shadow-2xs transition-all shrink-0">
+                  <Calendar size={13} className="text-rose-600 shrink-0" />
+                  <input
+                    type="date"
+                    value={`${selectedYear}-${String(selectedMonth === 'all' ? 1 : selectedMonth).padStart(2, '0')}-${selectedDay !== 'all' ? String(selectedDay).padStart(2, '0') : '01'}`}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        const [y, m, d] = e.target.value.split('-').map(Number);
+                        setSelectedYear(y);
+                        setSelectedMonth(m);
+                        setSelectedDay(d);
+                      }
+                    }}
+                    className="text-xs font-bold text-slate-700 bg-transparent border-none focus:outline-none cursor-pointer"
+                  />
+                </div>
+              )}
+
+              {/* 2. Weekly Tab Filters: Select Month, Year, Week in one row */}
+              {activeChartTab === 'Weekly' && (
+                <>
+                  <div className="flex items-center gap-1 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 px-2.5 py-1.5 rounded-xl shadow-2xs transition-all shrink-0">
+                    <Calendar size={13} className="text-rose-600 shrink-0" />
+                    <select
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                      className="text-xs font-bold text-slate-700 bg-transparent border-none focus:outline-none cursor-pointer"
+                    >
+                      {monthsList.map(m => (
+                        <option key={m.value} value={m.value}>{m.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 px-2.5 py-1.5 rounded-xl shadow-2xs transition-all shrink-0">
+                    <select
+                      value={selectedYear}
+                      onChange={(e) => setSelectedYear(Number(e.target.value))}
+                      className="text-xs font-bold text-slate-700 bg-transparent border-none focus:outline-none cursor-pointer"
+                    >
+                      {yearsList.map(y => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 px-2.5 py-1.5 rounded-xl shadow-2xs transition-all shrink-0">
+                    <Clock size={13} className="text-rose-600 shrink-0" />
+                    <select
+                      value={selectedWeek}
+                      onChange={(e) => setSelectedWeek(e.target.value)}
+                      className="text-xs font-bold text-slate-700 bg-transparent border-none focus:outline-none cursor-pointer"
+                    >
+                      <option value="all">All 4 Weeks</option>
+                      <option value="1">Week 1 (1–7)</option>
+                      <option value="2">Week 2 (8–14)</option>
+                      <option value="3">Week 3 (15–21)</option>
+                      <option value="4">Week 4 (22–{daysInSelectedMonth})</option>
+                    </select>
+                  </div>
+                </>
+              )}
+
+              {/* 3. Monthly Tab Filters: Select Month & Year */}
+              {activeChartTab === 'Monthly' && (
+                <>
+                  <div className="flex items-center gap-1 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 px-2.5 py-1.5 rounded-xl shadow-2xs transition-all shrink-0">
+                    <Calendar size={13} className="text-rose-600 shrink-0" />
+                    <select
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                      className="text-xs font-bold text-slate-700 bg-transparent border-none focus:outline-none cursor-pointer"
+                    >
+                      <option value="all">All Months</option>
+                      {monthsList.map(m => (
+                        <option key={m.value} value={m.value}>{m.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 px-2.5 py-1.5 rounded-xl shadow-2xs transition-all shrink-0">
+                    <select
+                      value={selectedYear}
+                      onChange={(e) => setSelectedYear(Number(e.target.value))}
+                      className="text-xs font-bold text-slate-700 bg-transparent border-none focus:outline-none cursor-pointer"
+                    >
+                      {yearsList.map(y => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              {/* 4. Yearly Tab Filters: Select Year Dropdown */}
+              {activeChartTab === 'Yearly' && (
+                <>
+                  <div className="flex items-center gap-1 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 px-2.5 py-1.5 rounded-xl shadow-2xs transition-all shrink-0">
+                    <Calendar size={13} className="text-rose-600 shrink-0" />
+                    <select
+                      value={selectedYear}
+                      onChange={(e) => setSelectedYear(Number(e.target.value))}
+                      className="text-xs font-bold text-slate-700 bg-transparent border-none focus:outline-none cursor-pointer"
+                    >
+                      {yearsList.map(y => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+
             {/* SVG Line Chart */}
-            <div className="p-6">
-              <div className="relative h-64 w-full border border-slate-100 rounded-2xl p-4 flex items-end bg-slate-50/20">
-                <svg className="absolute inset-0 w-full h-full p-4 overflow-visible" viewBox="0 0 520 180" preserveAspectRatio="none">
+            <div className="p-6 pt-2">
+              <div className="relative h-64 w-full border border-slate-100 rounded-2xl p-4 flex items-end bg-slate-50/20 overflow-hidden">
+                <svg className="absolute inset-0 w-full h-full p-2 overflow-visible" viewBox="0 0 520 180" preserveAspectRatio="none">
                   <defs>
                     <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.12" />
+                      <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.22" />
+                      <stop offset="70%" stopColor="#f43f5e" stopOpacity="0.05" />
                       <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.0" />
                     </linearGradient>
                   </defs>
 
-                  {/* Grid Lines */}
-                  <line x1="50" y1="20" x2="470" y2="20" stroke="#f1f5f9" strokeWidth="1" strokeDasharray="3 3" />
-                  <line x1="50" y1="60" x2="470" y2="60" stroke="#f1f5f9" strokeWidth="1" strokeDasharray="3 3" />
-                  <line x1="50" y1="100" x2="470" y2="100" stroke="#f1f5f9" strokeWidth="1" strokeDasharray="3 3" />
-                  <line x1="50" y1="140" x2="470" y2="140" stroke="#f1f5f9" strokeWidth="1" strokeDasharray="3 3" />
+                  {/* Y-Axis scale and horizontal grid lines */}
+                  {(revenueTimeframe?.ySteps || [80000, 60000, 40000, 20000, 0]).map((stepVal, sIdx) => {
+                    const stepY = Math.round(25 + (sIdx / 4) * 120);
+                    const stepLabel = stepVal >= 1000 ? `₹${Math.round(stepVal / 1000)}K` : `₹${stepVal}`;
+                    return (
+                      <g key={sIdx}>
+                        <text
+                          x="42"
+                          y={stepY + 3}
+                          textAnchor="end"
+                          fill="#94a3b8"
+                          fontSize="8"
+                          fontWeight="700"
+                          fontFamily="ui-monospace, monospace"
+                        >
+                          {stepLabel}
+                        </text>
+                        <line
+                          x1="48"
+                          y1={stepY}
+                          x2="500"
+                          y2={stepY}
+                          stroke="#f1f5f9"
+                          strokeWidth="1"
+                          strokeDasharray="3 3"
+                        />
+                      </g>
+                    );
+                  })}
 
                   {/* Area path */}
                   {areaPath && (
@@ -443,44 +654,132 @@ export default function Revenue() {
                       d={linePath}
                       fill="none"
                       stroke="#d31e1e"
-                      strokeWidth="3.5"
+                      strokeWidth="3"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
                   )}
 
-                  {/* Data Points */}
-                  {validPoints.map((pt, index) => (
-                    <g key={index}>
-                      <circle
-                        cx={pt.x}
-                        cy={pt.y}
-                        r={index === validPoints.length - 1 ? "5.5" : "4"}
-                        fill="#ffffff"
-                        stroke="#d31e1e"
-                        strokeWidth={index === validPoints.length - 1 ? "3.5" : "2"}
-                      />
-                      <text
-                        x={pt.x}
-                        y={pt.y - 12}
-                        textAnchor="middle"
-                        fill={index === validPoints.length - 1 ? "#d31e1e" : "#64748b"}
-                        className="font-black font-mono"
-                        style={{ fontSize: '8px' }}
+                  {/* Hover vertical dashed guideline */}
+                  {hoveredPoint !== null && validPoints[hoveredPoint] && (
+                    <line
+                      x1={validPoints[hoveredPoint].x}
+                      y1={25}
+                      x2={validPoints[hoveredPoint].x}
+                      y2={150}
+                      stroke="#f43f5e"
+                      strokeWidth="1.5"
+                      strokeDasharray="3 3"
+                      opacity="0.6"
+                    />
+                  )}
+
+                  {/* Data Points with interactive badges */}
+                  {validPoints.map((pt, index) => {
+                    const isSelected = (activeChartTab === 'Day-wise' && selectedDay !== 'all' && pt.day === Number(selectedDay)) ||
+                                       (activeChartTab === 'Weekly' && selectedWeek !== 'all' && pt.weekNum === Number(selectedWeek));
+                    const isFaded = (activeChartTab === 'Day-wise' && selectedDay !== 'all' && pt.day !== Number(selectedDay)) ||
+                                    (activeChartTab === 'Weekly' && selectedWeek !== 'all' && pt.weekNum !== Number(selectedWeek));
+                    const val = Number(pt.value || 0);
+                    const isHovered = hoveredPoint === index;
+                    const showBadge = (val > 0) || isSelected || isHovered;
+                    const isDenseZero = activeChartTab === 'Day-wise' && val === 0 && !isSelected && !isHovered;
+
+                    const labelText = `₹${val.toLocaleString()}`;
+                    const badgeWidth = Math.max(46, labelText.length * 6.5 + 8);
+
+                    return (
+                      <g 
+                        key={index}
+                        opacity={isFaded ? 0.35 : 1}
+                        className="cursor-pointer transition-opacity duration-200"
+                        onMouseEnter={() => setHoveredPoint(index)}
+                        onMouseLeave={() => setHoveredPoint(null)}
+                        onClick={() => {
+                          if (activeChartTab === 'Day-wise' && pt.day) {
+                            setSelectedDay(selectedDay === String(pt.day) ? 'all' : String(pt.day));
+                          } else if (activeChartTab === 'Weekly' && pt.weekNum) {
+                            setSelectedWeek(selectedWeek === String(pt.weekNum) ? 'all' : String(pt.weekNum));
+                          }
+                        }}
                       >
-                        ₹{Number(pt.value || 0).toLocaleString()}
-                      </text>
-                    </g>
-                  ))}
+                        {/* Circle Node: Subtle small dot for 0-value days; prominent circle for active/hovered */}
+                        {isDenseZero ? (
+                          <circle
+                            cx={pt.x}
+                            cy={pt.y}
+                            r="2.5"
+                            fill="#fda4af"
+                            className="transition-all hover:r-4"
+                          />
+                        ) : (
+                          <circle
+                            cx={pt.x}
+                            cy={pt.y}
+                            r={isSelected || isHovered ? "5.5" : "4"}
+                            fill="#ffffff"
+                            stroke="#d31e1e"
+                            strokeWidth={isSelected || isHovered ? "3" : "2.5"}
+                            className="transition-all"
+                          />
+                        )}
+
+                        {/* Red Badge above Node */}
+                        {showBadge && (
+                          <g className="animate-in fade-in zoom-in-95 duration-150">
+                            <rect
+                              x={pt.x - (badgeWidth / 2)}
+                              y={pt.y - 25}
+                              width={badgeWidth}
+                              height="17"
+                              rx="4"
+                              fill="#d31e1e"
+                            />
+                            <polygon
+                              points={`${pt.x - 3.5},${pt.y - 8} ${pt.x + 3.5},${pt.y - 8} ${pt.x},${pt.y - 4.5}`}
+                              fill="#d31e1e"
+                            />
+                            <text
+                              x={pt.x}
+                              y={pt.y - 13.5}
+                              textAnchor="middle"
+                              fill="#ffffff"
+                              fontSize="8"
+                              fontWeight="800"
+                              fontFamily="ui-monospace, monospace"
+                            >
+                              {labelText}
+                            </text>
+                          </g>
+                        )}
+                      </g>
+                    );
+                  })}
                 </svg>
 
-                {/* X Axis Labels */}
-                <div className="absolute bottom-1.5 inset-x-0 px-5 flex justify-between text-[8px] font-black text-slate-400 text-center leading-tight">
-                  {validPoints.map((pt, i) => (
-                    <span key={i} className={i === validPoints.length - 1 ? 'text-rose-600 font-extrabold' : ''}>
-                      {String(pt.label || '').replace('\n', ' ')}
-                    </span>
-                  ))}
+                {/* X Axis Labels along bottom */}
+                <div className="absolute bottom-1 inset-x-0 pl-12 pr-4 flex justify-between text-[9px] font-bold text-slate-400 pointer-events-none">
+                  {validPoints.map((pt, i) => {
+                    const isDayWiseDense = activeChartTab === 'Day-wise' && validPoints.length > 15;
+                    const showLabel = !isDayWiseDense || (i % 2 === 0) || pt.isToday || (Number(pt.value) > 0) || (hoveredPoint === i);
+
+                    if (!showLabel) {
+                      return <span key={i} className="opacity-0">.</span>;
+                    }
+
+                    return (
+                      <span
+                        key={i}
+                        className={`transition-colors text-center ${
+                          pt.isToday || pt.isSelectedDay || hoveredPoint === i
+                            ? 'text-rose-600 font-black'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        {activeChartTab === 'Weekly' ? `${pt.label} (${pt.subLabel})` : pt.label}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             </div>

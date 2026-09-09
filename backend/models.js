@@ -273,6 +273,14 @@ const EmployeeSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  password: {
+    type: String,
+    default: ''
+  },
+  pin: {
+    type: String,
+    default: '1234'
+  },
   createdAt: {
     type: Date,
     default: Date.now
@@ -661,6 +669,28 @@ const HomestayOwnerSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  subscription: {
+    planId: { type: mongoose.Schema.Types.ObjectId, ref: 'SubscriptionPlan', default: null },
+    planName: { type: String, default: 'Free Trial' },
+    status: { type: String, enum: ['Active', 'Expired', 'None'], default: 'Active' },
+    billingCycle: { type: String, default: 'Monthly' },
+    price: { type: Number, default: 0 },
+    startDate: { type: Date, default: Date.now },
+    expiresAt: { type: Date, default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) },
+    paymentStatus: { type: String, enum: ['Paid', 'Trial', 'Pending'], default: 'Trial' },
+    transactionId: { type: String, default: '' },
+    history: [{
+      planId: { type: mongoose.Schema.Types.ObjectId, ref: 'SubscriptionPlan' },
+      planName: String,
+      price: Number,
+      billingCycle: String,
+      startDate: Date,
+      expiresAt: Date,
+      purchasedAt: { type: Date, default: Date.now },
+      transactionId: String,
+      paymentMethod: String
+    }]
+  },
   // Property linking list
   properties: [{
     propertyName: { type: String, default: '' },
@@ -1026,18 +1056,39 @@ const SmtpSettingsSchema = new mongoose.Schema({
 export const SmtpSettings = mongoose.model('SmtpSettings', SmtpSettingsSchema);
 
 const CouponSchema = new mongoose.Schema({
-  code: { type: String, unique: true, required: true },
+  code: { type: String, unique: true, required: true, uppercase: true, trim: true },
+  title: { type: String, default: '' },
+  description: { type: String, default: '' },
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'HomestayOwner', default: null },
+  applicableHomestays: [{ type: String }], // 'all' or property ObjectIds
+  targetAudience: { type: String, enum: ['both', 'customer', 'agent'], default: 'both' }, // 'both' | 'customer' (B2C) | 'agent' (B2B)
+  discountType: { type: String, enum: ['percentage', 'fixed'], default: 'percentage' },
+  discountValue: { type: Number, required: true, min: 0 },
+  maxDiscountAmount: { type: Number, default: null }, // Cap on percentage discount (e.g. up to ₹1,500)
+  minCartAmount: { type: Number, default: 0 },
+  maxCartAmount: { type: Number, default: null },
+  startDate: { type: Date, default: Date.now },
+  endDate: { type: Date, required: true },
+  totalUsageLimit: { type: Number, default: 0 }, // 0 = unlimited
+  perUserLimit: { type: Number, default: 1 }, // max uses per single customer/agent
+  usedCount: { type: Number, default: 0 },
+  usedBy: [{
+    userIdentifier: { type: String }, // phone or email
+    bookingId: { type: String },
+    discountAmount: { type: Number },
+    usedAt: { type: Date, default: Date.now }
+  }],
+  status: { type: String, enum: ['Active', 'Inactive', 'Expired'], default: 'Active' },
+  // Backward compatibility aliases
   type: { type: String, enum: ['percentage', 'fixed'], default: 'percentage' },
-  value: { type: Number, required: true },
+  value: { type: Number },
   minOrder: { type: Number, default: 0 },
   maxUses: { type: Number, default: 0 },
-  usedCount: { type: Number, default: 0 },
-  expiry: { type: Date, required: true },
-  status: { type: String, enum: ['Active', 'Inactive', 'Expired'], default: 'Active' },
+  expiry: { type: Date },
   createdAt: { type: Date, default: Date.now },
-  createdBy: { type: String, default: 'Super Admin' },
-  updatedBy: { type: String, default: 'Super Admin' }
-});
+  createdBy: { type: String, default: 'Homestay Owner' },
+  updatedBy: { type: String, default: 'Homestay Owner' }
+}, { timestamps: true });
 
 export const Coupon = mongoose.model('Coupon', CouponSchema);
 
@@ -1289,9 +1340,141 @@ const PublicShareLinkSchema = new mongoose.Schema({
   ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'HomestayOwner' },
   linkType: { type: String, enum: ['guest', 'agent'], required: true },
   isUsed: { type: Boolean, default: false },
-  usedByBookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Booking' },
   usedAt: { type: Date },
   createdAt: { type: Date, default: Date.now }
 });
 
 export const PublicShareLink = mongoose.model('PublicShareLink', PublicShareLinkSchema, 'publicShareLinks');
+
+// ==========================================
+// Homestay Owner Staff & Roles Schemas
+// ==========================================
+const HomestayRoleSchema = new mongoose.Schema({
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'HomestayOwner', required: true, index: true },
+  name: { type: String, required: true },
+  description: { type: String, default: '' },
+  isSystemDefault: { type: Boolean, default: false },
+  permissions: [{
+    module: { type: String, required: true }, // inventory, bookings, requests, guests, payments, coupons, availability, staff
+    moduleName: { type: String, required: true },
+    view: { type: Boolean, default: false },
+    add: { type: Boolean, default: false },
+    edit: { type: Boolean, default: false },
+    delete: { type: Boolean, default: false }
+  }]
+}, { timestamps: true });
+
+HomestayRoleSchema.index({ ownerId: 1, name: 1 });
+
+export const HomestayRole = mongoose.model('HomestayRole', HomestayRoleSchema, 'homestayRoles');
+
+const HomestayStaffSchema = new mongoose.Schema({
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'HomestayOwner', required: true, index: true },
+  name: { type: String, required: true },
+  firstName: { type: String, default: '' },
+  lastName: { type: String, default: '' },
+  fatherName: { type: String, default: '' },
+  email: { type: String, required: true },
+  phone: { type: String, required: true },
+  mobile: { type: String, default: '' },
+  roleId: { type: mongoose.Schema.Types.ObjectId, ref: 'HomestayRole', required: true },
+  roleName: { type: String, default: '' },
+  role: { type: String, default: '' },
+  aadharNo: { type: String, default: '' },
+  panNo: { type: String, default: '' },
+  monthlySalary: { type: Number, default: 0 },
+  basicSalary: { type: Number, default: 0 },
+  hra: { type: Number, default: 0 },
+  da: { type: Number, default: 0 },
+  specialAllowance: { type: Number, default: 0 },
+  otherAllowance: { type: Number, default: 0 },
+  pfContribution: { type: Number, default: 0 },
+  esiContribution: { type: Number, default: 0 },
+  tempAddress: {
+    line1: { type: String, default: '' },
+    line2: { type: String, default: '' },
+    landmark: { type: String, default: '' },
+    state: { type: String, default: '' },
+    city: { type: String, default: '' },
+    pinCode: { type: String, default: '' }
+  },
+  permAddress: {
+    line1: { type: String, default: '' },
+    line2: { type: String, default: '' },
+    landmark: { type: String, default: '' },
+    state: { type: String, default: '' },
+    city: { type: String, default: '' },
+    pinCode: { type: String, default: '' }
+  },
+  bank: {
+    bankName: { type: String, default: '' },
+    accountNumber: { type: String, default: '' },
+    ifscCode: { type: String, default: '' },
+    upiId: { type: String, default: '' }
+  },
+  documents: {
+    aadharFront: { type: String, default: '' },
+    aadharBack: { type: String, default: '' },
+    panFront: { type: String, default: '' },
+    panBack: { type: String, default: '' },
+    drivingLicense: { type: String, default: '' },
+    voterId: { type: String, default: '' },
+    profilePhoto: { type: String, default: '' }
+  },
+  assignedProperties: [{ type: String, default: 'all' }],
+  status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
+  pin: { type: String, default: '1234' },
+  password: { type: String, default: '' },
+  avatar: { type: String, default: '' },
+  address: { type: String, default: '' },
+  emergencyContact: { type: String, default: '' },
+  notes: { type: String, default: '' },
+  joinedDate: { type: Date, default: Date.now },
+  lastActive: { type: Date, default: null }
+}, { timestamps: true });
+
+HomestayStaffSchema.index({ ownerId: 1, email: 1 });
+
+export const HomestayStaff = mongoose.model('HomestayStaff', HomestayStaffSchema, 'homestayStaff');
+
+// Notification Schema
+const NotificationSchema = new mongoose.Schema({
+  recipientType: { type: String, enum: ['HomestayOwner', 'SuperAdmin', 'All'], default: 'HomestayOwner' },
+  recipientId: { type: mongoose.Schema.Types.ObjectId, ref: 'HomestayOwner', index: true },
+  title: { type: String, required: true },
+  message: { type: String, required: true },
+  type: { 
+    type: String, 
+    enum: ['booking', 'confirmation', 'rejection', 'cancellation', 'system', 'payment'], 
+    default: 'booking' 
+  },
+  bookingId: { type: String, default: '' },
+  read: { type: Boolean, default: false },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+  createdAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+NotificationSchema.index({ recipientId: 1, read: 1, createdAt: -1 });
+
+export const Notification = mongoose.model('Notification', NotificationSchema, 'notifications');
+
+// Subscription Plan Schema
+const SubscriptionPlanSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  tagline: { type: String, default: '' },
+  price: { type: Number, required: true },
+  billingCycle: { type: String, enum: ['Monthly', 'Quarterly', 'Yearly', 'Custom'], default: 'Monthly' },
+  durationDays: { type: Number, default: 30 },
+  description: { type: String, default: '' },
+  features: [{ type: String }],
+  maxProperties: { type: Number, default: 1 },
+  maxRooms: { type: Number, default: 10 },
+  maxStaff: { type: Number, default: 5 },
+  status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
+  isPopular: { type: Boolean, default: false },
+  createdBy: { type: String, default: 'Super Admin' }
+}, { timestamps: true });
+
+export const SubscriptionPlan = mongoose.model('SubscriptionPlan', SubscriptionPlanSchema, 'subscriptionPlans');
+
+

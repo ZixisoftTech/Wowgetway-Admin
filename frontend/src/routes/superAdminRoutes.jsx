@@ -25,6 +25,7 @@ import Notifications from '../modules/WoWSuper-Admin/pages/Notifications.jsx';
 import Profile from '../modules/WoWSuper-Admin/pages/Profile.jsx';
 import RecycleBin from '../modules/WoWSuper-Admin/pages/RecycleBin.jsx';
 import WebApps from '../modules/WoWSuper-Admin/pages/WebApps.jsx';
+import SubscriptionPlans from '../modules/WoWSuper-Admin/pages/SubscriptionPlans.jsx';
 
 import { SuperAdminProtectedRoute } from './routeGuards.jsx';
 
@@ -36,6 +37,7 @@ export const getSuperAdminRoutes = () => (
     <Route path="roles" element={<ManageRoles />} />
     <Route path="attendance" element={<AttendanceManagement />} />
     <Route path="salary" element={<SalaryManagement />} />
+    <Route path="subscription-plans" element={<SubscriptionPlans />} />
     <Route path="homestay-owners" element={<HomestayOwnersManagement />} />
     <Route path="homestay-owners/add" element={<HomestayOwnersManagement />} />
     <Route path="homestay-owners/:id" element={<HomestayOwnersManagement />} />

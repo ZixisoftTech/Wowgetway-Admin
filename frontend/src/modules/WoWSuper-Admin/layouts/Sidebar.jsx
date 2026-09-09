@@ -11,7 +11,8 @@ import {
   X,
   Folder,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  CreditCard
 } from 'lucide-react';
 import { setActiveTab, setSidebarOpen } from '../store/dashboardSlice.js';
 
@@ -19,6 +20,7 @@ const menuItems = [
   { name: 'Dashboard', icon: LayoutDashboard, color: 'text-blue-550', path: '/dashboard' },
   { name: 'Staff Management', icon: Users, color: 'text-emerald-500', path: '/staff-management' },
   { name: 'Manage Roles', icon: ShieldCheck, color: 'text-indigo-500', path: '/roles' },
+  { name: 'Subscription Plans', icon: CreditCard, color: 'text-violet-500', path: '/subscription-plans' },
   { name: 'Manage Homestay Owners', icon: UserCheck, color: 'text-sky-500', path: '/homestay-owners' },
   { name: 'Manage Homestays', icon: Home, color: 'text-green-500', path: '/homestays' },
   { name: 'Recycle Bin', icon: Trash2, color: 'text-slate-500', path: '/recycle-bin' },

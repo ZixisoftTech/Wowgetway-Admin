@@ -21,6 +21,11 @@ import BookingQuotation from '../modules/Homestay-Owner-Admin/pages/BookingQuota
 import BookingTaxInvoice from '../modules/Homestay-Owner-Admin/pages/BookingTaxInvoice.jsx';
 import ManageBookings from '../modules/Homestay-Owner-Admin/pages/ManageBookings.jsx';
 import ManagePayments from '../modules/Homestay-Owner-Admin/pages/ManagePayments.jsx';
+import ComingSoon from '../modules/Homestay-Owner-Admin/pages/ComingSoon.jsx';
+import Coupons from '../modules/Homestay-Owner-Admin/pages/Coupons.jsx';
+import StaffManagement from '../modules/Homestay-Owner-Admin/pages/StaffManagement.jsx';
+import Notifications from '../modules/Homestay-Owner-Admin/pages/Notifications.jsx';
+import ManageSubscription from '../modules/Homestay-Owner-Admin/pages/ManageSubscription.jsx';
 import { HomestayOwnerProtectedRoute } from './routeGuards.jsx';
 
 export const getHomestayOwnerRoutes = () => (
@@ -54,6 +59,13 @@ export const getHomestayOwnerRoutes = () => (
     <Route path="guests" element={<GuestListing />} />
     <Route path="guests/:guestId" element={<GuestDetails />} />
     
+    {/* Other Routes */}
+    <Route path="staff" element={<StaffManagement />} />
+    <Route path="notifications" element={<Notifications />} />
+    <Route path="signatures-stamps" element={<ComingSoon title="Signatures / Stamps / Logo" />} />
+    <Route path="coupons" element={<Coupons />} />
+    <Route path="subscription" element={<ManageSubscription />} />
+
     {/* Inventory Sub-routes */}
     <Route path="inventory" element={<InventoryList />} />
     <Route path="inventory/add-property" element={<PropertySetupWizard />} />

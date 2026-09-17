@@ -61,7 +61,7 @@ export default function Coupons() {
     code: '',
     title: '',
     description: '',
-    applicableHomestays: ['all'],
+    applicableHomestays: [],
     targetAudience: 'both', // 'both' | 'customer' | 'agent'
     discountType: 'percentage', // 'percentage' | 'fixed'
     discountValue: '',
@@ -130,6 +130,7 @@ export default function Coupons() {
     setEditingCouponId(null);
     setFormData({
       ...initialFormState,
+      applicableHomestays: properties.length > 0 ? [String(properties[0]._id)] : [],
       code: `WOW${Math.floor(10 + Math.random() * 90)}`
     });
     setIsModalOpen(true);
@@ -142,7 +143,7 @@ export default function Coupons() {
       code: coupon.code,
       title: coupon.title,
       description: coupon.description || '',
-      applicableHomestays: coupon.applicableHomestays?.length ? coupon.applicableHomestays : ['all'],
+      applicableHomestays: coupon.applicableHomestays?.length ? coupon.applicableHomestays : [],
       targetAudience: coupon.targetAudience || 'both',
       discountType: coupon.discountType || 'percentage',
       discountValue: coupon.discountValue || '',
@@ -161,16 +162,19 @@ export default function Coupons() {
   // Toggle Homestay Selection in Form
   const handleToggleHomestay = (propId) => {
     setFormData((prev) => {
-      let current = [...prev.applicableHomestays];
+      let current = [...(prev.applicableHomestays || [])];
       if (propId === 'all') {
-        return { ...prev, applicableHomestays: ['all'] };
+        if (current.includes('all')) {
+          return { ...prev, applicableHomestays: properties.length > 0 ? [String(properties[0]._id)] : [] };
+        } else {
+          return { ...prev, applicableHomestays: ['all'] };
+        }
       }
       if (current.includes('all')) {
         current = [];
       }
       if (current.includes(propId)) {
         current = current.filter((id) => id !== propId);
-        if (current.length === 0) current = ['all'];
       } else {
         current.push(propId);
       }
@@ -183,6 +187,10 @@ export default function Coupons() {
     e.preventDefault();
     if (!formData.code || !formData.title || !formData.discountValue || !formData.endDate) {
       setActionMsg({ type: 'error', text: 'Please fill in all mandatory fields.' });
+      return;
+    }
+    if (!formData.applicableHomestays || formData.applicableHomestays.length === 0) {
+      setActionMsg({ type: 'error', text: 'Please select at least one applicable homestay for this coupon.' });
       return;
     }
 
@@ -867,6 +875,8 @@ export default function Coupons() {
                     <span className="text-[10px] text-slate-400 font-bold">
                       {formData.applicableHomestays.includes('all')
                         ? 'All Homestays Selected'
+                        : formData.applicableHomestays.length === 0
+                        ? <span className="text-rose-600 font-bold">None Selected (Required)</span>
                         : `${formData.applicableHomestays.length} Homestay(s) Selected`}
                     </span>
                   </div>

@@ -14983,12 +14983,57 @@ router.patch('/homestay-owner/coupons/:id/status', authenticateToken, async (req
   }
 });
 
+// Helper to check if a coupon is applicable to a specific property
+const isCouponApplicableToProperty = (coupon, property) => {
+  if (!coupon || !property) return false;
+  const applicable = coupon.applicableHomestays;
+  if (!Array.isArray(applicable) || applicable.length === 0) {
+    return false;
+  }
+
+  // If 'all', coupon is valid ONLY for homestays owned by this coupon's owner
+  if (applicable.includes('all')) {
+    if (coupon.ownerId && property.ownerId) {
+      return String(coupon.ownerId) === String(property.ownerId);
+    }
+    return false;
+  }
+
+  const propIdStr = String(property._id || '');
+  const propCodeStr = String(property.propertyId || '').trim();
+  const propNameStr = String(property.name || '').trim().toLowerCase();
+
+  return applicable.some(h => {
+    if (!h) return false;
+    const val = String(h).trim();
+    if (val === 'all') return false;
+    if (propIdStr && val === propIdStr) return true;
+    if (propCodeStr && val.toLowerCase() === propCodeStr.toLowerCase()) return true;
+    if (propNameStr && val.toLowerCase() === propNameStr) return true;
+    return false;
+  });
+};
+
 // GET /api/public/coupons/available (Public list of coupons applicable to a property)
-router.get('/public/coupons/available', async (req, res) => {
+router.get(['/public/coupons/available', '/api/public/coupons/available'], async (req, res) => {
   try {
     const { propertyId, bookingType = 'guest' } = req.query;
-    const now = new Date();
+    if (!propertyId) {
+      return res.json({ success: true, data: [] });
+    }
 
+    const prop = await Property.findOne({
+      $or: [
+        { _id: mongoose.Types.ObjectId.isValid(propertyId) ? propertyId : null },
+        { propertyId: propertyId }
+      ].filter(Boolean)
+    });
+
+    if (!prop) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const now = new Date();
     const audienceQuery = bookingType === 'agent' 
       ? { $in: ['both', 'agent'] } 
       : { $in: ['both', 'customer'] };
@@ -14997,17 +15042,14 @@ router.get('/public/coupons/available', async (req, res) => {
       status: 'Active',
       startDate: { $lte: now },
       endDate: { $gte: now },
-      targetAudience: audienceQuery
+      targetAudience: audienceQuery,
+      $or: [
+        { applicableHomestays: String(prop._id) },
+        { applicableHomestays: prop._id },
+        { applicableHomestays: prop.propertyId },
+        { applicableHomestays: 'all', ownerId: prop.ownerId }
+      ]
     };
-
-    if (propertyId) {
-      query.$or = [
-        { applicableHomestays: 'all' },
-        { applicableHomestays: propertyId },
-        { applicableHomestays: String(propertyId) },
-        { applicableHomestays: { $size: 0 } }
-      ];
-    }
 
     const coupons = await Coupon.find(query)
       .select('code title description discountType discountValue maxDiscountAmount minCartAmount endDate')
@@ -15025,7 +15067,7 @@ router.get('/public/coupons/available', async (req, res) => {
 });
 
 // POST /api/public/coupons/validate (Validate coupon code for a booking)
-router.post('/api/public/coupons/validate', async (req, res) => {
+router.post(['/public/coupons/validate', '/api/public/coupons/validate'], async (req, res) => {
   try {
     const { code, propertyId, subtotal = 0, bookingType = 'guest', guestMobile = '', guestEmail = '' } = req.body;
     if (!code) {
@@ -15061,11 +15103,23 @@ router.post('/api/public/coupons/validate', async (req, res) => {
     }
 
     // Check applicable homestay
-    if (propertyId && coupon.applicableHomestays && coupon.applicableHomestays.length > 0 && !coupon.applicableHomestays.includes('all')) {
-      const applies = coupon.applicableHomestays.some(h => String(h) === String(propertyId));
-      if (!applies) {
-        return res.status(400).json({ valid: false, message: 'This coupon is not valid for this homestay property.' });
-      }
+    if (!propertyId) {
+      return res.status(400).json({ valid: false, message: 'Property information is required to validate coupon.' });
+    }
+
+    const propertyDoc = await Property.findOne({
+      $or: [
+        { _id: mongoose.Types.ObjectId.isValid(propertyId) ? propertyId : null },
+        { propertyId: propertyId }
+      ].filter(Boolean)
+    });
+
+    if (!propertyDoc) {
+      return res.status(404).json({ valid: false, message: 'Homestay property not found.' });
+    }
+
+    if (!isCouponApplicableToProperty(coupon, propertyDoc)) {
+      return res.status(400).json({ valid: false, message: 'This coupon is not valid for this homestay.' });
     }
 
     // Check cart amount
@@ -15200,14 +15254,20 @@ router.post('/public/calculate-price', async (req, res) => {
     let discountAmount = 0;
     let appliedCouponInfo = null;
 
-    if (couponCode) {
+    if (couponCode && propertyId) {
       const cleanCode = String(couponCode).trim().toUpperCase();
       const coupon = await Coupon.findOne({ code: cleanCode, status: 'Active' });
       if (coupon) {
+        const propDoc = await Property.findOne({
+          $or: [
+            { _id: mongoose.Types.ObjectId.isValid(propertyId) ? propertyId : null },
+            { propertyId: propertyId }
+          ].filter(Boolean)
+        });
         const now = new Date();
         const validDates = (!coupon.startDate || new Date(coupon.startDate) <= now) && (new Date(coupon.endDate) >= now);
         const validAudience = coupon.targetAudience === 'both' || (bookingType === 'agent' ? coupon.targetAudience === 'agent' : coupon.targetAudience === 'customer');
-        const validProperty = !coupon.applicableHomestays?.length || coupon.applicableHomestays.includes('all') || coupon.applicableHomestays.some(h => String(h) === String(propertyId));
+        const validProperty = isCouponApplicableToProperty(coupon, propDoc);
         const validCart = (!coupon.minCartAmount || totalRoomCost >= coupon.minCartAmount) && (!coupon.maxCartAmount || totalRoomCost <= coupon.maxCartAmount);
         const validUsage = !coupon.totalUsageLimit || (coupon.usedCount < coupon.totalUsageLimit);
 
@@ -15358,15 +15418,25 @@ router.post('/public/create-booking', async (req, res) => {
     let appliedCouponDoc = null;
     if (couponCode) {
       const cleanCode = String(couponCode).trim().toUpperCase();
-      appliedCouponDoc = await Coupon.findOne({ code: cleanCode, status: 'Active' });
-      if (appliedCouponDoc) {
-        if (appliedCouponDoc.discountType === 'percentage') {
-          discountAmount = Math.round((totalRoomCost * Number(appliedCouponDoc.discountValue)) / 100);
-          if (appliedCouponDoc.maxDiscountAmount && appliedCouponDoc.maxDiscountAmount > 0) {
-            discountAmount = Math.min(discountAmount, Number(appliedCouponDoc.maxDiscountAmount));
+      const cDoc = await Coupon.findOne({ code: cleanCode, status: 'Active' });
+      if (cDoc) {
+        const now = new Date();
+        const validDates = (!cDoc.startDate || new Date(cDoc.startDate) <= now) && (new Date(cDoc.endDate) >= now);
+        const validAudience = cDoc.targetAudience === 'both' || (bookingType === 'agent' ? cDoc.targetAudience === 'agent' : cDoc.targetAudience === 'customer');
+        const validProperty = isCouponApplicableToProperty(cDoc, property);
+        const validCart = (!cDoc.minCartAmount || totalRoomCost >= cDoc.minCartAmount) && (!cDoc.maxCartAmount || totalRoomCost <= cDoc.maxCartAmount);
+        const validUsage = !cDoc.totalUsageLimit || (cDoc.usedCount < cDoc.totalUsageLimit);
+
+        if (validDates && validAudience && validProperty && validCart && validUsage) {
+          appliedCouponDoc = cDoc;
+          if (cDoc.discountType === 'percentage') {
+            discountAmount = Math.round((totalRoomCost * Number(cDoc.discountValue)) / 100);
+            if (cDoc.maxDiscountAmount && cDoc.maxDiscountAmount > 0) {
+              discountAmount = Math.min(discountAmount, Number(cDoc.maxDiscountAmount));
+            }
+          } else {
+            discountAmount = Math.min(totalRoomCost, Number(cDoc.discountValue));
           }
-        } else {
-          discountAmount = Math.min(totalRoomCost, Number(appliedCouponDoc.discountValue));
         }
       }
     }

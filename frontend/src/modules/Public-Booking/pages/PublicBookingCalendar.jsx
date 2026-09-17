@@ -137,7 +137,6 @@ export default function PublicBookingCalendar() {
   // Coupon States
   const [couponCodeInput, setCouponCodeInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState(null);
-  const [availableCoupons, setAvailableCoupons] = useState([]);
   const [validatingCoupon, setValidatingCoupon] = useState(false);
   const [couponError, setCouponError] = useState('');
   const [couponSuccess, setCouponSuccess] = useState('');
@@ -294,27 +293,6 @@ export default function PublicBookingCalendar() {
     fetchRooms();
   }, [propertyId, checkInDate, checkOutDate, linkType]);
 
-  // Fetch available coupons for this property and audience tier
-  useEffect(() => {
-    const fetchAvailableCoupons = async () => {
-      if (!propertyId) return;
-      try {
-        const res = await axios.get(getApiUrl('/api/public/coupons/available'), {
-          params: {
-            propertyId,
-            bookingType: linkType
-          }
-        });
-        if (res.data?.success) {
-          setAvailableCoupons(res.data.data || []);
-        }
-      } catch (err) {
-        console.error('Error fetching public coupons:', err);
-      }
-    };
-    fetchAvailableCoupons();
-  }, [propertyId, linkType]);
-
   // 4. Calculate Price whenever selected rooms, dates, or coupon changes
   useEffect(() => {
     if (!propertyId || !checkInDate || !checkOutDate || selectedRooms.length === 0) {
@@ -372,6 +350,12 @@ export default function PublicBookingCalendar() {
       return;
     }
 
+    const targetPropId = propertyId || property?._id || linkData?.property?._id || linkData?.propertyId;
+    if (!targetPropId) {
+      setCouponError('Property details loading. Please wait a moment.');
+      return;
+    }
+
     try {
       setValidatingCoupon(true);
       setCouponError('');
@@ -379,7 +363,7 @@ export default function PublicBookingCalendar() {
 
       const res = await axios.post(getApiUrl('/api/public/coupons/validate'), {
         code,
-        propertyId,
+        propertyId: targetPropId,
         subtotal: calculatedPricing.roomCost || 0,
         bookingType: linkType,
         guestMobile,
@@ -2046,46 +2030,6 @@ export default function PublicBookingCalendar() {
                           <span>{couponSuccess}</span>
                         </div>
                       )}
-                    </div>
-                  )}
-
-                  {/* Available Public Offers Clickable Chips */}
-                  {!appliedCoupon && availableCoupons.length > 0 && (
-                    <div className="space-y-1 pt-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                        Available Offers
-                      </span>
-                      <div className="space-y-1.5 max-h-32 overflow-y-auto pr-0.5">
-                        {availableCoupons.map((c) => (
-                          <div
-                            key={c._id || c.code}
-                            className="p-2 rounded-xl bg-slate-50 hover:bg-rose-50/50 border border-dashed border-slate-200 hover:border-rose-300 flex items-center justify-between gap-2 transition-all group"
-                          >
-                            <div className="truncate">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-mono font-black text-[11px] text-slate-800 bg-white px-1.5 py-0.5 rounded border border-slate-200">
-                                  {c.code}
-                                </span>
-                                <span className="text-[10px] font-black text-rose-600">
-                                  {c.discountType === 'percentage'
-                                    ? `${c.discountValue}% OFF`
-                                    : `₹${c.discountValue} OFF`}
-                                </span>
-                              </div>
-                              <span className="text-[9px] text-slate-500 font-medium block truncate mt-0.5">
-                                {c.minCartAmount > 0 ? `On bookings ₹${c.minCartAmount.toLocaleString()}+` : 'No minimum booking'}
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleApplyCoupon(c.code)}
-                              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer shadow-xs transition-all shrink-0"
-                            >
-                              Apply
-                            </button>
-                          </div>
-                        ))}
-                      </div>
                     </div>
                   )}
                 </div>

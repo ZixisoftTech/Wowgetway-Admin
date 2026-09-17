@@ -8,15 +8,17 @@ import {
   Trash2, 
   Check, 
   X, 
-  Crown, 
-  Building2, 
-  Users, 
   Home, 
-  Sparkles, 
+  BedDouble, 
+  Tag, 
+  Calendar, 
+  PlusCircle, 
   RefreshCw,
-  AlertCircle,
   SlidersHorizontal,
-  CheckCircle2
+  CheckCircle2,
+  Table as TableIcon,
+  LayoutGrid,
+  Info
 } from 'lucide-react';
 
 const API_BASE_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/admin/subscription-plans';
@@ -30,23 +32,29 @@ export default function SubscriptionPlans() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
+  const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
   const [modalOpen, setModalOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Form State
+  // 8 Specific Form Fields:
+  // 1. Plan Name
+  // 2. Description
+  // 3. Maximum Number of Homestays
+  // 4. Maximum Rooms per Homestay
+  // 5. MRP
+  // 6. Offer Price
+  // 7. Duration / Validity
+  // 8. Extra Room Add-on Price
   const [name, setName] = useState('');
-  const [tagline, setTagline] = useState('');
-  const [price, setPrice] = useState('');
-  const [billingCycle, setBillingCycle] = useState('Monthly');
-  const [durationDays, setDurationDays] = useState(30);
   const [description, setDescription] = useState('');
-  const [features, setFeatures] = useState(['']);
-  const [maxProperties, setMaxProperties] = useState(1);
-  const [maxRooms, setMaxRooms] = useState(10);
-  const [maxStaff, setMaxStaff] = useState(5);
+  const [maxHomestays, setMaxHomestays] = useState(1);
+  const [maxRoomsPerHomestay, setMaxRoomsPerHomestay] = useState(5);
+  const [mrp, setMrp] = useState('');
+  const [offerPrice, setOfferPrice] = useState('');
+  const [validity, setValidity] = useState('365 Days');
+  const [extraRoomPrice, setExtraRoomPrice] = useState(500);
   const [status, setStatus] = useState('Active');
-  const [isPopular, setIsPopular] = useState(false);
 
   const fetchPlans = async () => {
     const token = getAuthToken();
@@ -72,79 +80,66 @@ export default function SubscriptionPlans() {
   const handleOpenCreateModal = () => {
     setEditingPlan(null);
     setName('');
-    setTagline('');
-    setPrice('');
-    setBillingCycle('Monthly');
-    setDurationDays(30);
     setDescription('');
-    setFeatures([
-      'Core Property Management',
-      'Public Availability Calendar',
-      'Advance UPI Booking Slips',
-      'Email & WhatsApp Alerts'
-    ]);
-    setMaxProperties(1);
-    setMaxRooms(10);
-    setMaxStaff(5);
+    setMaxHomestays(1);
+    setMaxRoomsPerHomestay(5);
+    setMrp('');
+    setOfferPrice('');
+    setValidity('365 Days');
+    setExtraRoomPrice(500);
     setStatus('Active');
-    setIsPopular(false);
     setModalOpen(true);
   };
 
   const handleOpenEditModal = (plan) => {
     setEditingPlan(plan);
     setName(plan.name || '');
-    setTagline(plan.tagline || '');
-    setPrice(plan.price !== undefined ? String(plan.price) : '');
-    setBillingCycle(plan.billingCycle || 'Monthly');
-    setDurationDays(plan.durationDays || 30);
     setDescription(plan.description || '');
-    setFeatures(plan.features && plan.features.length > 0 ? plan.features : ['']);
-    setMaxProperties(plan.maxProperties || 1);
-    setMaxRooms(plan.maxRooms || 10);
-    setMaxStaff(plan.maxStaff || 5);
+    setMaxHomestays(plan.maxHomestays || plan.maxProperties || 1);
+    setMaxRoomsPerHomestay(plan.maxRoomsPerHomestay || plan.maxRooms || 5);
+    setMrp(plan.mrp !== undefined ? String(plan.mrp) : (plan.price ? String(plan.price) : ''));
+    setOfferPrice(plan.offerPrice !== undefined ? String(plan.offerPrice) : (plan.price ? String(plan.price) : ''));
+    setValidity(plan.validity || (plan.durationDays ? `${plan.durationDays} Days` : '365 Days'));
+    setExtraRoomPrice(plan.extraRoomPrice !== undefined ? plan.extraRoomPrice : 500);
     setStatus(plan.status || 'Active');
-    setIsPopular(Boolean(plan.isPopular));
     setModalOpen(true);
-  };
-
-  const handleFeatureChange = (index, val) => {
-    setFeatures(prev => {
-      const copy = [...prev];
-      copy[index] = val;
-      return copy;
-    });
-  };
-
-  const handleAddFeatureField = () => {
-    setFeatures(prev => [...prev, '']);
-  };
-
-  const handleRemoveFeatureField = (index) => {
-    setFeatures(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     const token = getAuthToken();
-    if (!name || price === '') {
-      alert('Plan Name and Price are required.');
+    if (!name.trim()) {
+      alert('Plan Name is required.');
+      return;
+    }
+    if (mrp === '' || offerPrice === '') {
+      alert('Both MRP and Offer Price are required.');
       return;
     }
 
+    // Parse validity to durationDays if possible
+    let parsedDays = 365;
+    const matchDays = String(validity).match(/(\d+)/);
+    if (matchDays && matchDays[1]) {
+      parsedDays = parseInt(matchDays[1], 10);
+      if (String(validity).toLowerCase().includes('month')) {
+        parsedDays = parsedDays * 30;
+      } else if (String(validity).toLowerCase().includes('year')) {
+        parsedDays = parsedDays * 365;
+      }
+    }
+
     const payload = {
-      name,
-      tagline,
-      price: Number(price),
-      billingCycle,
-      durationDays: Number(durationDays),
-      description,
-      features: features.map(f => f.trim()).filter(Boolean),
-      maxProperties: Number(maxProperties),
-      maxRooms: Number(maxRooms),
-      maxStaff: Number(maxStaff),
-      status,
-      isPopular
+      name: name.trim(),
+      description: description.trim(),
+      maxHomestays: Math.max(1, Number(maxHomestays) || 1),
+      maxRoomsPerHomestay: Math.max(1, Number(maxRoomsPerHomestay) || 1),
+      mrp: Math.max(0, Number(mrp) || 0),
+      offerPrice: Math.max(0, Number(offerPrice) || 0),
+      validity: validity.trim() || '365 Days',
+      durationDays: parsedDays,
+      extraRoomPrice: Math.max(0, Number(extraRoomPrice) || 0),
+      status
     };
 
     try {
@@ -169,7 +164,7 @@ export default function SubscriptionPlans() {
   };
 
   const handleDelete = async (plan) => {
-    if (!window.confirm(`Delete subscription plan "${plan.name}"?`)) return;
+    if (!window.confirm(`Are you sure you want to delete subscription plan "${plan.name}"?`)) return;
     const token = getAuthToken();
     try {
       await axios.delete(`${API_BASE_URL}/${plan._id}`, {
@@ -178,21 +173,20 @@ export default function SubscriptionPlans() {
       fetchPlans();
     } catch (err) {
       console.error('Error deleting plan:', err);
-      alert('Failed to delete plan.');
+      alert(err.response?.data?.message || 'Failed to delete plan.');
     }
   };
 
   // Filtered plans
   const filteredPlans = plans.filter(p => {
-    const matchSearch = p.name?.toLowerCase().includes(search.toLowerCase()) || 
-      p.tagline?.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = (p.name || '').toLowerCase().includes(search.toLowerCase()) || 
+      (p.description || '').toLowerCase().includes(search.toLowerCase());
     const matchStatus = filterStatus === 'All' || p.status === filterStatus;
     return matchSearch && matchStatus;
   });
 
   const totalCount = plans.length;
   const activeCount = plans.filter(p => p.status === 'Active').length;
-  const popularPlan = plans.find(p => p.isPopular);
 
   return (
     <div className="space-y-6 pb-12 select-none animate-fade-in font-sans">
@@ -205,12 +199,33 @@ export default function SubscriptionPlans() {
             </span>
             Subscription Plans Management
           </h1>
-          <p className="text-xs text-slate-400 font-medium mt-1">
-            Create, update, and manage subscription pricing tiers and resource limits for Homestay Owners.
+          <p className="text-xs text-slate-500 font-medium mt-1">
+            Configure subscription tiers, homestay and room allowances, pricing, and extra room add-on rates.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
+          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <button
+              onClick={() => setViewMode('cards')}
+              className={`p-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition-all ${
+                viewMode === 'cards' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="Card Grid View"
+            >
+              <LayoutGrid size={15} />
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              className={`p-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition-all ${
+                viewMode === 'table' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="Table View"
+            >
+              <TableIcon size={15} />
+            </button>
+          </div>
+
           <button
             onClick={fetchPlans}
             className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl cursor-pointer bg-white flex items-center justify-center transition-colors shadow-sm"
@@ -230,7 +245,7 @@ export default function SubscriptionPlans() {
       </div>
 
       {/* Summary Metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="bg-white border border-slate-100 p-4 sm:p-5 rounded-2xl shadow-sm flex items-center gap-3.5">
           <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
             <CreditCard size={18} />
@@ -246,32 +261,32 @@ export default function SubscriptionPlans() {
             <CheckCircle2 size={18} />
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Active Tiers</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Active Plans</span>
             <span className="text-lg font-extrabold text-emerald-600 leading-tight">{activeCount}</span>
           </div>
         </div>
 
         <div className="bg-white border border-slate-100 p-4 sm:p-5 rounded-2xl shadow-sm flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-            <Crown size={18} />
+          <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+            <Home size={18} />
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Popular Tier</span>
-            <span className="text-sm font-extrabold text-slate-800 truncate block max-w-[140px]">
-              {popularPlan ? popularPlan.name : 'None'}
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Max Homestays</span>
+            <span className="text-lg font-extrabold text-slate-800 leading-tight">
+              {plans.length > 0 ? Math.max(...plans.map(p => p.maxHomestays || p.maxProperties || 1)) : 1}
             </span>
           </div>
         </div>
 
         <div className="bg-white border border-slate-100 p-4 sm:p-5 rounded-2xl shadow-sm flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
-            <Sparkles size={18} />
+          <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+            <Tag size={18} />
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Pricing Range</span>
-            <span className="text-sm font-extrabold text-slate-800 block">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Offer Price Range</span>
+            <span className="text-xs font-extrabold text-slate-800 leading-tight">
               {plans.length > 0 
-                ? `₹${Math.min(...plans.map(p => p.price)).toLocaleString()} - ₹${Math.max(...plans.map(p => p.price)).toLocaleString()}`
+                ? `₹${Math.min(...plans.map(p => p.offerPrice ?? p.price ?? 0)).toLocaleString()} - ₹${Math.max(...plans.map(p => p.offerPrice ?? p.price ?? 0)).toLocaleString()}`
                 : '₹0'}
             </span>
           </div>
@@ -288,7 +303,7 @@ export default function SubscriptionPlans() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search plans by name or tagline..."
+            placeholder="Search plans by name or description..."
             className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
           />
         </div>
@@ -315,112 +330,241 @@ export default function SubscriptionPlans() {
       </div>
 
       {/* Plan Cards Visual Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {filteredPlans.map((plan) => (
-          <div
-            key={plan._id}
-            className={`bg-white rounded-2xl p-5 border shadow-xs flex flex-col justify-between relative transition-all ${
-              plan.isPopular ? 'border-blue-500 ring-2 ring-blue-500/10' : 'border-slate-150'
-            }`}
-          >
-            {plan.isPopular && (
-              <span className="absolute -top-2.5 right-5 bg-blue-600 text-white px-2.5 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase shadow-xs">
-                Popular
-              </span>
-            )}
+      {viewMode === 'cards' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {filteredPlans.map((plan) => {
+            const currentOffer = plan.offerPrice !== undefined ? plan.offerPrice : (plan.price || 0);
+            const currentMrp = plan.mrp !== undefined ? plan.mrp : currentOffer;
+            const homestaysLimit = plan.maxHomestays || plan.maxProperties || 1;
+            const roomsLimit = plan.maxRoomsPerHomestay || plan.maxRooms || 5;
+            const addOnPrice = plan.extraRoomPrice !== undefined ? plan.extraRoomPrice : 500;
+            const validityText = plan.validity || (plan.durationDays ? `${plan.durationDays} Days` : '365 Days');
 
-            <div>
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-base font-extrabold text-slate-800 m-0">{plan.name}</h3>
-                <span className={`px-2 py-0.5 text-[9px] font-extrabold rounded-md uppercase ${
-                  plan.status === 'Active' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-                }`}>
-                  {plan.status}
-                </span>
-              </div>
-
-              <p className="text-xs text-slate-500 mt-1 min-h-[32px] line-clamp-2">
-                {plan.tagline || plan.description || 'No description provided.'}
-              </p>
-
-              <div className="my-4 pb-4 border-b border-slate-100">
-                <span className="text-2xl font-black text-slate-900 leading-none">
-                  ₹{Number(plan.price).toLocaleString()}
-                </span>
-                <span className="text-xs text-slate-400 font-semibold ml-1">/ {plan.billingCycle || 'month'}</span>
-              </div>
-
-              {/* Limits */}
-              <div className="grid grid-cols-3 gap-1.5 mb-4 text-center">
-                <div className="p-1.5 bg-slate-50 rounded-lg border border-slate-100">
-                  <span className="block text-[9px] font-semibold text-slate-400 uppercase">Properties</span>
-                  <span className="block text-[11px] font-black text-slate-800">
-                    {plan.maxProperties >= 999 ? 'Unlimited' : plan.maxProperties}
-                  </span>
-                </div>
-                <div className="p-1.5 bg-slate-50 rounded-lg border border-slate-100">
-                  <span className="block text-[9px] font-semibold text-slate-400 uppercase">Rooms</span>
-                  <span className="block text-[11px] font-black text-slate-800">
-                    {plan.maxRooms >= 999 ? 'Unlimited' : plan.maxRooms}
-                  </span>
-                </div>
-                <div className="p-1.5 bg-slate-50 rounded-lg border border-slate-100">
-                  <span className="block text-[9px] font-semibold text-slate-400 uppercase">Staff</span>
-                  <span className="block text-[11px] font-black text-slate-800">
-                    {plan.maxStaff >= 999 ? 'Unlimited' : plan.maxStaff}
-                  </span>
-                </div>
-              </div>
-
-              {/* Feature bullets */}
-              <div className="space-y-1.5 mb-5">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Features:</span>
-                {(plan.features || []).slice(0, 4).map((f, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs text-slate-600 font-medium">
-                    <Check size={12} className="text-emerald-600 stroke-[3] shrink-0" />
-                    <span className="truncate">{f}</span>
+            return (
+              <div
+                key={plan._id}
+                className="bg-white rounded-2xl p-5 border border-slate-200 hover:border-blue-400 shadow-xs flex flex-col justify-between relative transition-all duration-200"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-base font-extrabold text-slate-900 m-0">{plan.name}</h3>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className={`px-2 py-0.5 text-[9px] font-extrabold rounded-md uppercase ${
+                          plan.status === 'Active' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                        }`}>
+                          {plan.status}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md flex items-center gap-1">
+                          <Calendar size={10} />
+                          {validityText}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                ))}
-                {plan.features?.length > 4 && (
-                  <span className="text-[10px] text-blue-600 font-bold block pt-0.5">
-                    +{plan.features.length - 4} more features
-                  </span>
-                )}
+
+                  <p className="text-xs text-slate-500 mt-2 min-h-[32px] line-clamp-2">
+                    {plan.description || 'No description specified.'}
+                  </p>
+
+                  {/* Pricing Display */}
+                  <div className="my-4 p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-baseline justify-between">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Offer Price</span>
+                      <span className="text-2xl font-black text-blue-600 leading-tight">
+                        ₹{Number(currentOffer).toLocaleString()}
+                      </span>
+                    </div>
+                    {currentMrp > currentOffer && (
+                      <div className="text-right">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">MRP</span>
+                        <span className="text-sm font-bold text-slate-400 line-through">
+                          ₹{Number(currentMrp).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Strictly the 8 Fields Highlighted */}
+                  <div className="space-y-2.5 mb-4 text-xs">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50/80 border border-slate-100">
+                      <span className="text-slate-600 font-medium flex items-center gap-1.5">
+                        <Home size={14} className="text-blue-500" />
+                        Max Homestays
+                      </span>
+                      <span className="font-extrabold text-slate-800">
+                        {homestaysLimit} Homestay{homestaysLimit > 1 ? 's' : ''}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50/80 border border-slate-100">
+                      <span className="text-slate-600 font-medium flex items-center gap-1.5">
+                        <BedDouble size={14} className="text-indigo-500" />
+                        Max Rooms / Homestay
+                      </span>
+                      <span className="font-extrabold text-slate-800">
+                        {roomsLimit} Rooms
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50/80 border border-slate-100">
+                      <span className="text-slate-600 font-medium flex items-center gap-1.5">
+                        <Calendar size={14} className="text-emerald-500" />
+                        Duration / Validity
+                      </span>
+                      <span className="font-extrabold text-slate-800">
+                        {validityText}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-amber-50/60 border border-amber-100">
+                      <span className="text-amber-800 font-semibold flex items-center gap-1.5 text-[11px]">
+                        <PlusCircle size={14} className="text-amber-600" />
+                        Extra Room Add-on
+                      </span>
+                      <span className="font-black text-amber-900 text-xs">
+                        ₹{Number(addOnPrice).toLocaleString()} / room
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    onClick={() => handleOpenEditModal(plan)}
+                    className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer border-none"
+                  >
+                    <Edit3 size={13} />
+                    <span>Edit Plan</span>
+                  </button>
+                  <button
+                    onClick={() => handleDelete(plan)}
+                    className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-colors cursor-pointer border border-rose-100"
+                    title="Delete plan"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
-            </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* Table View */
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  <th className="p-3.5 pl-4">Plan Name & Description</th>
+                  <th className="p-3.5">Max Homestays</th>
+                  <th className="p-3.5">Max Rooms / Homestay</th>
+                  <th className="p-3.5">MRP</th>
+                  <th className="p-3.5">Offer Price</th>
+                  <th className="p-3.5">Duration / Validity</th>
+                  <th className="p-3.5">Extra Room Add-on</th>
+                  <th className="p-3.5">Status</th>
+                  <th className="p-3.5 pr-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
+                {filteredPlans.map((plan) => {
+                  const currentOffer = plan.offerPrice !== undefined ? plan.offerPrice : (plan.price || 0);
+                  const currentMrp = plan.mrp !== undefined ? plan.mrp : currentOffer;
+                  const homestaysLimit = plan.maxHomestays || plan.maxProperties || 1;
+                  const roomsLimit = plan.maxRoomsPerHomestay || plan.maxRooms || 5;
+                  const addOnPrice = plan.extraRoomPrice !== undefined ? plan.extraRoomPrice : 500;
+                  const validityText = plan.validity || (plan.durationDays ? `${plan.durationDays} Days` : '365 Days');
 
-            <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
-              <button
-                onClick={() => handleOpenEditModal(plan)}
-                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center justify-center gap-1 transition-colors cursor-pointer border-none"
-              >
-                <Edit3 size={13} />
-                <span>Edit</span>
-              </button>
-              <button
-                onClick={() => handleDelete(plan)}
-                className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-colors cursor-pointer border border-rose-100"
-                title="Delete plan"
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
+                  return (
+                    <tr key={plan._id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="p-3.5 pl-4">
+                        <div className="font-extrabold text-slate-900">{plan.name}</div>
+                        <div className="text-[11px] text-slate-400 font-normal max-w-xs truncate">
+                          {plan.description || '—'}
+                        </div>
+                      </td>
+                      <td className="p-3.5">
+                        <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md font-bold">
+                          {homestaysLimit} Homestay{homestaysLimit > 1 ? 's' : ''}
+                        </span>
+                      </td>
+                      <td className="p-3.5">
+                        <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-md font-bold">
+                          {roomsLimit} Rooms
+                        </span>
+                      </td>
+                      <td className="p-3.5">
+                        <span className="text-slate-400 line-through">
+                          ₹{Number(currentMrp).toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="p-3.5">
+                        <span className="font-black text-emerald-600 text-sm">
+                          ₹{Number(currentOffer).toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="p-3.5">
+                        <span className="font-bold text-slate-600">
+                          {validityText}
+                        </span>
+                      </td>
+                      <td className="p-3.5">
+                        <span className="px-2 py-0.5 bg-amber-50 text-amber-800 rounded-md font-bold text-[11px]">
+                          ₹{Number(addOnPrice).toLocaleString()} / room
+                        </span>
+                      </td>
+                      <td className="p-3.5">
+                        <span className="`px-2 py-0.5 text-[9px] font-extrabold rounded-md uppercase ${
+                          plan.status === 'Active' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                        }`">
+                          {plan.status}
+                        </span>
+                      </td>
+                      <td className="p-3.5 pr-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleOpenEditModal(plan)}
+                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg cursor-pointer border-none"
+                            title="Edit Plan"
+                          >
+                            <Edit3 size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(plan)}
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg cursor-pointer border border-rose-100"
+                            title="Delete Plan"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
-      {/* Create / Edit Plan Modal */}
+      {/* Create / Edit Plan Modal — Strictly the 8 Fields */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto animate-fade-in">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
                 <span className="p-2 bg-blue-50 text-blue-600 rounded-xl">
                   <CreditCard size={18} />
                 </span>
-                <h3 className="text-base font-extrabold text-slate-800 m-0">
-                  {editingPlan ? 'Edit Subscription Plan' : 'Create New Subscription Plan'}
-                </h3>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-800 m-0">
+                    {editingPlan ? 'Edit Subscription Plan' : 'Add New Subscription Plan'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    Enter the 8 core subscription configuration parameters.
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setModalOpen(false)}
@@ -431,183 +575,172 @@ export default function SubscriptionPlans() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4 pt-4">
+              {/* Field 1: Plan Name */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  1. Plan Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Gold Plan, Premium Homestay, Starter"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {/* Field 2: Description */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  2. Description
+                </label>
+                <textarea
+                  rows="2"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Brief summary of what this plan includes..."
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500 resize-none"
+                />
+              </div>
+
+              {/* Field 3 & 4: Max Homestays & Max Rooms per Homestay */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Plan Name *
+                    3. Max Homestays *
                   </label>
+                  <p className="text-[10px] text-slate-400 mb-1">Homestays owner can create under plan</p>
                   <input
-                    type="text"
+                    type="number"
                     required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Starter Host"
+                    min="1"
+                    value={maxHomestays}
+                    onChange={(e) => setMaxHomestays(e.target.value)}
+                    placeholder="e.g. 1"
                     className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
                   />
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Tagline
+                    4. Max Rooms per Homestay *
                   </label>
+                  <p className="text-[10px] text-slate-400 mb-1">Max rooms per homestay under plan</p>
                   <input
-                    type="text"
-                    value={tagline}
-                    onChange={(e) => setTagline(e.target.value)}
-                    placeholder="e.g. Best for boutique villas"
+                    type="number"
+                    required
+                    min="1"
+                    value={maxRoomsPerHomestay}
+                    onChange={(e) => setMaxRoomsPerHomestay(e.target.value)}
+                    placeholder="e.g. 5"
                     className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* Field 5 & 6: MRP & Offer Price */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Price (₹) *
+                    5. MRP (₹) *
                   </label>
                   <input
                     type="number"
                     required
                     min="0"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    placeholder="e.g. 1999"
+                    value={mrp}
+                    onChange={(e) => setMrp(e.target.value)}
+                    placeholder="e.g. 14999"
                     className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
                   />
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Billing Cycle
+                    6. Offer Price (₹) *
                   </label>
-                  <select
-                    value={billingCycle}
-                    onChange={(e) => setBillingCycle(e.target.value)}
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    value={offerPrice}
+                    onChange={(e) => setOfferPrice(e.target.value)}
+                    placeholder="e.g. 9999"
                     className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="Monthly">Monthly</option>
-                    <option value="Quarterly">Quarterly</option>
-                    <option value="Yearly">Yearly</option>
-                    <option value="Custom">Custom</option>
-                  </select>
+                  />
+                </div>
+              </div>
+
+              {/* Field 7 & 8: Duration / Validity & Extra Room Add-on Price */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    7. Duration / Validity *
+                  </label>
+                  <p className="text-[10px] text-slate-400 mb-1">e.g. "365 Days", "30 Days", "1 Year"</p>
+                  <input
+                    type="text"
+                    required
+                    value={validity}
+                    onChange={(e) => setValidity(e.target.value)}
+                    placeholder="e.g. 365 Days"
+                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
+                  />
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Duration (Days)
+                    8. Extra Room Add-on Price (₹) *
                   </label>
+                  <p className="text-[10px] text-slate-400 mb-1">Charged per additional room over limit</p>
                   <input
                     type="number"
-                    min="1"
-                    value={durationDays}
-                    onChange={(e) => setDurationDays(e.target.value)}
+                    required
+                    min="0"
+                    value={extraRoomPrice}
+                    onChange={(e) => setExtraRoomPrice(e.target.value)}
+                    placeholder="e.g. 500"
                     className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Max Properties
+              {/* Status Selector */}
+              <div className="flex items-center gap-4 py-2 border-t border-slate-100">
+                <span className="text-xs font-bold text-slate-700">Plan Status:</span>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="planStatus"
+                      value="Active"
+                      checked={status === 'Active'}
+                      onChange={() => setStatus('Active')}
+                      className="text-blue-600 focus:ring-blue-500"
+                    />
+                    Active
                   </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={maxProperties}
-                    onChange={(e) => setMaxProperties(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Max Rooms
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="planStatus"
+                      value="Inactive"
+                      checked={status === 'Inactive'}
+                      onChange={() => setStatus('Inactive')}
+                      className="text-blue-600 focus:ring-blue-500"
+                    />
+                    Inactive
                   </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={maxRooms}
-                    onChange={(e) => setMaxRooms(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Max Staff
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={maxStaff}
-                    onChange={(e) => setMaxStaff(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
-                  />
                 </div>
               </div>
 
-              {/* Status & Popular Checkbox */}
-              <div className="flex items-center gap-6 py-2 border-y border-slate-100">
-                <div className="flex items-center gap-2">
-                  <label className="text-xs font-bold text-slate-700">Status:</label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value)}
-                    className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold"
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
-                </div>
-
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={isPopular}
-                    onChange={(e) => setIsPopular(e.target.checked)}
-                    className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
-                  />
-                  <span>Mark as Most Popular Badge</span>
-                </label>
-              </div>
-
-              {/* Features Builder */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                    Plan Features & Inclusions
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleAddFeatureField}
-                    className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 border-none bg-transparent cursor-pointer"
-                  >
-                    <Plus size={12} />
-                    <span>Add Feature</span>
-                  </button>
-                </div>
-
-                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                  {features.map((feat, idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={feat}
-                        onChange={(e) => handleFeatureChange(idx, e.target.value)}
-                        placeholder={`Feature #${idx + 1}`}
-                        className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
-                      />
-                      {features.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveFeatureField(idx)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg border-none bg-transparent cursor-pointer"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
+              {/* Info Note */}
+              <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 flex items-start gap-2 text-xs text-blue-800">
+                <Info size={15} className="shrink-0 mt-0.5 text-blue-600" />
+                <span>
+                  When this plan is assigned to a Homestay Owner, all resource limits, pricing, and room add-on rates are centrally derived from this definition.
+                </span>
               </div>
 
               <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-100">

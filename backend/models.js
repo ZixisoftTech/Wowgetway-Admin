@@ -671,21 +671,38 @@ const HomestayOwnerSchema = new mongoose.Schema({
   },
   subscription: {
     planId: { type: mongoose.Schema.Types.ObjectId, ref: 'SubscriptionPlan', default: null },
-    planName: { type: String, default: 'Free Trial' },
-    status: { type: String, enum: ['Active', 'Expired', 'None'], default: 'Active' },
-    billingCycle: { type: String, default: 'Monthly' },
+    planName: { type: String, default: '' },
+    description: { type: String, default: '' },
+    maxHomestays: { type: Number, default: 1 },
+    maxRoomsPerHomestay: { type: Number, default: 5 },
+    mrp: { type: Number, default: 0 },
+    offerPrice: { type: Number, default: 0 },
+    validity: { type: String, default: '' },
+    durationDays: { type: Number, default: 365 },
+    extraRoomPrice: { type: Number, default: 500 },
+    status: { type: String, enum: ['Active', 'Expired', 'None'], default: 'None' },
+    billingCycle: { type: String, default: 'Yearly' },
     price: { type: Number, default: 0 },
-    startDate: { type: Date, default: Date.now },
-    expiresAt: { type: Date, default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) },
-    paymentStatus: { type: String, enum: ['Paid', 'Trial', 'Pending'], default: 'Trial' },
+    startDate: { type: Date },
+    expiresAt: { type: Date },
+    assignedBy: { type: String, default: 'Super Admin' },
+    assignedAt: { type: Date, default: Date.now },
+    paymentStatus: { type: String, enum: ['Paid', 'Trial', 'Pending'], default: 'Paid' },
     transactionId: { type: String, default: '' },
     history: [{
       planId: { type: mongoose.Schema.Types.ObjectId, ref: 'SubscriptionPlan' },
       planName: String,
+      maxHomestays: Number,
+      maxRoomsPerHomestay: Number,
+      mrp: Number,
+      offerPrice: Number,
+      validity: String,
+      extraRoomPrice: Number,
       price: Number,
       billingCycle: String,
       startDate: Date,
       expiresAt: Date,
+      assignedBy: String,
       purchasedAt: { type: Date, default: Date.now },
       transactionId: String,
       paymentMethod: String
@@ -1207,7 +1224,8 @@ const PropertySchema = new mongoose.Schema({
     advancePercent: { type: Number, default: 30 },
     advanceType: { type: String, default: 'percent' },
     advanceAmount: { type: Number, default: 0 }
-  }
+  },
+  extraRoomsPurchased: { type: Number, default: 0 }
 }, { timestamps: true });
 
 // Ensure unique property name per owner
@@ -1460,17 +1478,23 @@ export const Notification = mongoose.model('Notification', NotificationSchema, '
 
 // Subscription Plan Schema
 const SubscriptionPlanSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  tagline: { type: String, default: '' },
-  price: { type: Number, required: true },
-  billingCycle: { type: String, enum: ['Monthly', 'Quarterly', 'Yearly', 'Custom'], default: 'Monthly' },
-  durationDays: { type: Number, default: 30 },
-  description: { type: String, default: '' },
-  features: [{ type: String }],
-  maxProperties: { type: Number, default: 1 },
-  maxRooms: { type: Number, default: 10 },
-  maxStaff: { type: Number, default: 5 },
+  name: { type: String, required: true, trim: true },
+  description: { type: String, default: '', trim: true },
+  maxHomestays: { type: Number, required: true, default: 1, min: 1 },
+  maxRoomsPerHomestay: { type: Number, required: true, default: 5, min: 1 },
+  mrp: { type: Number, required: true, default: 0, min: 0 },
+  offerPrice: { type: Number, required: true, default: 0, min: 0 },
+  validity: { type: String, default: '365 Days' },
+  durationDays: { type: Number, default: 365 },
+  extraRoomPrice: { type: Number, required: true, default: 500, min: 0 },
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
+  // Backward compatibility aliases
+  price: { type: Number },
+  maxProperties: { type: Number },
+  maxRooms: { type: Number },
+  billingCycle: { type: String, default: 'Yearly' },
+  tagline: { type: String, default: '' },
+  features: [{ type: String }],
   isPopular: { type: Boolean, default: false },
   createdBy: { type: String, default: 'Super Admin' }
 }, { timestamps: true });

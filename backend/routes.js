@@ -3582,12 +3582,25 @@ router.get('/homestays-list', async (req, res) => {
     }
     const propertiesList = await Property.find(query).sort({ updatedAt: -1, createdAt: -1 }).lean();
     
+    // Batch load owners for subscription details
+    const ownerIds = [...new Set(propertiesList.map(p => p.ownerId).filter(Boolean))];
+    const ownersMap = new Map();
+    if (ownerIds.length > 0) {
+      try {
+        const owners = await HomestayOwner.find({ _id: { $in: ownerIds } }).select('_id firstName lastName email mobile subscription').lean();
+        owners.forEach(o => ownersMap.set(String(o._id), o));
+      } catch (err) {
+        console.error('Error batch fetching owners for homestays list:', err);
+      }
+    }
+
     const formatted = [];
     for (const p of propertiesList) {
       const gal = await PropertyGallery.findOne({ propertyId: p._id });
       const rooms = await PropertyRooms.find({ propertyId: p._id });
       const pricingList = await PropertyPricing.find({ propertyId: p._id });
       const approval = await PropertyApproval.findOne({ propertyId: p._id });
+      const owner = p.ownerId ? ownersMap.get(String(p.ownerId)) : null;
       
       let minPrice = 'N/A';
       if (pricingList.length > 0) {
@@ -3602,8 +3615,19 @@ router.get('/homestays-list', async (req, res) => {
         propertyId: p.propertyId || p._id,
         name: p.name || 'Untitled Property',
         type: p.type || 'Homestay',
+        ownerId: p.ownerId,
         ownerName: p.ownerName,
         ownerMobile: p.ownerMobile,
+        ownerSubscription: owner?.subscription ? {
+          planId: owner.subscription.planId,
+          planName: owner.subscription.planName,
+          status: owner.subscription.status,
+          expiresAt: owner.subscription.expiresAt,
+          maxHomestays: owner.subscription.maxHomestays,
+          maxRoomsPerHomestay: owner.subscription.maxRoomsPerHomestay,
+          extraRoomPrice: owner.subscription.extraRoomPrice
+        } : null,
+        extraRoomsPurchased: p.extraRoomsPurchased || 0,
         city: p.city,
         region: p.state || '',
         status: p.status === 'Submitted For Review' ? 'Pending Approval' : p.status,
@@ -10692,6 +10716,20 @@ router.get('/homestay-owner/properties/draft', authenticateToken, async (req, re
       }
     }
     if (!prop) {
+      if (!isSuperAdmin) {
+        const ownerDoc = await HomestayOwner.findById(ownerId);
+        if (ownerDoc && ownerDoc.subscription && ownerDoc.subscription.status === 'Active') {
+          const activePropertiesCount = await Property.countDocuments({ ownerId, deleted: false, status: { $ne: 'Deleted' } });
+          const maxAllowedHomestays = Number(ownerDoc.subscription.maxHomestays) || 1;
+          if (activePropertiesCount >= maxAllowedHomestays) {
+            return res.status(403).json({
+              error: 'HomestayLimitExceeded',
+              message: `You have reached your subscription plan limit of ${maxAllowedHomestays} homestay(s) under "${ownerDoc.subscription.planName || 'Active Plan'}". Please upgrade your subscription plan to add more homestays.`
+            });
+          }
+        }
+      }
+
       const count = await Property.countDocuments();
       const propIdStr = `WG-PROP-${String(count + 1).padStart(6, '0')}`;
       prop = new Property({
@@ -10746,8 +10784,25 @@ router.get('/homestay-owner/properties/draft', authenticateToken, async (req, re
       };
     });
 
+    let ownerSub = null;
+    try {
+      const ownerDoc = await HomestayOwner.findById(prop.ownerId || ownerId);
+      if (ownerDoc) {
+        ownerSub = {
+          planId: ownerDoc.subscription?.planId,
+          planName: ownerDoc.subscription?.planName || 'Standard',
+          status: ownerDoc.subscription?.status || 'Active',
+          maxHomestays: ownerDoc.subscription?.maxHomestays || 1,
+          maxRoomsPerHomestay: ownerDoc.subscription?.maxRoomsPerHomestay || 5,
+          extraRoomPrice: ownerDoc.subscription?.extraRoomPrice !== undefined ? ownerDoc.subscription?.extraRoomPrice : 500,
+          extraRoomsPurchased: prop.extraRoomsPurchased || 0
+        };
+      }
+    } catch (e) {}
+
     res.json({
       property: prop,
+      subscription: ownerSub,
       gallery,
       rooms: rooms.map(r => ({
         id: r._id,
@@ -10865,6 +10920,34 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
         const { rooms } = data;
         if (!rooms || rooms.length === 0) {
           return res.status(400).json({ error: 'ValidationError', message: 'At least one Room Category is required.' });
+        }
+
+        const totalRoomsCount = (rooms || []).reduce((sum, r) => sum + (Number(r.count) || 0), 0);
+        if (!isSuperAdmin) {
+          try {
+            const ownerDoc = await HomestayOwner.findById(prop.ownerId);
+            if (ownerDoc && ownerDoc.subscription && ownerDoc.subscription.status === 'Active') {
+              const includedRooms = Number(ownerDoc.subscription.maxRoomsPerHomestay) || 5;
+              const extraPurchased = Number(prop.extraRoomsPurchased) || 0;
+              const maxAllowed = includedRooms + extraPurchased;
+              if (totalRoomsCount > maxAllowed) {
+                const extraRoomsNeeded = totalRoomsCount - maxAllowed;
+                const extraRoomPrice = Number(ownerDoc.subscription.extraRoomPrice !== undefined ? ownerDoc.subscription.extraRoomPrice : 500);
+                return res.status(400).json({
+                  error: 'RoomLimitExceeded',
+                  message: `Room limit exceeded. Your plan includes ${includedRooms} rooms per homestay (+${extraPurchased} extra room add-ons = ${maxAllowed} total allowed). You are attempting to save ${totalRoomsCount} rooms. Please purchase Extra Room Add-ons for ${extraRoomsNeeded} room(s) at ₹${extraRoomPrice}/room (Total: ₹${(extraRoomsNeeded * extraRoomPrice).toLocaleString()}).`,
+                  maxAllowed,
+                  includedRooms,
+                  extraRoomsPurchased: extraPurchased,
+                  totalRoomsCount,
+                  extraRoomsNeeded,
+                  extraRoomPrice
+                });
+              }
+            }
+          } catch (e) {
+            // Ignore owner lookup failure if in mock mode
+          }
         }
         const roomNumSet = new Set();
         for (const roomCat of rooms) {
@@ -11131,6 +11214,31 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
       const { rooms } = data;
       if (!rooms || rooms.length === 0) {
         return res.status(400).json({ error: 'ValidationError', message: 'At least one Room Category is required.' });
+      }
+
+      // Enforce subscription plan room limit per homestay
+      const totalRoomsCount = (rooms || []).reduce((sum, r) => sum + (Number(r.count) || 0), 0);
+      if (!isSuperAdmin) {
+        const ownerDoc = await HomestayOwner.findById(prop.ownerId);
+        if (ownerDoc && ownerDoc.subscription && ownerDoc.subscription.status === 'Active') {
+          const includedRooms = Number(ownerDoc.subscription.maxRoomsPerHomestay) || 5;
+          const extraPurchased = Number(prop.extraRoomsPurchased) || 0;
+          const maxAllowed = includedRooms + extraPurchased;
+          if (totalRoomsCount > maxAllowed) {
+            const extraRoomsNeeded = totalRoomsCount - maxAllowed;
+            const extraRoomPrice = Number(ownerDoc.subscription.extraRoomPrice !== undefined ? ownerDoc.subscription.extraRoomPrice : 500);
+            return res.status(400).json({
+              error: 'RoomLimitExceeded',
+              message: `Room limit exceeded. Your plan includes ${includedRooms} rooms per homestay (+${extraPurchased} extra room add-ons = ${maxAllowed} total allowed). You are attempting to save ${totalRoomsCount} rooms. Please purchase Extra Room Add-ons for ${extraRoomsNeeded} room(s) at ₹${extraRoomPrice}/room (Total: ₹${(extraRoomsNeeded * extraRoomPrice).toLocaleString()}).`,
+              maxAllowed,
+              includedRooms,
+              extraRoomsPurchased: extraPurchased,
+              totalRoomsCount,
+              extraRoomsNeeded,
+              extraRoomPrice
+            });
+          }
+        }
       }
       const roomNumSet = new Set();
       for (const roomCat of rooms) {
@@ -16371,77 +16479,57 @@ const ensureSubscriptionPlansSeeded = async () => {
   try {
     const count = await SubscriptionPlan.countDocuments();
     if (count === 0) {
-      console.log('[Subscription Plans] Seeding default plans...');
+      console.log('[Subscription Plans] Seeding default plans with exact 8 fields...');
       await SubscriptionPlan.create([
         {
-          name: 'Starter Host',
-          tagline: 'Perfect for individual homestays and cottage owners getting started.',
-          price: 999,
-          billingCycle: 'Monthly',
-          durationDays: 30,
-          description: 'Basic management suite with core booking features and single property access.',
-          features: [
-            '1 Property Listing',
-            'Up to 5 Rooms Management',
-            '2 Staff Members Access',
-            'Public Shareable Booking Calendar',
-            'Advance UPI Payments & Slips',
-            'Standard Email Support'
-          ],
+          name: 'Starter Host Plan',
+          description: 'Designed for individual homestays and cottage hosts getting started.',
+          maxHomestays: 1,
+          maxRoomsPerHomestay: 5,
+          mrp: 6999,
+          offerPrice: 3999,
+          validity: '365 Days',
+          durationDays: 365,
+          extraRoomPrice: 500,
+          price: 3999,
           maxProperties: 1,
           maxRooms: 5,
-          maxStaff: 2,
-          status: 'Active',
-          isPopular: false
+          status: 'Active'
         },
         {
-          name: 'Professional Host',
-          tagline: 'Most popular plan for growing homestay businesses and boutique villas.',
-          price: 2499,
-          billingCycle: 'Monthly',
-          durationDays: 30,
-          description: 'Advanced features with multi-property capability, custom staff roles, and analytics.',
-          features: [
-            'Up to 3 Properties Listings',
-            'Up to 20 Rooms Management',
-            '10 Staff Members & Custom Permissions',
-            'Interactive Day-wise / Weekly Revenue Analytics',
-            'Exclusive Discount Coupons & Offers',
-            'Guest ID Verification & Document Storage',
-            'Priority 24/7 Phone & WhatsApp Support'
-          ],
+          name: 'Professional Host Plan',
+          description: 'Best for growing multi-property homestay hosts and boutique luxury villas.',
+          maxHomestays: 3,
+          maxRoomsPerHomestay: 12,
+          mrp: 14999,
+          offerPrice: 9999,
+          validity: '365 Days',
+          durationDays: 365,
+          extraRoomPrice: 400,
+          price: 9999,
           maxProperties: 3,
-          maxRooms: 20,
-          maxStaff: 10,
-          status: 'Active',
-          isPopular: true
+          maxRooms: 12,
+          status: 'Active'
         },
         {
-          name: 'Enterprise Hotelier',
-          tagline: 'Comprehensive suite for resort groups and homestay chains.',
-          price: 5999,
-          billingCycle: 'Monthly',
-          durationDays: 30,
-          description: 'Unlimited properties and rooms with dedicated account manager and tax audit reporting.',
-          features: [
-            'Unlimited Properties & Room Inventories',
-            'Unlimited Staff Members & Granular Access Checkboxes',
-            'Comprehensive GST & Tax Invoice Suite',
-            'Full P&L and Multi-Year Revenue Projection',
-            'Automated SMS & WhatsApp Booking Notifications',
-            'Dedicated Account Manager & Concierge'
-          ],
-          maxProperties: 999,
-          maxRooms: 999,
-          maxStaff: 999,
-          status: 'Active',
-          isPopular: false
+          name: 'Enterprise Hotelier Plan',
+          description: 'Comprehensive suite for large homestay chains, resort groups and estate portfolios.',
+          maxHomestays: 10,
+          maxRoomsPerHomestay: 30,
+          mrp: 34999,
+          offerPrice: 24999,
+          validity: '365 Days',
+          durationDays: 365,
+          extraRoomPrice: 300,
+          price: 24999,
+          maxProperties: 10,
+          maxRooms: 30,
+          status: 'Active'
         }
       ]);
-      console.log('[Subscription Plans] Default plans successfully seeded.');
     }
   } catch (err) {
-    console.error('[Subscription Plans] Error seeding plans:', err.message);
+    console.error('Error seeding subscription plans:', err);
   }
 };
 
@@ -16574,55 +16662,78 @@ router.delete('/homestay-owner/notifications/clear-all', authenticateToken, asyn
 // ==========================================
 
 // GET /api/admin/subscription-plans (List all subscription plans)
-router.get('/admin/subscription-plans', authenticateToken, async (req, res) => {
+router.get(['/admin/subscription-plans', '/api/admin/subscription-plans'], authenticateToken, async (req, res) => {
   try {
     await ensureSubscriptionPlansSeeded();
-    const plans = await SubscriptionPlan.find().sort({ price: 1 }).lean();
+    const rawPlans = await SubscriptionPlan.find().sort({ offerPrice: 1, price: 1 }).lean();
+    
+    // Normalize to exact 8 fields
+    const plans = rawPlans.map(p => ({
+      _id: p._id,
+      name: p.name,
+      description: p.description || '',
+      maxHomestays: Number(p.maxHomestays || p.maxProperties || 1),
+      maxRoomsPerHomestay: Number(p.maxRoomsPerHomestay || p.maxRooms || 5),
+      mrp: Number(p.mrp !== undefined ? p.mrp : (p.price || 0)),
+      offerPrice: Number(p.offerPrice !== undefined ? p.offerPrice : (p.price || 0)),
+      validity: p.validity || (p.durationDays ? `${p.durationDays} Days` : '365 Days'),
+      durationDays: Number(p.durationDays || 365),
+      extraRoomPrice: Number(p.extraRoomPrice !== undefined ? p.extraRoomPrice : 500),
+      status: p.status || 'Active',
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt
+    }));
+
     res.json({ success: true, data: plans });
   } catch (err) {
     res.status(500).json({ error: 'ServerError', message: err.message });
   }
 });
 
-// POST /api/admin/subscription-plans (Create new subscription plan)
-router.post('/admin/subscription-plans', authenticateToken, async (req, res) => {
+// POST /api/admin/subscription-plans (Create new subscription plan with strictly 8 fields)
+router.post(['/admin/subscription-plans', '/api/admin/subscription-plans'], authenticateToken, async (req, res) => {
   try {
     const {
       name,
-      tagline = '',
-      price,
-      billingCycle = 'Monthly',
-      durationDays = 30,
       description = '',
-      features = [],
-      maxProperties = 1,
-      maxRooms = 10,
-      maxStaff = 5,
-      status = 'Active',
-      isPopular = false
+      maxHomestays = 1,
+      maxRoomsPerHomestay = 5,
+      mrp = 0,
+      offerPrice = 0,
+      validity = '365 Days',
+      durationDays,
+      extraRoomPrice = 500,
+      status = 'Active'
     } = req.body;
 
-    if (!name || price === undefined) {
-      return res.status(400).json({ error: 'ValidationError', message: 'Plan Name and Price are required.' });
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'ValidationError', message: 'Plan Name is required.' });
     }
+    if (offerPrice === undefined || offerPrice === null || isNaN(Number(offerPrice))) {
+      return res.status(400).json({ error: 'ValidationError', message: 'Offer Price is required.' });
+    }
+
+    const calculatedDurationDays = durationDays ? Number(durationDays) : (parseInt(validity, 10) || 365);
 
     const newPlan = await SubscriptionPlan.create({
       name: name.trim(),
-      tagline: tagline.trim(),
-      price: Number(price),
-      billingCycle,
-      durationDays: Number(durationDays) || 30,
       description: description.trim(),
-      features: Array.isArray(features) ? features.map(f => String(f).trim()).filter(Boolean) : [],
-      maxProperties: Number(maxProperties) || 1,
-      maxRooms: Number(maxRooms) || 10,
-      maxStaff: Number(maxStaff) || 5,
+      maxHomestays: Math.max(1, Number(maxHomestays) || 1),
+      maxRoomsPerHomestay: Math.max(1, Number(maxRoomsPerHomestay) || 5),
+      mrp: Math.max(0, Number(mrp) || 0),
+      offerPrice: Math.max(0, Number(offerPrice) || 0),
+      validity: validity.trim() || `${calculatedDurationDays} Days`,
+      durationDays: calculatedDurationDays,
+      extraRoomPrice: Math.max(0, Number(extraRoomPrice) || 0),
       status: status === 'Inactive' ? 'Inactive' : 'Active',
-      isPopular: Boolean(isPopular),
+      // Backward compatibility aliases
+      price: Math.max(0, Number(offerPrice) || 0),
+      maxProperties: Math.max(1, Number(maxHomestays) || 1),
+      maxRooms: Math.max(1, Number(maxRoomsPerHomestay) || 5),
       createdBy: req.user.fullName || req.user.email || 'Super Admin'
     });
 
-    logActivity(req, 'CREATE_SUBSCRIPTION_PLAN', 'Subscription Management', `Created plan: ${newPlan.name} (₹${newPlan.price})`);
+    logActivity(req, 'CREATE_SUBSCRIPTION_PLAN', 'Subscription Management', `Created plan: ${newPlan.name} (Offer Price: ₹${newPlan.offerPrice})`);
 
     res.status(201).json({ success: true, message: 'Subscription plan created successfully.', data: newPlan });
   } catch (err) {
@@ -16630,41 +16741,48 @@ router.post('/admin/subscription-plans', authenticateToken, async (req, res) => 
   }
 });
 
-// PUT /api/admin/subscription-plans/:id (Update subscription plan)
-router.put('/admin/subscription-plans/:id', authenticateToken, async (req, res) => {
+// PUT /api/admin/subscription-plans/:id (Update subscription plan with strictly 8 fields)
+router.put(['/admin/subscription-plans/:id', '/api/admin/subscription-plans/:id'], authenticateToken, async (req, res) => {
   try {
     const {
       name,
-      tagline,
-      price,
-      billingCycle,
-      durationDays,
       description,
-      features,
-      maxProperties,
-      maxRooms,
-      maxStaff,
-      status,
-      isPopular
+      maxHomestays,
+      maxRoomsPerHomestay,
+      mrp,
+      offerPrice,
+      validity,
+      durationDays,
+      extraRoomPrice,
+      status
     } = req.body;
 
     const plan = await SubscriptionPlan.findById(req.params.id);
     if (!plan) return res.status(404).json({ error: 'NotFound', message: 'Plan not found.' });
 
-    if (name) plan.name = name.trim();
-    if (tagline !== undefined) plan.tagline = tagline.trim();
-    if (price !== undefined) plan.price = Number(price);
-    if (billingCycle) plan.billingCycle = billingCycle;
-    if (durationDays !== undefined) plan.durationDays = Number(durationDays);
+    if (name !== undefined) plan.name = name.trim();
     if (description !== undefined) plan.description = description.trim();
-    if (features !== undefined && Array.isArray(features)) {
-      plan.features = features.map(f => String(f).trim()).filter(Boolean);
+    if (maxHomestays !== undefined) {
+      plan.maxHomestays = Math.max(1, Number(maxHomestays) || 1);
+      plan.maxProperties = plan.maxHomestays;
     }
-    if (maxProperties !== undefined) plan.maxProperties = Number(maxProperties);
-    if (maxRooms !== undefined) plan.maxRooms = Number(maxRooms);
-    if (maxStaff !== undefined) plan.maxStaff = Number(maxStaff);
-    if (status) plan.status = status;
-    if (isPopular !== undefined) plan.isPopular = Boolean(isPopular);
+    if (maxRoomsPerHomestay !== undefined) {
+      plan.maxRoomsPerHomestay = Math.max(1, Number(maxRoomsPerHomestay) || 5);
+      plan.maxRooms = plan.maxRoomsPerHomestay;
+    }
+    if (mrp !== undefined) plan.mrp = Math.max(0, Number(mrp) || 0);
+    if (offerPrice !== undefined) {
+      plan.offerPrice = Math.max(0, Number(offerPrice) || 0);
+      plan.price = plan.offerPrice;
+    }
+    if (validity !== undefined) {
+      plan.validity = validity.trim();
+      const parsedDays = parseInt(validity, 10);
+      if (!isNaN(parsedDays)) plan.durationDays = parsedDays;
+    }
+    if (durationDays !== undefined) plan.durationDays = Number(durationDays);
+    if (extraRoomPrice !== undefined) plan.extraRoomPrice = Math.max(0, Number(extraRoomPrice) || 0);
+    if (status !== undefined) plan.status = status;
 
     await plan.save();
     logActivity(req, 'UPDATE_SUBSCRIPTION_PLAN', 'Subscription Management', `Updated plan: ${plan.name}`);
@@ -16676,7 +16794,7 @@ router.put('/admin/subscription-plans/:id', authenticateToken, async (req, res) 
 });
 
 // DELETE /api/admin/subscription-plans/:id (Delete subscription plan)
-router.delete('/admin/subscription-plans/:id', authenticateToken, async (req, res) => {
+router.delete(['/admin/subscription-plans/:id', '/api/admin/subscription-plans/:id'], authenticateToken, async (req, res) => {
   try {
     const plan = await SubscriptionPlan.findById(req.params.id);
     if (!plan) return res.status(404).json({ error: 'NotFound', message: 'Plan not found.' });
@@ -16691,14 +16809,201 @@ router.delete('/admin/subscription-plans/:id', authenticateToken, async (req, re
 });
 
 // ==========================================
+// ADMIN: ASSIGN & MANAGE HOMESTAY OWNER SUBSCRIPTIONS
+// ==========================================
+
+// GET /api/admin/homestay-owners/:id/subscription (View owner's current plan & limits)
+router.get(['/admin/homestay-owners/:id/subscription', '/api/admin/homestay-owners/:id/subscription'], authenticateToken, async (req, res) => {
+  try {
+    const owner = await HomestayOwner.findById(req.params.id).populate('subscription.planId');
+    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found.' });
+
+    const activeHomestaysCount = await Property.countDocuments({ ownerId: owner._id, deleted: false, status: { $ne: 'Deleted' } });
+    
+    // Calculate total rooms across all properties
+    const properties = await Property.find({ ownerId: owner._id, deleted: false, status: { $ne: 'Deleted' } }).select('_id name propertyId extraRoomsPurchased');
+    const propertyDetails = [];
+    for (const p of properties) {
+      const pRooms = await PropertyRooms.find({ propertyId: p._id });
+      const currentRooms = pRooms.reduce((sum, r) => sum + (Number(r.numberOfRooms) || 0), 0);
+      propertyDetails.push({
+        _id: p._id,
+        name: p.name,
+        propertyId: p.propertyId,
+        currentRooms,
+        extraRoomsPurchased: p.extraRoomsPurchased || 0
+      });
+    }
+
+    const sub = owner.subscription || {};
+    let isExpired = false;
+    let daysRemaining = 0;
+    if (sub.expiresAt) {
+      const now = new Date();
+      const exp = new Date(sub.expiresAt);
+      isExpired = exp < now;
+      daysRemaining = Math.max(0, Math.ceil((exp - now) / (1000 * 60 * 60 * 24)));
+    }
+
+    res.json({
+      success: true,
+      owner: {
+        _id: owner._id,
+        name: `${owner.firstName} ${owner.lastName}`,
+        mobile: owner.mobile,
+        email: owner.email,
+        activeHomestaysCount,
+        properties: propertyDetails,
+        subscription: {
+          ...sub.toObject?.() || sub,
+          isExpired,
+          daysRemaining
+        }
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// POST /api/admin/homestay-owners/:id/subscription/assign (Assign or Change Subscription Plan)
+router.post(['/admin/homestay-owners/:id/subscription/assign', '/api/admin/homestay-owners/:id/subscription/assign'], authenticateToken, async (req, res) => {
+  try {
+    const { planId, startDate, customDurationDays } = req.body;
+    if (!planId) {
+      return res.status(400).json({ error: 'ValidationError', message: 'Please select a Subscription Plan to assign.' });
+    }
+
+    const plan = await SubscriptionPlan.findById(planId);
+    if (!plan) return res.status(404).json({ error: 'NotFound', message: 'Subscription Plan not found.' });
+
+    const owner = await HomestayOwner.findById(req.params.id);
+    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found.' });
+
+    const start = startDate ? new Date(startDate) : new Date();
+    const duration = customDurationDays ? Number(customDurationDays) : (plan.durationDays || 365);
+    const expiresAt = new Date(start.getTime() + duration * 24 * 60 * 60 * 1000);
+
+    if (!owner.subscription) owner.subscription = {};
+    if (!Array.isArray(owner.subscription.history)) owner.subscription.history = [];
+
+    // Archive current active plan if any
+    if (owner.subscription.status === 'Active' && owner.subscription.planName) {
+      owner.subscription.history.push({
+        planId: owner.subscription.planId,
+        planName: owner.subscription.planName,
+        maxHomestays: owner.subscription.maxHomestays,
+        maxRoomsPerHomestay: owner.subscription.maxRoomsPerHomestay,
+        mrp: owner.subscription.mrp,
+        offerPrice: owner.subscription.offerPrice,
+        validity: owner.subscription.validity,
+        extraRoomPrice: owner.subscription.extraRoomPrice,
+        startDate: owner.subscription.startDate,
+        expiresAt: owner.subscription.expiresAt,
+        assignedBy: owner.subscription.assignedBy || 'Super Admin',
+        purchasedAt: new Date()
+      });
+    }
+
+    // Apply central limits and pricing from the plan
+    owner.subscription.planId = plan._id;
+    owner.subscription.planName = plan.name;
+    owner.subscription.description = plan.description;
+    owner.subscription.maxHomestays = plan.maxHomestays || 1;
+    owner.subscription.maxRoomsPerHomestay = plan.maxRoomsPerHomestay || 5;
+    owner.subscription.mrp = plan.mrp || 0;
+    owner.subscription.offerPrice = plan.offerPrice || 0;
+    owner.subscription.validity = plan.validity || `${duration} Days`;
+    owner.subscription.durationDays = duration;
+    owner.subscription.extraRoomPrice = plan.extraRoomPrice !== undefined ? plan.extraRoomPrice : 500;
+    owner.subscription.price = plan.offerPrice || 0;
+    owner.subscription.billingCycle = plan.billingCycle || 'Yearly';
+    owner.subscription.startDate = start;
+    owner.subscription.expiresAt = expiresAt;
+    owner.subscription.status = 'Active';
+    owner.subscription.paymentStatus = 'Paid';
+    owner.subscription.assignedBy = req.user.fullName || req.user.email || 'Super Admin';
+    owner.subscription.assignedAt = new Date();
+
+    await owner.save();
+
+    logActivity(req, 'ASSIGN_SUBSCRIPTION_PLAN', 'Homestay Management', `Assigned plan "${plan.name}" to owner ${owner.firstName} ${owner.lastName} (Homestays: ${plan.maxHomestays}, Rooms/Homestay: ${plan.maxRoomsPerHomestay}, Extra Room Add-on: ₹${plan.extraRoomPrice})`);
+
+    // Create Notification for Homestay Owner
+    await createOwnerNotification({
+      ownerId: owner._id,
+      title: 'Subscription Plan Updated',
+      message: `Your account subscription plan has been set to "${plan.name}". You can create up to ${plan.maxHomestays} homestay(s) with ${plan.maxRoomsPerHomestay} rooms each.`,
+      type: 'payment',
+      metadata: { planName: plan.name, expiresAt }
+    });
+
+    res.json({
+      success: true,
+      message: `Successfully assigned "${plan.name}" to ${owner.firstName} ${owner.lastName}.`,
+      subscription: owner.subscription
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// DELETE /api/admin/homestay-owners/:id/subscription (Remove Assigned Subscription Plan)
+router.delete(['/admin/homestay-owners/:id/subscription', '/api/admin/homestay-owners/:id/subscription'], authenticateToken, async (req, res) => {
+  try {
+    const owner = await HomestayOwner.findById(req.params.id);
+    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found.' });
+
+    if (owner.subscription && owner.subscription.status === 'Active') {
+      if (!Array.isArray(owner.subscription.history)) owner.subscription.history = [];
+      owner.subscription.history.push({
+        ...owner.subscription.toObject?.() || owner.subscription,
+        removedAt: new Date(),
+        removedBy: req.user.fullName || req.user.email || 'Super Admin'
+      });
+    }
+
+    owner.subscription.status = 'None';
+    owner.subscription.planId = null;
+    owner.subscription.planName = '';
+    owner.subscription.maxHomestays = 0;
+    owner.subscription.maxRoomsPerHomestay = 0;
+    owner.subscription.mrp = 0;
+    owner.subscription.offerPrice = 0;
+    owner.subscription.validity = '';
+    owner.subscription.extraRoomPrice = 0;
+
+    await owner.save();
+    logActivity(req, 'REMOVE_SUBSCRIPTION_PLAN', 'Homestay Management', `Removed subscription plan from owner ${owner.firstName} ${owner.lastName}`);
+
+    res.json({ success: true, message: 'Subscription plan removed successfully from this Homestay Owner.' });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// ==========================================
 // HOMESTAY OWNER SUBSCRIPTION MANAGEMENT
 // ==========================================
 
 // GET /api/homestay-owner/subscription-plans (Public/Owner active plans list)
-router.get('/homestay-owner/subscription-plans', async (req, res) => {
+router.get(['/homestay-owner/subscription-plans', '/api/homestay-owner/subscription-plans'], async (req, res) => {
   try {
     await ensureSubscriptionPlansSeeded();
-    const plans = await SubscriptionPlan.find({ status: 'Active' }).sort({ price: 1 }).lean();
+    const rawPlans = await SubscriptionPlan.find({ status: 'Active' }).sort({ offerPrice: 1, price: 1 }).lean();
+    const plans = rawPlans.map(p => ({
+      _id: p._id,
+      name: p.name,
+      description: p.description || '',
+      maxHomestays: Number(p.maxHomestays || p.maxProperties || 1),
+      maxRoomsPerHomestay: Number(p.maxRoomsPerHomestay || p.maxRooms || 5),
+      mrp: Number(p.mrp !== undefined ? p.mrp : (p.price || 0)),
+      offerPrice: Number(p.offerPrice !== undefined ? p.offerPrice : (p.price || 0)),
+      validity: p.validity || (p.durationDays ? `${p.durationDays} Days` : '365 Days'),
+      durationDays: Number(p.durationDays || 365),
+      extraRoomPrice: Number(p.extraRoomPrice !== undefined ? p.extraRoomPrice : 500),
+      status: p.status || 'Active'
+    }));
     res.json({ success: true, data: plans });
   } catch (err) {
     res.status(500).json({ error: 'ServerError', message: err.message });
@@ -16706,41 +17011,30 @@ router.get('/homestay-owner/subscription-plans', async (req, res) => {
 });
 
 // GET /api/homestay-owner/subscription/current (Get owner's current subscription details)
-router.get('/homestay-owner/subscription/current', authenticateToken, async (req, res) => {
+router.get(['/homestay-owner/subscription/current', '/api/homestay-owner/subscription/current'], authenticateToken, async (req, res) => {
   try {
     const ownerId = req.user.ownerId || req.user._id || req.user.id;
     let owner = await HomestayOwner.findById(ownerId).populate('subscription.planId');
     if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay owner not found.' });
 
-    // Initialize trial if none exists
-    if (!owner.subscription || !owner.subscription.status) {
-      owner.subscription = {
-        planName: 'Free Trial',
-        status: 'Active',
-        startDate: new Date(),
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        paymentStatus: 'Trial',
-        billingCycle: 'Monthly',
-        price: 0
-      };
-      await owner.save();
-    }
-
     // Check if expired
-    const isExpired = new Date(owner.subscription.expiresAt) < new Date();
-    if (isExpired && owner.subscription.status === 'Active') {
-      owner.subscription.status = 'Expired';
-      await owner.save();
+    let isExpired = false;
+    let daysRemaining = 0;
+    if (owner.subscription && owner.subscription.expiresAt) {
+      const now = new Date();
+      const exp = new Date(owner.subscription.expiresAt);
+      isExpired = exp < now;
+      if (isExpired && owner.subscription.status === 'Active') {
+        owner.subscription.status = 'Expired';
+        await owner.save();
+      }
+      daysRemaining = Math.max(0, Math.ceil((exp - now) / (1000 * 60 * 60 * 24)));
     }
-
-    const now = new Date();
-    const exp = new Date(owner.subscription.expiresAt);
-    const daysRemaining = Math.max(0, Math.ceil((exp - now) / (1000 * 60 * 60 * 24)));
 
     res.json({
       success: true,
       subscription: {
-        ...owner.subscription.toObject(),
+        ...owner.subscription?.toObject?.() || owner.subscription || {},
         daysRemaining,
         isExpired
       }
@@ -16751,7 +17045,7 @@ router.get('/homestay-owner/subscription/current', authenticateToken, async (req
 });
 
 // POST /api/homestay-owner/subscription/purchase (Purchase or Upgrade Subscription)
-router.post('/homestay-owner/subscription/purchase', authenticateToken, async (req, res) => {
+router.post(['/homestay-owner/subscription/purchase', '/api/homestay-owner/subscription/purchase'], authenticateToken, async (req, res) => {
   try {
     const ownerId = req.user.ownerId || req.user._id || req.user.id;
     const { planId, paymentMethod = 'UPI', transactionId = '' } = req.body;
@@ -16767,7 +17061,7 @@ router.post('/homestay-owner/subscription/purchase', authenticateToken, async (r
     if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay owner not found.' });
 
     const startDate = new Date();
-    const durationDays = plan.durationDays || 30;
+    const durationDays = plan.durationDays || 365;
     const expiresAt = new Date(startDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
 
     const txId = transactionId || `SUB-TX-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -16779,8 +17073,13 @@ router.post('/homestay-owner/subscription/purchase', authenticateToken, async (r
     owner.subscription.history.push({
       planId: plan._id,
       planName: plan.name,
-      price: plan.price,
-      billingCycle: plan.billingCycle,
+      maxHomestays: plan.maxHomestays,
+      maxRoomsPerHomestay: plan.maxRoomsPerHomestay,
+      mrp: plan.mrp,
+      offerPrice: plan.offerPrice,
+      validity: plan.validity,
+      extraRoomPrice: plan.extraRoomPrice,
+      price: plan.offerPrice,
       startDate,
       expiresAt,
       purchasedAt: new Date(),
@@ -16790,8 +17089,15 @@ router.post('/homestay-owner/subscription/purchase', authenticateToken, async (r
 
     owner.subscription.planId = plan._id;
     owner.subscription.planName = plan.name;
-    owner.subscription.price = plan.price;
-    owner.subscription.billingCycle = plan.billingCycle;
+    owner.subscription.description = plan.description;
+    owner.subscription.maxHomestays = plan.maxHomestays || 1;
+    owner.subscription.maxRoomsPerHomestay = plan.maxRoomsPerHomestay || 5;
+    owner.subscription.mrp = plan.mrp || 0;
+    owner.subscription.offerPrice = plan.offerPrice || 0;
+    owner.subscription.validity = plan.validity || `${durationDays} Days`;
+    owner.subscription.durationDays = durationDays;
+    owner.subscription.extraRoomPrice = plan.extraRoomPrice !== undefined ? plan.extraRoomPrice : 500;
+    owner.subscription.price = plan.offerPrice || 0;
     owner.subscription.startDate = startDate;
     owner.subscription.expiresAt = expiresAt;
     owner.subscription.status = 'Active';
@@ -16806,7 +17112,7 @@ router.post('/homestay-owner/subscription/purchase', authenticateToken, async (r
       title: 'Subscription Plan Activated!',
       message: `You have successfully subscribed to "${plan.name}". Valid until ${expiresAt.toLocaleDateString('en-GB')}.`,
       type: 'payment',
-      metadata: { planName: plan.name, price: plan.price, expiresAt }
+      metadata: { planName: plan.name, price: plan.offerPrice, expiresAt }
     });
 
     res.json({
@@ -16816,6 +17122,55 @@ router.post('/homestay-owner/subscription/purchase', authenticateToken, async (r
     });
   } catch (err) {
     console.error('Error purchasing subscription:', err);
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// POST /api/homestay-owner/properties/:propertyId/extra-rooms (Purchase Extra Room Add-ons)
+router.post(['/homestay-owner/properties/:propertyId/extra-rooms', '/api/homestay-owner/properties/:propertyId/extra-rooms'], authenticateToken, async (req, res) => {
+  try {
+    const ownerId = req.user.ownerId || req.user._id || req.user.id;
+    const { propertyId } = req.params;
+    const { extraRoomsCount = 1, paymentMethod = 'UPI', transactionId = '' } = req.body;
+
+    const count = Number(extraRoomsCount);
+    if (isNaN(count) || count <= 0) {
+      return res.status(400).json({ error: 'ValidationError', message: 'Please specify a valid number of extra rooms to purchase.' });
+    }
+
+    const owner = await HomestayOwner.findById(ownerId);
+    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found.' });
+
+    const prop = await Property.findOne({ _id: propertyId, ownerId, deleted: false });
+    if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
+
+    const ratePerExtraRoom = owner.subscription?.extraRoomPrice !== undefined ? Number(owner.subscription.extraRoomPrice) : 500;
+    const totalAmount = count * ratePerExtraRoom;
+    const txId = transactionId || `ROOM-TX-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    prop.extraRoomsPurchased = (prop.extraRoomsPurchased || 0) + count;
+    await prop.save();
+
+    // Log in owner's history
+    if (!owner.subscription) owner.subscription = {};
+    if (!Array.isArray(owner.subscription.history)) owner.subscription.history = [];
+    owner.subscription.history.push({
+      planName: `Extra Room Add-on (+${count} Rooms for ${prop.name})`,
+      price: totalAmount,
+      purchasedAt: new Date(),
+      transactionId: txId,
+      paymentMethod
+    });
+    await owner.save();
+
+    res.json({
+      success: true,
+      message: `Successfully purchased ${count} extra room add-on(s) for ₹${totalAmount.toLocaleString()}!`,
+      extraRoomsPurchased: prop.extraRoomsPurchased,
+      totalAllowedRooms: (owner.subscription?.maxRoomsPerHomestay || 5) + prop.extraRoomsPurchased
+    });
+  } catch (err) {
+    console.error('Error purchasing extra room add-ons:', err);
     res.status(500).json({ error: 'ServerError', message: err.message });
   }
 });

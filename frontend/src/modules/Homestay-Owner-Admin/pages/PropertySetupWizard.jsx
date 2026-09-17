@@ -34,7 +34,10 @@ import {
   Copy,
   AlertCircle,
   ShieldAlert,
-  Search
+  Search,
+  Crown,
+  CreditCard,
+  PlusCircle
 } from 'lucide-react';
 
 const getApiUrl = (path) => {
@@ -162,6 +165,10 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
 
   const [propertyDbId, setPropertyDbId] = useState(null);
   const [approvalComments, setApprovalComments] = useState([]);
+  const [ownerSubscription, setOwnerSubscription] = useState(null);
+  const [addonModalOpen, setAddonModalOpen] = useState(false);
+  const [addonRoomsCount, setAddonRoomsCount] = useState(1);
+  const [addonPurchasing, setAddonPurchasing] = useState(false);
 
   const isReadOnly = !isAdmin && (propertyStatus === 'Submitted For Review' || propertyStatus === 'Pending Approval');
 
@@ -277,6 +284,9 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
 
         setPropertyDbId(property._id);
         setPropertyStatus(property.status || 'Draft');
+        if (res.data.subscription) {
+          setOwnerSubscription(res.data.subscription);
+        }
         if (isPreview) {
           setCurrentStep(7);
         } else {
@@ -416,6 +426,72 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
       throw e;
     }
   };
+ 
+  // Purchase Extra Room Add-ons (Calculated per additional room)
+  const handlePurchaseExtraRooms = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!propertyDbId) {
+      Swal.fire('Error', 'Property not initialized yet. Please complete Step 1 first.', 'error');
+      return;
+    }
+    const count = Number(addonRoomsCount);
+    if (isNaN(count) || count <= 0) {
+      Swal.fire('Invalid Count', 'Please specify at least 1 extra room to purchase.', 'warning');
+      return;
+    }
+
+    const rate = ownerSubscription?.extraRoomPrice !== undefined ? Number(ownerSubscription.extraRoomPrice) : 500;
+    const totalAmount = count * rate;
+
+    const confirm = await Swal.fire({
+      title: 'Purchase Extra Room Add-ons',
+      html: `You are purchasing <b>${count}</b> Extra Room Add-on(s) at <b>₹${rate.toLocaleString()}/room</b>.<br/><br/><span style="font-size: 1.25rem; font-weight: 800; color: #1e3a8a;">Total: ₹${totalAmount.toLocaleString()}</span>`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: `Pay ₹${totalAmount.toLocaleString()}`,
+      confirmButtonColor: '#2563eb'
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    setAddonPurchasing(true);
+    try {
+      const token = getAuthToken();
+      const res = await axios.post(
+        getApiUrl(`/api/homestay-owner/properties/${propertyDbId}/extra-rooms`),
+        {
+          extraRoomsCount: count,
+          paymentMethod: 'UPI'
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data?.success) {
+        setOwnerSubscription(prev => ({
+          ...prev,
+          extraRoomsPurchased: res.data.extraRoomsPurchased
+        }));
+        setAddonModalOpen(false);
+        setErrors(prev => {
+          const copy = { ...prev };
+          delete copy.rooms;
+          return copy;
+        });
+
+        Swal.fire({
+          title: 'Add-on Confirmed!',
+          text: `Successfully added ${count} extra room(s)! Your total room allowance for this homestay is now ${res.data.totalAllowedRooms} rooms.`,
+          icon: 'success',
+          confirmButtonColor: '#2563eb'
+        });
+      }
+    } catch (err) {
+      console.error('Error purchasing extra rooms:', err);
+      Swal.fire('Failed', err.response?.data?.message || 'Could not complete extra room purchase.', 'error');
+    } finally {
+      setAddonPurchasing(false);
+    }
+  };
 
   // Image Upload handler
   const handleImageUpload = async (e, categoryKey) => {
@@ -551,6 +627,21 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
         const missingImages = formData.rooms.filter(r => !r.images || r.images.length === 0);
         if (missingImages.length > 0) {
           stepErrors.rooms = `Every Room Category must have at least one image. Missing images in: ${missingImages.map(r => r.name).join(', ')}`;
+        }
+
+        // Room Limit & Add-on verification
+        if (!isAdmin && ownerSubscription && ownerSubscription.status === 'Active') {
+          const totalRoomsCount = formData.rooms.reduce((sum, r) => sum + (Number(r.count) || 0), 0);
+          const included = Number(ownerSubscription.maxRoomsPerHomestay) || 5;
+          const extra = Number(ownerSubscription.extraRoomsPurchased) || 0;
+          const maxAllowed = included + extra;
+          if (totalRoomsCount > maxAllowed) {
+            const extraNeeded = totalRoomsCount - maxAllowed;
+            const rate = Number(ownerSubscription.extraRoomPrice !== undefined ? ownerSubscription.extraRoomPrice : 500);
+            stepErrors.rooms = `Room limit exceeded! Your plan includes ${included} rooms per homestay (+${extra} extra room add-ons = ${maxAllowed} total allowed). You have configured ${totalRoomsCount} rooms. Please purchase ${extraNeeded} Extra Room Add-on(s) at ₹${rate}/room (Total: ₹${(extraNeeded * rate).toLocaleString()}) before proceeding.`;
+            setAddonRoomsCount(extraNeeded);
+            setAddonModalOpen(true);
+          }
         }
       }
     }
@@ -2299,6 +2390,103 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
                 </button>
               </div>
 
+              {/* Subscription Room Allowance & Add-on Indicator */}
+              {(() => {
+                const totalRoomsCount = (formData.rooms || []).reduce((sum, r) => sum + (Number(r.count) || 0), 0);
+                const includedRooms = ownerSubscription?.maxRoomsPerHomestay || 5;
+                const extraRoomsPurchased = ownerSubscription?.extraRoomsPurchased || 0;
+                const maxAllowedRooms = includedRooms + extraRoomsPurchased;
+                const isLimitExceeded = totalRoomsCount > maxAllowedRooms;
+                const extraRoomsNeeded = Math.max(0, totalRoomsCount - maxAllowedRooms);
+                const ratePerExtraRoom = ownerSubscription?.extraRoomPrice !== undefined ? Number(ownerSubscription.extraRoomPrice) : 500;
+                const totalAddonCost = extraRoomsNeeded * ratePerExtraRoom;
+
+                return (
+                  <div className={`p-4 rounded-2xl border transition-all ${
+                    isLimitExceeded 
+                      ? 'bg-rose-50/60 border-rose-200' 
+                      : 'bg-gradient-to-r from-blue-50/50 to-indigo-50/50 border-blue-100'
+                  }`}>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200/60">
+                      <div className="flex items-center gap-2">
+                        <span className="p-1.5 bg-blue-600 text-white rounded-lg">
+                          <Crown size={14} />
+                        </span>
+                        <div>
+                          <span className="text-xs font-black text-slate-800">
+                            Subscription Room Allowance: {ownerSubscription?.planName || 'Standard Plan'}
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-semibold block">
+                            Extra Room Add-on Rate: ₹{ratePerExtraRoom.toLocaleString()} / additional room
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAddonRoomsCount(Math.max(1, extraRoomsNeeded || 1));
+                          setAddonModalOpen(true);
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-extrabold flex items-center gap-1 cursor-pointer border-none shadow-xs transition-colors self-start sm:self-auto"
+                      >
+                        <PlusCircle size={13} />
+                        <span>+ Purchase Extra Rooms</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 text-center">
+                      <div className="p-2 bg-white rounded-xl border border-slate-100 shadow-2xs">
+                        <span className="block text-[9px] font-bold text-slate-400 uppercase">Plan Included</span>
+                        <span className="block text-xs font-black text-slate-800 mt-0.5">{includedRooms} Rooms</span>
+                      </div>
+
+                      <div className="p-2 bg-white rounded-xl border border-slate-100 shadow-2xs">
+                        <span className="block text-[9px] font-bold text-slate-400 uppercase">Extra Purchased</span>
+                        <span className="block text-xs font-black text-amber-700 mt-0.5">+{extraRoomsPurchased} Rooms</span>
+                      </div>
+
+                      <div className="p-2 bg-white rounded-xl border border-slate-100 shadow-2xs">
+                        <span className="block text-[9px] font-bold text-slate-400 uppercase">Total Allowed</span>
+                        <span className="block text-xs font-black text-blue-700 mt-0.5">{maxAllowedRooms} Rooms</span>
+                      </div>
+
+                      <div className={`p-2 bg-white rounded-xl border shadow-2xs ${
+                        isLimitExceeded ? 'border-rose-300 ring-1 ring-rose-200' : 'border-slate-100'
+                      }`}>
+                        <span className="block text-[9px] font-bold text-slate-400 uppercase">Total Configured</span>
+                        <span className={`block text-xs font-black mt-0.5 ${
+                          isLimitExceeded ? 'text-rose-600' : 'text-emerald-700'
+                        }`}>
+                          {totalRoomsCount} Rooms
+                        </span>
+                      </div>
+                    </div>
+
+                    {isLimitExceeded && (
+                      <div className="mt-3 p-3 bg-rose-100/70 border border-rose-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-rose-900">
+                        <div className="flex items-start gap-2 text-xs">
+                          <AlertTriangle size={15} className="text-rose-600 shrink-0 mt-0.5" />
+                          <span>
+                            <strong>Room limit exceeded:</strong> You configured <strong>{totalRoomsCount}</strong> rooms, which exceeds your allowance of <strong>{maxAllowedRooms}</strong>. You must purchase <strong>{extraRoomsNeeded}</strong> Extra Room Add-on(s) ({extraRoomsNeeded} × ₹{ratePerExtraRoom} = ₹{totalAddonCost.toLocaleString()}) to proceed.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAddonRoomsCount(extraRoomsNeeded);
+                            setAddonModalOpen(true);
+                          }}
+                          className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black rounded-xl border-none cursor-pointer whitespace-nowrap shadow-xs"
+                        >
+                          Buy {extraRoomsNeeded} Room{extraRoomsNeeded > 1 ? 's' : ''} (₹{totalAddonCost.toLocaleString()})
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {errors.rooms && (
                 <div className="p-3.5 bg-rose-50 text-rose-600 border border-rose-200 text-[10px] font-bold rounded-2xl">
                   {errors.rooms}
@@ -2671,6 +2859,114 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
                 {isAdmin ? 'Save & Publish Property' : 'Publish Property'}
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Extra Room Add-on Purchase Modal */}
+      {addonModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in font-sans">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
+                  <PlusCircle size={20} />
+                </span>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-800 m-0">Purchase Extra Room Add-ons</h3>
+                  <p className="text-[10px] text-slate-400 font-medium">Add room capacity beyond your plan limit.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAddonModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg border-none bg-transparent cursor-pointer"
+              >
+                <X size={17} />
+              </button>
+            </div>
+
+            {(() => {
+              const rate = ownerSubscription?.extraRoomPrice !== undefined ? Number(ownerSubscription.extraRoomPrice) : 500;
+              const count = Math.max(1, Number(addonRoomsCount) || 1);
+              const total = count * rate;
+
+              return (
+                <form onSubmit={handlePurchaseExtraRooms} className="space-y-4">
+                  <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 text-xs text-blue-900">
+                    <span className="font-bold block">Centrally Defined Plan Pricing:</span>
+                    <span className="text-[11px] text-blue-700 block mt-0.5">
+                      Your subscription plan defines extra room add-ons at <strong>₹{rate.toLocaleString()} / room</strong>. Extra rooms are permanently linked to this homestay.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Number of Extra Rooms *
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAddonRoomsCount(prev => Math.max(1, (Number(prev) || 1) - 1))}
+                        className="w-10 h-10 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 font-black text-slate-700 cursor-pointer text-base"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min="1"
+                        required
+                        value={addonRoomsCount}
+                        onChange={(e) => setAddonRoomsCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                        className="flex-1 px-3 py-2 text-center text-sm font-black text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAddonRoomsCount(prev => (Number(prev) || 0) + 1)}
+                        className="w-10 h-10 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 font-black text-slate-700 cursor-pointer text-base"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Pricing Calculation Summary */}
+                  <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-150 space-y-2">
+                    <div className="flex justify-between text-xs text-slate-600 font-medium">
+                      <span>Formula:</span>
+                      <span>{count} Room{count > 1 ? 's' : ''} × ₹{rate.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between items-baseline pt-2 border-t border-slate-200">
+                      <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Total Add-on Cost:</span>
+                      <span className="text-xl font-black text-blue-600">
+                        ₹{total.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2.5 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setAddonModalOpen(false)}
+                      className="px-4 py-2 border border-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer bg-white"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={addonPurchasing}
+                      className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer border-none shadow-sm shadow-blue-100 disabled:opacity-50"
+                    >
+                      {addonPurchasing ? (
+                        <RefreshCw size={13} className="animate-spin" />
+                      ) : (
+                        <Check size={13} className="stroke-[3]" />
+                      )}
+                      <span>Pay ₹{total.toLocaleString()} & Confirm</span>
+                    </button>
+                  </div>
+                </form>
+              );
+            })()}
           </div>
         </div>
       )}

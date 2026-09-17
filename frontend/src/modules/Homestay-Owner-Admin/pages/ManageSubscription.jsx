@@ -13,9 +13,10 @@ import {
   ArrowRight, 
   CheckCircle2, 
   RefreshCw,
-  Building2,
-  Users,
   Home,
+  BedDouble,
+  Tag,
+  PlusCircle,
   X,
   QrCode
 } from 'lucide-react';
@@ -141,13 +142,13 @@ export default function ManageSubscription() {
           <div>
             <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-rose-400 mb-2">
               <Crown size={14} className="stroke-[2.5]" />
-              <span>Membership & Access Tier</span>
+              <span>Membership & Subscription Plan</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white m-0">
               Manage Your Subscription Plan
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 font-medium mt-1.5 max-w-2xl leading-relaxed">
-              Unlock unlimited homestay listings, public booking calendars, automated financial invoicing, and advanced staff access roles.
+              Centrally derived homestay listings allowance, room limits per homestay, and extra room add-ons.
             </p>
           </div>
 
@@ -170,7 +171,7 @@ export default function ManageSubscription() {
           <div>
             <h4 className="text-sm font-black text-rose-900 m-0">Subscription Expired</h4>
             <p className="text-xs text-rose-700 font-medium mt-1 m-0 leading-relaxed">
-              Your previous subscription plan or free trial has expired. Please select a plan below and renew your subscription to access all property management, booking requests, and calendar features.
+              Your previous subscription plan has expired. Please select a plan below or contact Super Admin to renew your subscription.
             </p>
           </div>
         </div>
@@ -185,10 +186,10 @@ export default function ManageSubscription() {
                 <Crown size={24} />
               </div>
               <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Current Active Tier</span>
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Current Active Plan</span>
                 <div className="flex items-center gap-2.5 mt-0.5">
                   <h2 className="text-lg font-black text-slate-900 m-0">
-                    {currentSub.planName || 'Free Trial Plan'}
+                    {currentSub.planName || 'Standard Plan'}
                   </h2>
                   <span className={`px-2.5 py-0.5 text-[10px] font-black rounded-full uppercase tracking-wider ${
                     currentSub.status === 'Active' && !isExpired
@@ -204,143 +205,169 @@ export default function ManageSubscription() {
             <div className="text-left sm:text-right">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Plan Cost</span>
               <span className="text-2xl font-black text-slate-900 block leading-tight">
-                {currentSub.price > 0 ? `₹${currentSub.price.toLocaleString()}` : 'Free'}
-                <span className="text-xs font-semibold text-slate-400 ml-1">/ {currentSub.billingCycle || 'month'}</span>
+                {currentSub.price > 0 ? `₹${currentSub.price.toLocaleString()}` : (currentSub.offerPrice ? `₹${currentSub.offerPrice.toLocaleString()}` : 'Free')}
+                <span className="text-xs font-semibold text-slate-400 ml-1">/ {currentSub.validity || `${currentSub.durationDays || 365} Days`}</span>
               </span>
             </div>
           </div>
 
-          {/* Details Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-5">
-            <div className="bg-slate-50/70 border border-slate-100 rounded-2xl p-4">
-              <div className="flex items-center gap-2 text-slate-400 text-[10px] font-black uppercase tracking-wider mb-1">
-                <Calendar size={13} />
-                <span>Activated On</span>
+          {/* Centrally Derived Plan Resource Limits */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-5 text-center">
+            <div className="bg-slate-50/80 border border-slate-100 rounded-2xl p-3.5">
+              <div className="flex items-center justify-center gap-1.5 text-slate-400 text-[10px] font-black uppercase tracking-wider mb-1">
+                <Home size={13} className="text-blue-500" />
+                <span>Max Homestays</span>
               </div>
-              <p className="text-xs font-black text-slate-800 m-0">
-                {currentSub.startDate ? new Date(currentSub.startDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Today'}
+              <p className="text-sm font-black text-slate-800 m-0">
+                {currentSub.maxHomestays || 1} Homestay{Number(currentSub.maxHomestays) > 1 ? 's' : ''}
               </p>
             </div>
 
-            <div className="bg-slate-50/70 border border-slate-100 rounded-2xl p-4">
-              <div className="flex items-center gap-2 text-slate-400 text-[10px] font-black uppercase tracking-wider mb-1">
-                <Clock size={13} />
-                <span>Valid Until</span>
+            <div className="bg-slate-50/80 border border-slate-100 rounded-2xl p-3.5">
+              <div className="flex items-center justify-center gap-1.5 text-slate-400 text-[10px] font-black uppercase tracking-wider mb-1">
+                <BedDouble size={13} className="text-indigo-500" />
+                <span>Rooms / Homestay</span>
               </div>
-              <p className="text-xs font-black text-slate-800 m-0">
-                {currentSub.expiresAt ? new Date(currentSub.expiresAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A'}
+              <p className="text-sm font-black text-slate-800 m-0">
+                {currentSub.maxRoomsPerHomestay || 5} Rooms
               </p>
             </div>
 
-            <div className="bg-slate-50/70 border border-slate-100 rounded-2xl p-4">
-              <div className="flex items-center gap-2 text-slate-400 text-[10px] font-black uppercase tracking-wider mb-1">
-                <Sparkles size={13} />
-                <span>Days Remaining</span>
+            <div className="bg-amber-50/70 border border-amber-100 rounded-2xl p-3.5">
+              <div className="flex items-center justify-center gap-1.5 text-amber-700 text-[10px] font-black uppercase tracking-wider mb-1">
+                <PlusCircle size={13} className="text-amber-600" />
+                <span>Extra Room Add-on</span>
               </div>
-              <p className="text-xs font-black text-rose-600 m-0">
-                {isExpired ? '0 Days (Expired)' : `${currentSub.daysRemaining ?? 30} Days Left`}
+              <p className="text-sm font-black text-amber-900 m-0">
+                ₹{Number(currentSub.extraRoomPrice ?? 500).toLocaleString()} / room
+              </p>
+            </div>
+
+            <div className="bg-slate-50/80 border border-slate-100 rounded-2xl p-3.5">
+              <div className="flex items-center justify-center gap-1.5 text-slate-400 text-[10px] font-black uppercase tracking-wider mb-1">
+                <Clock size={13} className="text-emerald-500" />
+                <span>Validity Remaining</span>
+              </div>
+              <p className="text-sm font-black text-slate-800 m-0">
+                {isExpired ? 'Expired' : `${currentSub.daysRemaining ?? 365} Days Left`}
               </p>
             </div>
           </div>
         </div>
       )}
 
-      {/* Available Plans Section */}
+      {/* Available Plans Section — Strictly the 8 Fields */}
       <div>
         <div className="mb-6">
           <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2 m-0">
-            <span>Available Subscription Tiers</span>
+            <span>Available Subscription Plans</span>
           </h2>
           <p className="text-xs text-slate-400 font-semibold mt-1 m-0">
-            Choose the best plan tailored to the scale of your homestays and villas. Instant online activation.
+            Choose from the central plans configured by Super Admin. All resource limits and extra room add-on pricing are derived from your selected plan.
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {plans.map((plan) => {
             const isCurrent = isCurrentPlan(plan);
+            const offer = plan.offerPrice !== undefined ? plan.offerPrice : (plan.price || 0);
+            const mrp = plan.mrp !== undefined ? plan.mrp : offer;
+            const homestaysLimit = plan.maxHomestays || plan.maxProperties || 1;
+            const roomsLimit = plan.maxRoomsPerHomestay || plan.maxRooms || 5;
+            const addOnPrice = plan.extraRoomPrice !== undefined ? plan.extraRoomPrice : 500;
+            const validityText = plan.validity || `${plan.durationDays || 365} Days`;
+
             return (
               <div
                 key={plan._id}
                 className={`bg-white rounded-3xl p-6 sm:p-7 border flex flex-col justify-between transition-all relative ${
-                  plan.isPopular
-                    ? 'border-[#D80032] ring-2 ring-rose-600/10 shadow-lg'
+                  isCurrent
+                    ? 'border-blue-500 ring-2 ring-blue-500/10 shadow-lg'
                     : 'border-slate-150 shadow-xs hover:border-slate-300'
                 }`}
               >
-                {plan.isPopular && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#D80032] text-white px-3.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase shadow-xs">
-                    Most Popular
-                  </div>
-                )}
-
                 <div>
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-base font-black text-slate-900 m-0">{plan.name}</h3>
                     {isCurrent && (
                       <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-extrabold rounded-md">
-                        Current
+                        Current Plan
                       </span>
                     )}
                   </div>
 
                   <p className="text-xs text-slate-500 font-medium mt-1.5 min-h-[36px] line-clamp-2">
-                    {plan.tagline || plan.description}
+                    {plan.description || 'Standard Homestay Owner subscription tier.'}
                   </p>
 
-                  <div className="my-5 pb-5 border-b border-slate-100">
-                    <span className="text-3xl font-black text-slate-900 leading-none">
-                      ₹{Number(plan.price).toLocaleString()}
-                    </span>
-                    <span className="text-xs font-semibold text-slate-400 ml-1.5">
-                      / {plan.billingCycle || 'month'}
-                    </span>
-                  </div>
-
-                  {/* Limit Highlights */}
-                  <div className="grid grid-cols-3 gap-2 mb-5 text-center">
-                    <div className="p-2 bg-slate-50 rounded-xl border border-slate-100">
-                      <Home size={13} className="text-slate-500 mx-auto mb-1" />
-                      <span className="block text-[10px] font-black text-slate-800">
-                        {plan.maxProperties >= 999 ? 'Unlimited' : `${plan.maxProperties} Prop`}
+                  <div className="my-4 p-3 bg-slate-50 rounded-2xl border border-slate-100 flex items-baseline justify-between">
+                    <div>
+                      <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Offer Price</span>
+                      <span className="text-2xl font-black text-blue-600 leading-none">
+                        ₹{Number(offer).toLocaleString()}
                       </span>
+                      <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">/ {validityText}</span>
                     </div>
-                    <div className="p-2 bg-slate-50 rounded-xl border border-slate-100">
-                      <Building2 size={13} className="text-slate-500 mx-auto mb-1" />
-                      <span className="block text-[10px] font-black text-slate-800">
-                        {plan.maxRooms >= 999 ? 'Unlimited' : `${plan.maxRooms} Rooms`}
-                      </span>
-                    </div>
-                    <div className="p-2 bg-slate-50 rounded-xl border border-slate-100">
-                      <Users size={13} className="text-slate-500 mx-auto mb-1" />
-                      <span className="block text-[10px] font-black text-slate-800">
-                        {plan.maxStaff >= 999 ? 'Unlimited' : `${plan.maxStaff} Staff`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Features List */}
-                  <div className="space-y-2.5 mb-6">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
-                      Plan Inclusions:
-                    </span>
-                    {(plan.features || []).map((feat, idx) => (
-                      <div key={idx} className="flex items-start gap-2.5 text-xs text-slate-700 font-medium leading-tight">
-                        <Check size={14} className="text-emerald-600 stroke-[3] shrink-0 mt-0.5" />
-                        <span>{feat}</span>
+                    {mrp > offer && (
+                      <div className="text-right">
+                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">MRP</span>
+                        <span className="text-xs font-bold text-slate-400 line-through">
+                          ₹{Number(mrp).toLocaleString()}
+                        </span>
                       </div>
-                    ))}
+                    )}
+                  </div>
+
+                  {/* Strictly the 8 Fields Highlighted */}
+                  <div className="space-y-2 mb-5 text-xs">
+                    <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50/80 border border-slate-100">
+                      <span className="text-slate-600 font-medium flex items-center gap-1.5">
+                        <Home size={13} className="text-blue-500" />
+                        Max Homestays
+                      </span>
+                      <span className="font-black text-slate-800">
+                        {homestaysLimit} Homestay{homestaysLimit > 1 ? 's' : ''}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50/80 border border-slate-100">
+                      <span className="text-slate-600 font-medium flex items-center gap-1.5">
+                        <BedDouble size={13} className="text-indigo-500" />
+                        Rooms / Homestay
+                      </span>
+                      <span className="font-black text-slate-800">
+                        {roomsLimit} Rooms
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50/80 border border-slate-100">
+                      <span className="text-slate-600 font-medium flex items-center gap-1.5">
+                        <Calendar size={13} className="text-emerald-500" />
+                        Duration / Validity
+                      </span>
+                      <span className="font-black text-slate-800">
+                        {validityText}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded-xl bg-amber-50/60 border border-amber-100">
+                      <span className="text-amber-800 font-semibold flex items-center gap-1.5 text-[11px]">
+                        <PlusCircle size={13} className="text-amber-600" />
+                        Extra Room Add-on
+                      </span>
+                      <span className="font-black text-amber-900 text-xs">
+                        ₹{Number(addOnPrice).toLocaleString()} / room
+                      </span>
+                    </div>
                   </div>
                 </div>
 
                 <button
                   onClick={() => handleOpenPurchase(plan)}
                   className={`w-full py-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer border-none shadow-sm ${
-                    plan.isPopular
-                      ? 'bg-[#D80032] hover:bg-rose-700 text-white shadow-rose-100'
-                      : isCurrent
-                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-800'
-                        : 'bg-slate-900 hover:bg-slate-800 text-white'
+                    isCurrent
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-100'
+                      : 'bg-slate-900 hover:bg-slate-800 text-white'
                   }`}
                 >
                   <span>{isCurrent ? (isExpired ? 'Renew This Plan' : 'Extend / Renew') : 'Choose This Plan'}</span>
@@ -390,12 +417,12 @@ export default function ManageSubscription() {
                   <div>
                     <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Selected Tier</span>
                     <span className="text-sm font-black text-slate-900">{selectedPlanForPurchase.name}</span>
-                    <span className="block text-[11px] text-slate-500">Duration: {selectedPlanForPurchase.durationDays || 30} Days</span>
+                    <span className="block text-[11px] text-slate-500">Duration: {selectedPlanForPurchase.validity || `${selectedPlanForPurchase.durationDays || 365} Days`}</span>
                   </div>
                   <div className="text-right">
                     <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Amount Payable</span>
-                    <span className="text-xl font-black text-[#D80032]">
-                      ₹{Number(selectedPlanForPurchase.price).toLocaleString()}
+                    <span className="text-xl font-black text-blue-600">
+                      ₹{Number(selectedPlanForPurchase.offerPrice ?? selectedPlanForPurchase.price ?? 0).toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -443,7 +470,7 @@ export default function ManageSubscription() {
                   <button
                     type="submit"
                     disabled={purchaseSubmitting}
-                    className="w-2/3 py-2.5 bg-[#D80032] hover:bg-rose-700 text-white font-black rounded-2xl text-xs flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-sm shadow-rose-100 disabled:opacity-50"
+                    className="w-2/3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl text-xs flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-sm shadow-blue-100 disabled:opacity-50"
                   >
                     {purchaseSubmitting ? (
                       <RefreshCw size={14} className="animate-spin" />

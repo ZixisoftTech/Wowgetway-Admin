@@ -17,12 +17,15 @@ import {
   Building,
   LogIn,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Crown,
+  CreditCard
 } from 'lucide-react';
 
 import MetricCard from '../components/widgets/MetricCard.jsx';
 import AddEditHomestayOwner from './AddEditHomestayOwner.jsx';
 import HomestayOwnerDetails from './HomestayOwnerDetails.jsx';
+import ManageOwnerSubscriptionModal from '../components/ManageOwnerSubscriptionModal.jsx';
 import { authSuccess as ownerAuthSuccess } from '../../Homestay-Owner-Admin/store/homestayOwnerAuthSlice.js';
 
 const API_BASE_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/owners';
@@ -37,6 +40,7 @@ export default function HomestayOwnersManagement() {
   // Parsing viewMode and selectedId from the active route URL path
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'add' | 'edit' | 'details'
   const [selectedId, setSelectedId] = useState(null);
+  const [subModalOwner, setSubModalOwner] = useState(null);
 
   // Listing state & query parameters
   const [searchQuery, setSearchQuery] = useState('');
@@ -385,6 +389,7 @@ export default function HomestayOwnersManagement() {
                     <th className="py-4 px-6">Mobile Number</th>
                     <th className="py-4 px-6">Email Address</th>
                     <th className="py-4 px-6 text-center">Linked Properties</th>
+                    <th className="py-4 px-6 text-center">Subscription Plan</th>
                     <th className="py-4 px-6 text-center">Status</th>
                     <th className="py-4 px-6">Created By</th>
                     <th className="py-4 px-6">Created Date</th>
@@ -394,7 +399,7 @@ export default function HomestayOwnersManagement() {
                 <tbody className="divide-y divide-slate-50 text-xs font-semibold text-slate-700">
                   {listLoading ? (
                     <tr>
-                      <td colSpan="8" className="py-12 text-center text-slate-400">
+                      <td colSpan="9" className="py-12 text-center text-slate-400">
                         <div className="flex justify-center gap-1.5 items-center animate-pulse">
                           <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" />
                           <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce delay-75" />
@@ -404,7 +409,7 @@ export default function HomestayOwnersManagement() {
                     </tr>
                   ) : ownersList.length === 0 ? (
                     <tr>
-                      <td colSpan="8" className="py-12 text-center text-slate-450 font-medium">
+                      <td colSpan="9" className="py-12 text-center text-slate-450 font-medium">
                         No homestay owners registered matching the filters.
                       </td>
                     </tr>
@@ -442,6 +447,28 @@ export default function HomestayOwnersManagement() {
                             </span>
                           </td>
                           <td className="py-4 px-6 text-center">
+                            {owner.subscription?.status === 'Active' ? (
+                              <button
+                                type="button"
+                                onClick={() => setSubModalOwner({ id: owner._id, name: `${owner.firstName} ${owner.lastName}` })}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-800 text-[10px] font-black border border-amber-200 cursor-pointer transition-colors"
+                                title="Manage Subscription Plan"
+                              >
+                                <Crown size={11} className="text-amber-600" />
+                                <span>{owner.subscription.planName}</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setSubModalOwner({ id: owner._id, name: `${owner.firstName} ${owner.lastName}` })}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 hover:bg-blue-50 text-slate-500 hover:text-blue-600 text-[10px] font-bold border border-slate-200 cursor-pointer transition-colors"
+                                title="Assign Subscription Plan"
+                              >
+                                + Assign
+                              </button>
+                            )}
+                          </td>
+                          <td className="py-4 px-6 text-center">
                             <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold tracking-wide ${
                               owner.status === 'Active' 
                                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
@@ -458,6 +485,13 @@ export default function HomestayOwnersManagement() {
                           <td className="py-4 px-6 text-slate-500 font-medium">{joiningDate}</td>
                           <td className="py-4 px-6 text-right">
                             <div className="flex justify-end gap-1.5">
+                              <button
+                                onClick={() => setSubModalOwner({ id: owner._id, name: `${owner.firstName} ${owner.lastName}` })}
+                                className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                                title="Manage Owner Subscription Plan"
+                              >
+                                <Crown size={15} />
+                              </button>
                               {owner.status !== 'Deleted' && (
                                 <button
                                   onClick={() => handleImpersonateLogin(owner._id)}
@@ -555,6 +589,16 @@ export default function HomestayOwnersManagement() {
         </motion.div>
       )}
 
+      {/* Owner Subscription Management Modal */}
+      <ManageOwnerSubscriptionModal
+        isOpen={Boolean(subModalOwner)}
+        onClose={() => setSubModalOwner(null)}
+        ownerId={subModalOwner?.id}
+        ownerName={subModalOwner?.name}
+        onSuccess={() => {
+          queryClient.invalidateQueries(['ownersList']);
+        }}
+      />
     </div>
   );
 }

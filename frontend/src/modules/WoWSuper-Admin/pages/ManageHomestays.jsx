@@ -34,10 +34,13 @@ import {
   Camera,
   Star,
   Activity,
-  Layers
+  Layers,
+  Crown,
+  CreditCard
 } from 'lucide-react';
 import MetricCard from '../components/widgets/MetricCard.jsx';
 import PropertySetupWizard from '../../Homestay-Owner-Admin/pages/PropertySetupWizard.jsx';
+import ManageOwnerSubscriptionModal from '../components/ManageOwnerSubscriptionModal.jsx';
 
 const getApiUrl = (path) => {
   const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
@@ -71,6 +74,7 @@ export default function ManageHomestays() {
   const [wizardStep, setWizardStep] = useState(1);
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
   const [reviewComment, setReviewComment] = useState('');
+  const [subModalOwner, setSubModalOwner] = useState(null);
 
   const handleReviewAction = async (actionStatus) => {
     if ((actionStatus === 'Rejected' || actionStatus === 'Changes Requested') && !reviewComment.trim()) {
@@ -898,11 +902,37 @@ export default function ManageHomestays() {
                           <td className="py-4 px-6 text-slate-500 font-bold">{prop.type}</td>
                           <td className="py-4 px-6">
                             <div className="flex flex-col">
-                              <span className="text-slate-850 font-bold flex items-center gap-1.5">
-                                <User size={12} className="text-slate-400" />
-                                {prop.ownerName}
-                              </span>
-                              <span className="text-[10px] font-medium text-slate-400 pl-4">{prop.ownerMobile}</span>
+                              <div className="flex flex-col">
+                                <span className="text-slate-850 font-bold flex items-center gap-1.5">
+                                  <User size={12} className="text-slate-400" />
+                                  {prop.ownerName}
+                                </span>
+                                <span className="text-[10px] font-medium text-slate-400 pl-4">{prop.ownerMobile}</span>
+                                {prop.ownerId && (
+                                  <div className="pl-4 mt-1">
+                                    {prop.ownerSubscription?.status === 'Active' ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); setSubModalOwner({ id: prop.ownerId, name: prop.ownerName }); }}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 text-[9px] font-black cursor-pointer transition-colors"
+                                        title="Click to view/change subscription plan"
+                                      >
+                                        <Crown size={10} className="text-amber-600" />
+                                        <span>{prop.ownerSubscription.planName}</span>
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); setSubModalOwner({ id: prop.ownerId, name: prop.ownerName }); }}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 hover:bg-blue-50 text-slate-500 hover:text-blue-600 border border-slate-200 text-[9px] font-bold cursor-pointer transition-colors"
+                                        title="Click to assign subscription plan"
+                                      >
+                                        <span>+ Assign Plan</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="py-4 px-6 text-slate-600">
@@ -926,6 +956,15 @@ export default function ManageHomestays() {
                           </td>
                           <td className="py-4 px-6 text-right">
                             <div className="flex justify-end gap-1.5 items-center">
+                              {prop.ownerId && (
+                                <button
+                                  onClick={() => setSubModalOwner({ id: prop.ownerId, name: prop.ownerName })}
+                                  className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition-all cursor-pointer"
+                                  title="Manage Owner Subscription Plan"
+                                >
+                                  <Crown size={15} />
+                                </button>
+                              )}
                               {(prop.status === 'Pending Approval' || prop.rawStatus === 'Submitted For Review') && (
                                 <button
                                   onClick={() => { setSelectedId(prop._id); setViewMode('details'); }}
@@ -1026,7 +1065,20 @@ export default function ManageHomestays() {
                       </div>
                       <div>
                         <span className="text-[10px] text-slate-400 font-bold block">Owner</span>
-                        {prop.ownerName}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>{prop.ownerName}</span>
+                          {prop.ownerId && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setSubModalOwner({ id: prop.ownerId, name: prop.ownerName }); }}
+                              className="px-1.5 py-0.5 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 text-[9px] font-black border border-amber-200 flex items-center gap-1 cursor-pointer"
+                              title="Manage Subscription"
+                            >
+                              <Crown size={10} className="text-amber-600" />
+                              <span>{prop.ownerSubscription?.planName || 'Plan'}</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div>
                         <span className="text-[10px] text-slate-400 font-bold block">Capacity & Min Rate</span>
@@ -1612,6 +1664,17 @@ export default function ManageHomestays() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Owner Subscription Management Modal */}
+      <ManageOwnerSubscriptionModal
+        isOpen={Boolean(subModalOwner)}
+        onClose={() => setSubModalOwner(null)}
+        ownerId={subModalOwner?.id}
+        ownerName={subModalOwner?.name}
+        onSuccess={() => {
+          queryClient.invalidateQueries(['homestaysList']);
+        }}
+      />
     </div>
   );
 }

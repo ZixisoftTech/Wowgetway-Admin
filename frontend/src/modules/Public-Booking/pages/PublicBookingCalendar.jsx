@@ -149,6 +149,8 @@ export default function PublicBookingCalendar() {
   const slipPrintRef = useRef(null);
   const calendarSectionRef = useRef(null);
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [roomGalleryModal, setRoomGalleryModal] = useState(null);
+  const [activePhotoIndexByCat, setActivePhotoIndexByCat] = useState({});
 
   // 1. Fetch Link Verification and Owner Payment Settings on mount
   useEffect(() => {
@@ -1294,11 +1296,22 @@ export default function PublicBookingCalendar() {
                           <td colSpan={(calendarData?.daysInMonth || 30) + 1} className="py-2 px-3">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                <div className="w-7 h-7 rounded-lg overflow-hidden shrink-0 border border-slate-200 bg-slate-100">
+                                <div 
+                                  className="w-7 h-7 rounded-lg overflow-hidden shrink-0 border border-slate-200 bg-slate-100 cursor-pointer hover:ring-2 hover:ring-rose-400 transition-all"
+                                  onClick={() => {
+                                    const cImgs = (cat.images && cat.images.length > 0) ? cat.images : (cat.coverImage ? [cat.coverImage] : [fallbackPropertyImages[1]]);
+                                    setRoomGalleryModal({
+                                      title: `${cat.categoryName} (${cat.roomType})`,
+                                      images: cImgs,
+                                      activeIndex: 0
+                                    });
+                                  }}
+                                  title="View all room photos"
+                                >
                                   <img 
                                     src={(cat.images && cat.images.length > 0) ? getImageUrl(cat.images[0]) : (cat.coverImage ? getImageUrl(cat.coverImage) : fallbackPropertyImages[1])} 
                                     alt={cat.categoryName} 
-                                    className="w-full h-full object-cover"
+                                    className="w-full h-full object-cover" 
                                     onError={(e) => { e.currentTarget.src = fallbackPropertyImages[1]; }}
                                   />
                                 </div>
@@ -1397,28 +1410,122 @@ export default function PublicBookingCalendar() {
                 ) : (
                   <div className="space-y-3">
                     {availableCategories.map((cat, catIdx) => {
-                      const catImage = (cat.images && cat.images.length > 0) 
-                        ? getImageUrl(cat.images[0]) 
-                        : (cat.coverImage ? getImageUrl(cat.coverImage) : fallbackPropertyImages[(catIdx + 1) % fallbackPropertyImages.length]);
+                      const catImages = (cat.images && cat.images.length > 0) 
+                        ? cat.images 
+                        : (cat.coverImage ? [cat.coverImage] : [fallbackPropertyImages[(catIdx + 1) % fallbackPropertyImages.length]]);
+                      const activeIdx = (activePhotoIndexByCat[cat.categoryId] !== undefined && activePhotoIndexByCat[cat.categoryId] < catImages.length) 
+                        ? activePhotoIndexByCat[cat.categoryId] 
+                        : 0;
+                      const activeImg = catImages[activeIdx];
 
                       return (
                         <div 
                           key={cat.categoryId} 
-                          className="border border-slate-200 rounded-2xl p-4 bg-white hover:border-slate-300 transition-colors shadow-2xs"
+                          className="border border-slate-200 rounded-3xl p-4 sm:p-5 bg-white hover:border-slate-300 transition-colors shadow-2xs"
                         >
                           <div className="flex flex-col sm:flex-row gap-4 items-start">
-                            {/* Room Photo Thumbnail */}
-                            <div className="w-full sm:w-44 h-32 sm:h-32 rounded-xl overflow-hidden relative shrink-0 border border-slate-200/80 bg-slate-100 group">
-                              <img 
-                                src={catImage} 
-                                alt={cat.categoryName} 
-                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
-                                onError={(e) => { e.currentTarget.src = fallbackPropertyImages[1]; }}
-                              />
-                              {cat.images && cat.images.length > 1 && (
-                                <span className="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-md bg-slate-900/75 text-white text-[9px] font-black uppercase tracking-wider backdrop-blur-xs">
-                                  +{cat.images.length} Photos
-                                </span>
+                            {/* Room Photo Gallery & Carousel */}
+                            <div className="w-full sm:w-52 shrink-0 space-y-2">
+                              {/* Main Image with Interactive Controls */}
+                              <div 
+                                className="w-full h-36 sm:h-36 rounded-2xl overflow-hidden relative border border-slate-200/80 bg-slate-100 group cursor-pointer shadow-2xs"
+                                onClick={() => setRoomGalleryModal({
+                                  title: `${cat.categoryName} (${cat.roomType})`,
+                                  images: catImages,
+                                  activeIndex: activeIdx
+                                })}
+                                title="Click to view all photos in full screen"
+                              >
+                                <img 
+                                  src={getImageUrl(activeImg)} 
+                                  alt={`${cat.categoryName} photo ${activeIdx + 1}`} 
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+                                  onError={(e) => { e.currentTarget.src = fallbackPropertyImages[1]; }}
+                                />
+
+                                {/* Prev Photo Button */}
+                                {catImages.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const nextIdx = activeIdx > 0 ? activeIdx - 1 : catImages.length - 1;
+                                      setActivePhotoIndexByCat(prev => ({ ...prev, [cat.categoryId]: nextIdx }));
+                                    }}
+                                    className="absolute left-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-900/60 hover:bg-slate-900/90 text-white flex items-center justify-center backdrop-blur-xs transition-all opacity-90 sm:opacity-0 group-hover:opacity-100 border border-white/20 shadow-xs cursor-pointer z-10"
+                                    title="Previous photo"
+                                  >
+                                    <ChevronLeft size={14} className="stroke-[2.5]" />
+                                  </button>
+                                )}
+
+                                {/* Next Photo Button */}
+                                {catImages.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const nextIdx = activeIdx < catImages.length - 1 ? activeIdx + 1 : 0;
+                                      setActivePhotoIndexByCat(prev => ({ ...prev, [cat.categoryId]: nextIdx }));
+                                    }}
+                                    className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-900/60 hover:bg-slate-900/90 text-white flex items-center justify-center backdrop-blur-xs transition-all opacity-90 sm:opacity-0 group-hover:opacity-100 border border-white/20 shadow-xs cursor-pointer z-10"
+                                    title="Next photo"
+                                  >
+                                    <ChevronRight size={14} className="stroke-[2.5]" />
+                                  </button>
+                                )}
+
+                                {/* Photo Count / View All Badge */}
+                                <div className="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-md bg-slate-900/80 text-white text-[9px] font-black uppercase tracking-wider backdrop-blur-xs flex items-center gap-1 border border-white/10 hover:bg-rose-600 transition-colors">
+                                  <Camera size={10} />
+                                  <span>{catImages.length > 1 ? `${activeIdx + 1}/${catImages.length} Photos` : '1 Photo'}</span>
+                                </div>
+                              </div>
+
+                              {/* Clickable Mini-Thumbnails Strip: SHOWS ALL IMAGES OF THE ROOM */}
+                              {catImages.length > 1 && (
+                                <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 px-0.5 scrollbar-none">
+                                  {catImages.map((img, imgIdx) => (
+                                    <button
+                                      key={imgIdx}
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActivePhotoIndexByCat(prev => ({ ...prev, [cat.categoryId]: imgIdx }));
+                                      }}
+                                      className={`relative w-10 h-10 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer p-0 bg-slate-100 ${
+                                        activeIdx === imgIdx 
+                                          ? 'border-rose-600 ring-2 ring-rose-200 scale-105' 
+                                          : 'border-slate-200 hover:border-slate-400 opacity-70 hover:opacity-100'
+                                      }`}
+                                      title={`View photo ${imgIdx + 1}`}
+                                    >
+                                      <img 
+                                        src={getImageUrl(img)} 
+                                        alt={`Thumb ${imgIdx + 1}`} 
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => { e.currentTarget.src = fallbackPropertyImages[1]; }}
+                                      />
+                                    </button>
+                                  ))}
+                                  {catImages.length > 4 && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setRoomGalleryModal({
+                                          title: `${cat.categoryName} (${cat.roomType})`,
+                                          images: catImages,
+                                          activeIndex: activeIdx
+                                        });
+                                      }}
+                                      className="w-10 h-10 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 text-[9px] font-black shrink-0 flex items-center justify-center cursor-pointer transition-colors"
+                                      title="Open Full Gallery"
+                                    >
+                                      +{catImages.length - 4}
+                                    </button>
+                                  )}
+                                </div>
                               )}
                             </div>
 
@@ -2232,6 +2339,101 @@ export default function PublicBookingCalendar() {
                 <ChevronRight size={22} />
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ROOM PHOTO GALLERY LIGHTBOX MODAL */}
+      {roomGalleryModal && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-200"
+          onClick={() => setRoomGalleryModal(null)}
+        >
+          <div 
+            className="max-w-4xl w-full flex flex-col items-center justify-center space-y-4 relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="w-full flex items-center justify-between text-white px-2">
+              <div className="space-y-0.5">
+                <h3 className="text-base font-black tracking-tight">{roomGalleryModal.title}</h3>
+                <span className="text-xs font-bold text-white/70">
+                  Photo {roomGalleryModal.activeIndex + 1} of {roomGalleryModal.images.length}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRoomGalleryModal(null)}
+                className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer border border-white/20 transition-colors"
+                title="Close Gallery"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Main Active Image with Prev & Next */}
+            <div className="relative w-full flex items-center justify-center max-h-[70vh]">
+              {roomGalleryModal.images.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setRoomGalleryModal(prev => ({
+                    ...prev,
+                    activeIndex: prev.activeIndex > 0 ? prev.activeIndex - 1 : prev.images.length - 1
+                  }))}
+                  className="absolute left-2 sm:left-4 z-10 w-11 h-11 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center border border-white/20 cursor-pointer transition-all shadow-lg"
+                  title="Previous Photo"
+                >
+                  <ChevronLeft size={24} />
+                </button>
+              )}
+
+              <img 
+                src={getImageUrl(roomGalleryModal.images[roomGalleryModal.activeIndex])} 
+                alt={`${roomGalleryModal.title} - ${roomGalleryModal.activeIndex + 1}`}
+                className="max-h-[70vh] w-auto max-w-full object-contain rounded-2xl shadow-2xl border border-white/10"
+                onError={(e) => { e.currentTarget.src = fallbackPropertyImages[1]; }}
+              />
+
+              {roomGalleryModal.images.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setRoomGalleryModal(prev => ({
+                    ...prev,
+                    activeIndex: prev.activeIndex < prev.images.length - 1 ? prev.activeIndex + 1 : 0
+                  }))}
+                  className="absolute right-2 sm:right-4 z-10 w-11 h-11 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center border border-white/20 cursor-pointer transition-all shadow-lg"
+                  title="Next Photo"
+                >
+                  <ChevronRight size={24} />
+                </button>
+              )}
+            </div>
+
+            {/* Bottom Thumbnails Strip */}
+            {roomGalleryModal.images.length > 1 && (
+              <div className="w-full flex items-center justify-center gap-2 overflow-x-auto py-2 px-4 scrollbar-none max-w-2xl">
+                {roomGalleryModal.images.map((img, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setRoomGalleryModal(prev => ({ ...prev, activeIndex: idx }))}
+                    className={`relative w-14 h-14 rounded-xl overflow-hidden shrink-0 border-2 transition-all cursor-pointer p-0 bg-slate-900 ${
+                      roomGalleryModal.activeIndex === idx
+                        ? 'border-rose-500 scale-105 ring-2 ring-rose-400'
+                        : 'border-white/20 hover:border-white/60 opacity-60 hover:opacity-100'
+                    }`}
+                    title={`Go to photo ${idx + 1}`}
+                  >
+                    <img 
+                      src={getImageUrl(img)} 
+                      alt={`Thumb ${idx + 1}`} 
+                      className="w-full h-full object-cover"
+                      onError={(e) => { e.currentTarget.src = fallbackPropertyImages[1]; }}
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -32,7 +32,9 @@ import {
   Trash2,
   Ban,
   Check,
-  BedDouble
+  BedDouble,
+  Edit3,
+  AlertTriangle
 } from 'lucide-react';
 
 const getApiUrl = (path) => {
@@ -121,6 +123,313 @@ export default function Revenue() {
   const [transactions, setTransactions] = useState([]);
   const [selectedBookingModal, setSelectedBookingModal] = useState(null);
   const [selectedBooking, setSelectedBooking] = useState(null);
+
+  // Reschedule Modal
+  const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false);
+  const [rescheduleBooking, setRescheduleBooking] = useState(null);
+  const [rescheduleCheckIn, setRescheduleCheckIn] = useState('');
+  const [rescheduleCheckOut, setRescheduleCheckOut] = useState('');
+  const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
+
+  // Record Payment Modal
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [paymentBooking, setPaymentBooking] = useState(null);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('UPI');
+  const [paymentTransactionId, setPaymentTransactionId] = useState('');
+  const [paymentRemark, setPaymentRemark] = useState('');
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+
+  // Edit Booking Modal
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editBooking, setEditBooking] = useState(null);
+  const [editGuestName, setEditGuestName] = useState('');
+  const [editGuestPhone, setEditGuestPhone] = useState('');
+  const [editGuestEmail, setEditGuestEmail] = useState('');
+  const [editAddOns, setEditAddOns] = useState(0);
+  const [editAddOnsRemark, setEditAddOnsRemark] = useState('');
+  const [editSpecialRequests, setEditSpecialRequests] = useState('');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+
+  // Cancel Booking Modal
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [cancelBooking, setCancelBooking] = useState(null);
+  const [cancelReason, setCancelReason] = useState('Guest requested cancellation');
+  const [cancelNotes, setCancelNotes] = useState('');
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
+
+  const toInputDateString = (dateVal) => {
+    if (!dateVal) return '';
+    try {
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return '';
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    } catch (e) {
+      return '';
+    }
+  };
+
+  // 1. Reschedule Handlers
+  const handleOpenReschedule = (b) => {
+    const raw = b.rawBooking || b;
+    setRescheduleBooking(raw);
+    setRescheduleCheckIn(toInputDateString(raw.checkInDate || raw.rawCheckIn || b.checkInDate));
+    setRescheduleCheckOut(toInputDateString(raw.checkOutDate || raw.rawCheckOut || b.checkOutDate));
+    setIsRescheduleModalOpen(true);
+  };
+
+  const handleRescheduleSubmit = async (e) => {
+    e.preventDefault();
+    if (!rescheduleBooking) return;
+    const bookingId = rescheduleBooking._id || rescheduleBooking.id || rescheduleBooking.dbId;
+
+    if (!rescheduleCheckIn || !rescheduleCheckOut) {
+      Swal.fire({ icon: 'warning', title: 'Dates Required', text: 'Please select both check-in and check-out dates.' });
+      return;
+    }
+
+    if (new Date(rescheduleCheckIn) >= new Date(rescheduleCheckOut)) {
+      Swal.fire({ icon: 'warning', title: 'Invalid Dates', text: 'Check-out date must be after check-in date.' });
+      return;
+    }
+
+    try {
+      setRescheduleSubmitting(true);
+      const token = getAuthToken();
+      const res = await axios.patch(getApiUrl(`/api/homestay-owner/bookings/${bookingId}/reschedule`), {
+        checkIn: rescheduleCheckIn,
+        checkOut: rescheduleCheckOut
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data?.success) {
+        Swal.fire({
+          icon: 'success',
+          title: 'Rescheduled!',
+          text: 'The stay dates have been updated successfully.',
+          timer: 1600,
+          showConfirmButton: false
+        });
+        setIsRescheduleModalOpen(false);
+        fetchRevenueData();
+        if (selectedBooking && (selectedBooking._id === bookingId || selectedBooking.id === bookingId || selectedBooking.dbId === bookingId)) {
+          setSelectedBooking({
+            ...selectedBooking,
+            checkInDate: rescheduleCheckIn,
+            checkOutDate: rescheduleCheckOut,
+            rawCheckIn: rescheduleCheckIn,
+            rawCheckOut: rescheduleCheckOut
+          });
+        }
+      }
+    } catch (err) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Reschedule Failed',
+        text: err.response?.data?.message || 'Could not reschedule stay. Room might be booked on selected dates.'
+      });
+    } finally {
+      setRescheduleSubmitting(false);
+    }
+  };
+
+  // 2. Record Payment Handlers
+  const handleOpenPayment = (b) => {
+    const raw = b.rawBooking || b;
+    setPaymentBooking(raw);
+    const pend = Number(raw.pricing?.pendingAmount !== undefined ? raw.pricing.pendingAmount : (raw.pendingAmount !== undefined ? raw.pendingAmount : Math.max(0, (raw.pricing?.finalAmount || raw.totalAmount || 0) - (raw.pricing?.paidAmount || raw.paidAmount || 0))));
+    setPaymentAmount(pend > 0 ? pend : '');
+    setPaymentMethod(raw.paymentMethod || raw.paymentMode || 'UPI');
+    setPaymentTransactionId('');
+    setPaymentRemark('Settlement payment');
+    setIsPaymentModalOpen(true);
+  };
+
+  const handlePaymentSubmit = async (e) => {
+    e.preventDefault();
+    if (!paymentBooking) return;
+    const bookingId = paymentBooking._id || paymentBooking.id || paymentBooking.dbId;
+
+    if (!paymentAmount || Number(paymentAmount) <= 0) {
+      Swal.fire({ icon: 'warning', title: 'Invalid Amount', text: 'Please enter a valid payment amount.' });
+      return;
+    }
+
+    try {
+      setPaymentSubmitting(true);
+      const token = getAuthToken();
+      const res = await axios.patch(getApiUrl(`/api/homestay-owner/bookings/${bookingId}/payment`), {
+        amount: Number(paymentAmount),
+        paymentMethod,
+        transactionId: paymentTransactionId,
+        remark: paymentRemark
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data?.success) {
+        Swal.fire({
+          icon: 'success',
+          title: 'Payment Recorded!',
+          text: `Payment of ₹${Number(paymentAmount).toLocaleString()} recorded.`,
+          timer: 1600,
+          showConfirmButton: false
+        });
+        setIsPaymentModalOpen(false);
+        fetchRevenueData();
+        if (selectedBooking && (selectedBooking._id === bookingId || selectedBooking.id === bookingId || selectedBooking.dbId === bookingId)) {
+          const oldPaid = Number(selectedBooking.pricing?.paidAmount ?? selectedBooking.paidAmount ?? 0);
+          const newPaid = oldPaid + Number(paymentAmount);
+          const totalAmt = Number(selectedBooking.pricing?.finalAmount ?? selectedBooking.totalAmount ?? 0);
+          const newPend = Math.max(0, totalAmt - newPaid);
+          setSelectedBooking({
+            ...selectedBooking,
+            pricing: {
+              ...selectedBooking.pricing,
+              paidAmount: newPaid,
+              pendingAmount: newPend
+            },
+            paidAmount: newPaid,
+            pendingAmount: newPend,
+            paymentStatus: newPend === 0 ? 'Completed' : 'Partial'
+          });
+        }
+      }
+    } catch (err) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Payment Error',
+        text: err.response?.data?.message || 'Failed to record payment.'
+      });
+    } finally {
+      setPaymentSubmitting(false);
+    }
+  };
+
+  // 3. Edit Booking Info Handlers
+  const handleOpenEdit = (b) => {
+    const raw = b.rawBooking || b;
+    setEditBooking(raw);
+    setEditGuestName(raw.customer?.name || raw.guestName || '');
+    setEditGuestPhone(raw.customer?.mobile || raw.phone || '');
+    setEditGuestEmail(raw.customer?.email || raw.email || '');
+    setEditAddOns(Number(raw.pricing?.addOns ?? raw.addOns ?? 0));
+    setEditAddOnsRemark(raw.pricing?.addOnsRemark || '');
+    setEditSpecialRequests(raw.specialRequests || '');
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editBooking) return;
+    const bookingId = editBooking._id || editBooking.id || editBooking.dbId;
+
+    try {
+      setEditSubmitting(true);
+      const token = getAuthToken();
+      const res = await axios.patch(getApiUrl(`/api/homestay-owner/bookings/${bookingId}`), {
+        guestName: editGuestName,
+        guestPhone: editGuestPhone,
+        guestEmail: editGuestEmail,
+        addOns: Number(editAddOns || 0),
+        addOnsRemark: editAddOnsRemark,
+        specialRequests: editSpecialRequests
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data?.success) {
+        Swal.fire({
+          icon: 'success',
+          title: 'Booking Updated',
+          text: 'Guest details and add-ons saved successfully.',
+          timer: 1500,
+          showConfirmButton: false
+        });
+        setIsEditModalOpen(false);
+        fetchRevenueData();
+        if (selectedBooking && (selectedBooking._id === bookingId || selectedBooking.id === bookingId || selectedBooking.dbId === bookingId)) {
+          setSelectedBooking({
+            ...selectedBooking,
+            customer: {
+              ...selectedBooking.customer,
+              name: editGuestName,
+              mobile: editGuestPhone,
+              email: editGuestEmail
+            },
+            guestName: editGuestName,
+            phone: editGuestPhone,
+            email: editGuestEmail,
+            pricing: {
+              ...selectedBooking.pricing,
+              addOns: Number(editAddOns || 0),
+              addOnsRemark: editAddOnsRemark
+            },
+            addOns: Number(editAddOns || 0),
+            specialRequests: editSpecialRequests
+          });
+        }
+      }
+    } catch (err) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Update Failed',
+        text: err.response?.data?.message || 'Failed to update booking.'
+      });
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  // 4. Cancel Booking Handlers
+  const handleOpenCancel = (b) => {
+    const raw = b.rawBooking || b;
+    setCancelBooking(raw);
+    setCancelReason('Guest requested cancellation');
+    setCancelNotes('');
+    setIsCancelModalOpen(true);
+  };
+
+  const handleCancelSubmit = async (e) => {
+    e.preventDefault();
+    if (!cancelBooking) return;
+    const bookingId = cancelBooking._id || cancelBooking.id || cancelBooking.dbId;
+
+    try {
+      setCancelSubmitting(true);
+      const token = getAuthToken();
+      const res = await axios.patch(getApiUrl(`/api/homestay-owner/bookings/${bookingId}/cancel`), {
+        reason: cancelReason,
+        notes: cancelNotes
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data?.success) {
+        Swal.fire({
+          icon: 'success',
+          title: 'Booking Cancelled',
+          text: 'The booking has been marked as cancelled.',
+          timer: 1600,
+          showConfirmButton: false
+        });
+        setIsCancelModalOpen(false);
+        fetchRevenueData();
+        if (selectedBooking && (selectedBooking._id === bookingId || selectedBooking.id === bookingId || selectedBooking.dbId === bookingId)) {
+          setSelectedBooking({ ...selectedBooking, bookingStatus: 'Cancelled' });
+        }
+      }
+    } catch (err) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Cancellation Failed',
+        text: err.response?.data?.message || 'Could not cancel booking.'
+      });
+    } finally {
+      setCancelSubmitting(false);
+    }
+  };
 
   const handleApplyFilter = () => {
     setAppliedDateFilters({
@@ -1724,7 +2033,7 @@ export default function Revenue() {
 
               {/* Operations Action Buttons */}
               <div className="space-y-2 pt-2 border-t border-slate-100">
-                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Operations &amp; Documents</span>
+                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Operations &amp; Actions</span>
                 
                 {/* If Hold Booking: Confirm and Remove Hold */}
                 {status === 'Hold' && (
@@ -1746,12 +2055,37 @@ export default function Revenue() {
                   </div>
                 )}
 
+                {/* Action Buttons Row */}
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => handleOpenReschedule(raw)}
+                    className="py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer border-none"
+                  >
+                    <CalendarDays size={13} />
+                    <span>Reschedule</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleOpenPayment(raw)}
+                    className="py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer border-none"
+                  >
+                    <CreditCard size={13} />
+                    <span>Record Pay</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleOpenEdit(raw)}
+                    className="py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer border-none"
+                  >
+                    <Edit3 size={13} />
+                    <span>Edit Info</span>
+                  </button>
+                </div>
+
                 {/* Printable Documents Row */}
                 <div className="grid grid-cols-3 gap-2 pt-1">
                   <button
                     onClick={() => {
-                      setSelectedBooking(null);
-                      setSelectedBookingModal(null);
                       navigate(`/homestay-owner/bookings/confirmation-slip/${dbId}`);
                     }}
                     className="py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer bg-white"
@@ -1762,8 +2096,6 @@ export default function Revenue() {
 
                   <button
                     onClick={() => {
-                      setSelectedBooking(null);
-                      setSelectedBookingModal(null);
                       navigate(`/homestay-owner/bookings/quotation/${dbId}`);
                     }}
                     className="py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer bg-white"
@@ -1774,8 +2106,6 @@ export default function Revenue() {
 
                   <button
                     onClick={() => {
-                      setSelectedBooking(null);
-                      setSelectedBookingModal(null);
                       navigate(`/homestay-owner/bookings/invoice/${dbId}`);
                     }}
                     className="py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer bg-white"
@@ -1785,22 +2115,322 @@ export default function Revenue() {
                   </button>
                 </div>
 
-                <button
-                  onClick={() => {
-                    setSelectedBooking(null);
-                    setSelectedBookingModal(null);
-                    navigate('/homestay-owner/bookings/manage');
-                  }}
-                  className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-rose-200 flex items-center justify-center gap-2 transition-colors mt-2"
-                >
-                  <CalendarCheck size={15} />
-                  <span>Open in Manage Bookings</span>
-                </button>
+                {/* Cancel Booking button */}
+                {status !== 'Cancelled' && (
+                  <button
+                    onClick={() => handleOpenCancel(raw)}
+                    className="w-full py-2.5 mt-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border border-rose-200 flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Ban size={13} />
+                    <span>Cancel This Booking</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
         );
       })()}
+
+      {/* 1. RESCHEDULE MODAL */}
+      {isRescheduleModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-100">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-sm font-black text-slate-800">Reschedule Stay Dates</h3>
+              <button onClick={() => setIsRescheduleModalOpen(false)} className="p-1 hover:bg-slate-100 rounded-lg cursor-pointer border-none bg-transparent">
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleRescheduleSubmit} className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">New Check-In Date</label>
+                <input
+                  type="date"
+                  value={rescheduleCheckIn}
+                  onChange={(e) => setRescheduleCheckIn(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-bold"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">New Check-Out Date</label>
+                <input
+                  type="date"
+                  value={rescheduleCheckOut}
+                  onChange={(e) => setRescheduleCheckOut(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-bold"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsRescheduleModalOpen(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer border-none"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={rescheduleSubmitting}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl cursor-pointer border-none shadow-sm"
+                >
+                  {rescheduleSubmitting ? 'Updating...' : 'Save Dates'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2. RECORD PAYMENT MODAL */}
+      {isPaymentModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-100">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-sm font-black text-slate-800">Record Guest Payment</h3>
+              <button onClick={() => setIsPaymentModalOpen(false)} className="p-1 hover:bg-slate-100 rounded-lg cursor-pointer border-none bg-transparent">
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handlePaymentSubmit} className="space-y-3.5 text-xs">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">Amount Received (₹)</label>
+                <input
+                  type="number"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm font-black"
+                  placeholder="Enter amount"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">Payment Method</label>
+                <select
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+                >
+                  <option value="UPI">UPI / QR Code</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Card">Credit / Debit Card</option>
+                  <option value="Bank Transfer">Bank Transfer / NEFT</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">Transaction Reference ID (Optional)</label>
+                <input
+                  type="text"
+                  value={paymentTransactionId}
+                  onChange={(e) => setPaymentTransactionId(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                  placeholder="e.g. UPI-123456789"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">Remark (Optional)</label>
+                <input
+                  type="text"
+                  value={paymentRemark}
+                  onChange={(e) => setPaymentRemark(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                  placeholder="e.g. Check-in advance"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPaymentModalOpen(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer border-none"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={paymentSubmitting}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl cursor-pointer border-none shadow-sm"
+                >
+                  {paymentSubmitting ? 'Saving...' : 'Record Payment'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 3. EDIT BOOKING DETAILS MODAL */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-100">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-sm font-black text-slate-800">Edit Guest &amp; Booking Info</h3>
+              <button onClick={() => setIsEditModalOpen(false)} className="p-1 hover:bg-slate-100 rounded-lg cursor-pointer border-none bg-transparent">
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditSubmit} className="space-y-3.5 text-xs">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">Guest Name</label>
+                <input
+                  type="text"
+                  value={editGuestName}
+                  onChange={(e) => setEditGuestName(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase">Phone Number</label>
+                  <input
+                    type="text"
+                    value={editGuestPhone}
+                    onChange={(e) => setEditGuestPhone(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
+                    required
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase">Email (Optional)</label>
+                  <input
+                    type="email"
+                    value={editGuestEmail}
+                    onChange={(e) => setEditGuestEmail(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase">Add-ons Amount (₹)</label>
+                  <input
+                    type="number"
+                    value={editAddOns}
+                    onChange={(e) => setEditAddOns(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase">Add-ons Remark</label>
+                  <input
+                    type="text"
+                    value={editAddOnsRemark}
+                    onChange={(e) => setEditAddOnsRemark(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    placeholder="e.g. Extra mattress"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">Special Requests / Notes</label>
+                <textarea
+                  value={editSpecialRequests}
+                  onChange={(e) => setEditSpecialRequests(e.target.value)}
+                  rows={2}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs resize-none"
+                  placeholder="Any special notes or preferences"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer border-none"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSubmitting}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl cursor-pointer border-none shadow-sm"
+                >
+                  {editSubmitting ? 'Saving...' : 'Update Details'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 4. CANCEL BOOKING MODAL */}
+      {isCancelModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-100">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-sm font-black text-rose-700 flex items-center gap-1.5">
+                <AlertTriangle size={15} />
+                <span>Cancel Reservation</span>
+              </h3>
+              <button onClick={() => setIsCancelModalOpen(false)} className="p-1 hover:bg-slate-100 rounded-lg cursor-pointer border-none bg-transparent">
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCancelSubmit} className="space-y-3.5 text-xs">
+              <p className="text-slate-600">
+                Are you sure you want to cancel booking <strong className="text-slate-800">{cancelBooking?.bookingId}</strong>? This will release reserved dates on the calendar.
+              </p>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">Cancellation Reason</label>
+                <select
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                >
+                  <option value="Guest requested cancellation">Guest requested cancellation</option>
+                  <option value="Change of dates/plans">Change of dates/plans</option>
+                  <option value="Payment not received">Payment not received</option>
+                  <option value="Property maintenance">Property maintenance</option>
+                  <option value="Other">Other reason</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">Internal Notes (Optional)</label>
+                <textarea
+                  value={cancelNotes}
+                  onChange={(e) => setCancelNotes(e.target.value)}
+                  rows={2}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs resize-none"
+                  placeholder="Reason or guest feedback..."
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCancelModalOpen(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer border-none"
+                >
+                  Keep Booking
+                </button>
+                <button
+                  type="submit"
+                  disabled={cancelSubmitting}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl cursor-pointer border-none shadow-sm"
+                >
+                  {cancelSubmitting ? 'Cancelling...' : 'Confirm Cancellation'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Global Footer */}
       <footer className="mt-8 flex flex-col sm:flex-row justify-between items-center text-[10px] font-bold text-slate-400 border-t border-slate-100 pt-6 gap-3 print:hidden">

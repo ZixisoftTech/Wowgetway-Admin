@@ -46,8 +46,11 @@ export const getHomestayOwnerRoutes = () => (
     <Route path="bookings/requests" element={<BookingRequests />} />
     <Route path="bookings/requests/:requestId" element={<BookingRequestDetails />} />
     <Route path="bookings/confirmation-slip/:requestId" element={<BookingConfirmationSlip />} />
+    <Route path="bookings/:requestId/confirmation-slip" element={<BookingConfirmationSlip />} />
     <Route path="bookings/quotation/:requestId" element={<BookingQuotation />} />
+    <Route path="bookings/:requestId/quotation" element={<BookingQuotation />} />
     <Route path="bookings/invoice/:requestId" element={<BookingTaxInvoice />} />
+    <Route path="bookings/:requestId/invoice" element={<BookingTaxInvoice />} />
 
     {/* Settings/Payments Route */}
     <Route path="settings/payments" element={<ManagePayments />} />

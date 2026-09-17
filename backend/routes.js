@@ -14031,10 +14031,12 @@ router.get('/homestay-owner/revenue', authenticateToken, async (req, res) => {
       }
     }
 
-    const bookings = await Booking.find({
-      propertyId: propFilter,
-      bookingStatus: { $nin: ['Cancelled'] }
+    const allBookings = await Booking.find({
+      propertyId: propFilter
     }).populate('propertyId', 'name');
+
+    // Active Bookings (excluding cancelled) for Revenue Metrics and Charts
+    const activeBookings = allBookings.filter(b => b.bookingStatus !== 'Cancelled');
 
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
@@ -14063,7 +14065,7 @@ router.get('/homestay-owner/revenue', authenticateToken, async (req, res) => {
     let lastMonthRev = 0;
     let totalRev = 0;
 
-    bookings.forEach(b => {
+    activeBookings.forEach(b => {
       const bDate = new Date(b.createdAt || b.checkInDate);
       const amt = Number(b.pricing?.finalAmount || b.amount || 0);
       totalRev += amt;
@@ -14080,11 +14082,11 @@ router.get('/homestay-owner/revenue', authenticateToken, async (req, res) => {
     const weekChange = lastWeekRev > 0 ? (((thisWeekRev - lastWeekRev) / lastWeekRev) * 100).toFixed(1) : '+15.3';
     const monthChange = lastMonthRev > 0 ? (((thisMonthRev - lastMonthRev) / lastMonthRev) * 100).toFixed(1) : '+18.8';
 
-    // Unified timeframe calculations matching reference designs
-    const timeframeData = generateRevenueTimeframeData(bookings, { timeframe, year, month, day, week });
+    // Unified timeframe calculations matching reference designs (using active non-cancelled bookings)
+    const timeframeData = generateRevenueTimeframeData(activeBookings, { timeframe, year, month, day, week });
 
     const propertyBreakdown = properties.map(p => {
-      const pBookings = bookings.filter(b => String(b.propertyId?._id || b.propertyId) === String(p._id));
+      const pBookings = activeBookings.filter(b => String(b.propertyId?._id || b.propertyId) === String(p._id));
       const pRev = pBookings.reduce((sum, b) => sum + Number(b.pricing?.finalAmount || b.amount || 0), 0);
       const pPaid = pBookings.reduce((sum, b) => sum + Number(b.pricing?.paidAmount || 0), 0);
       return {
@@ -14110,7 +14112,8 @@ router.get('/homestay-owner/revenue', authenticateToken, async (req, res) => {
       pending: typeof d.pending === 'number' ? `₹${d.pending.toLocaleString()}` : (d.pending || '₹0')
     }));
 
-    const transactions = bookings.map(b => {
+    // Transactions for ledger table: contains all bookings with their statuses
+    const transactions = allBookings.map(b => {
       const fAmt = Number(b.pricing?.finalAmount || b.amount || 0);
       const pAmt = Number(b.pricing?.paidAmount || 0);
       const pend = Number(b.pricing?.pendingAmount !== undefined ? b.pricing.pendingAmount : Math.max(0, fAmt - pAmt));
@@ -14122,6 +14125,7 @@ router.get('/homestay-owner/revenue', authenticateToken, async (req, res) => {
         _id: String(b._id),
         id: b.bookingId || String(b._id),
         bookingId: b.bookingId || String(b._id),
+        customer: b.customer || { name: b.guestDetails?.fullName || 'Guest', mobile: b.guestDetails?.phone || '', email: '' },
         guestName: b.customer?.name || b.guestDetails?.fullName || 'Guest',
         phone: b.customer?.mobile || b.customer?.phone || '',
         email: b.customer?.email || '',
@@ -14129,12 +14133,23 @@ router.get('/homestay-owner/revenue', authenticateToken, async (req, res) => {
         propertyId: String(b.propertyId?._id || b.propertyId),
         roomNumber: roomStr,
         bookedRooms: b.bookedRooms || [{ roomNumber: roomStr }],
+        roomDetails: b.propertyDetails || { roomNumber: roomStr, roomType: 'Standard Room' },
+        propertyDetails: b.propertyDetails || { roomNumber: roomStr, roomType: 'Standard Room' },
+        guests: b.guests || { adults: 2, children: 0, infants: 0 },
         checkInDate: cin.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }),
         checkOutDate: cout.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }),
         rawCheckIn: b.checkInDate,
         rawCheckOut: b.checkOutDate,
         bookingDate: bDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }),
         bookingTime: bDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        pricing: b.pricing || {
+          bookingAmount: Number(b.pricing?.bookingAmount || Math.max(0, fAmt - Number(b.pricing?.tax || 0) - Number(b.pricing?.addOns || 0))),
+          addOns: Number(b.pricing?.addOns || 0),
+          tax: Number(b.pricing?.tax || 0),
+          finalAmount: fAmt,
+          paidAmount: pAmt,
+          pendingAmount: pend
+        },
         baseTariff: Number(b.pricing?.bookingAmount || Math.max(0, fAmt - Number(b.pricing?.tax || 0) - Number(b.pricing?.addOns || 0))),
         addOns: Number(b.pricing?.addOns || 0),
         tax: Number(b.pricing?.tax || 0),
@@ -14145,7 +14160,8 @@ router.get('/homestay-owner/revenue', authenticateToken, async (req, res) => {
         paymentMode: b.paymentMode || b.paymentMethod || 'UPI',
         bookingStatus: b.bookingStatus,
         specialRequests: b.specialRequests || b.notes || '',
-        timeline: b.timeline || []
+        timeline: b.timeline || [],
+        rawBooking: b
       };
     });
 
@@ -14625,12 +14641,18 @@ router.get('/public/calendar-availability', async (req, res) => {
         };
       });
 
+      const catImages = Array.isArray(cat.images) ? cat.images.filter(Boolean) : [];
       return {
         categoryId: cat._id,
         categoryName: cat.roomCategoryName,
         roomType: cat.roomType,
         basePrice: baseRate,
         rateType: linkType === 'agent' ? 'B2B' : 'B2C',
+        images: catImages,
+        coverImage: catImages[0] || '',
+        bedType: cat.bedType || 'King Bed',
+        maxAdults: cat.maxOccupancyAdults || 2,
+        maxChildren: cat.maxOccupancyChildren || 1,
         rooms: roomsWithAvailability
       };
     });
@@ -14703,6 +14725,7 @@ router.get('/public/available-rooms', async (req, res) => {
         ? (linkType === 'agent' ? epPrice.b2bRate : epPrice.b2cRate) 
         : 3000;
 
+      const catImages = Array.isArray(cat.images) ? cat.images.filter(Boolean) : [];
       return {
         categoryId: cat._id,
         categoryName: cat.roomCategoryName,
@@ -14715,7 +14738,9 @@ router.get('/public/available-rooms', async (req, res) => {
         maxAdults: cat.maxOccupancyAdults || 2,
         maxChildren: cat.maxOccupancyChildren || 1,
         bedType: cat.bedType || 'King Bed',
-        roomSize: cat.roomSize || 'Standard'
+        roomSize: cat.roomSize || 'Standard',
+        images: catImages,
+        coverImage: catImages[0] || ''
       };
     });
 

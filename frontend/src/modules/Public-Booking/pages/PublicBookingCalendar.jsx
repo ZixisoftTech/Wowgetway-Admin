@@ -616,7 +616,9 @@ export default function PublicBookingCalendar() {
           adults: 2,
           child5_9: 0,
           child0_4: 0,
-          price: cat.basePrice
+          price: cat.basePrice,
+          images: cat.images || [],
+          coverImage: cat.coverImage || ''
         }
       ]);
     }
@@ -1292,7 +1294,15 @@ export default function PublicBookingCalendar() {
                           <td colSpan={(calendarData?.daysInMonth || 30) + 1} className="py-2 px-3">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                <BedDouble size={14} className="text-rose-600" />
+                                <div className="w-7 h-7 rounded-lg overflow-hidden shrink-0 border border-slate-200 bg-slate-100">
+                                  <img 
+                                    src={(cat.images && cat.images.length > 0) ? getImageUrl(cat.images[0]) : (cat.coverImage ? getImageUrl(cat.coverImage) : fallbackPropertyImages[1])} 
+                                    alt={cat.categoryName} 
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => { e.currentTarget.src = fallbackPropertyImages[1]; }}
+                                  />
+                                </div>
+                                <BedDouble size={14} className="text-rose-600 shrink-0" />
                                 <span>{cat.categoryName} ({cat.roomType})</span>
                               </div>
                               <span className="text-[10px] font-black text-slate-500">
@@ -1386,61 +1396,92 @@ export default function PublicBookingCalendar() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {availableCategories.map((cat) => (
-                      <div 
-                        key={cat.categoryId} 
-                        className="border border-slate-200 rounded-2xl p-4 space-y-3 bg-white hover:border-slate-300 transition-colors"
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <div>
-                            <h4 className="text-sm font-black text-slate-900">{cat.categoryName}</h4>
-                            <p className="text-xs text-slate-500 font-medium">
-                              {cat.roomType} • {cat.bedType} • Max {cat.maxAdults} Adults, {cat.maxChildren} Child
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-[10px] font-black uppercase tracking-wider block text-slate-400">
-                              {linkType === 'agent' ? 'B2B Partner Rate' : 'Direct Guest Tariff'}
-                            </span>
-                            <span className="text-base font-black text-slate-900">
-                              ₹{Number(cat.basePrice).toLocaleString()}
-                              <span className="text-xs font-semibold text-slate-400"> /night</span>
-                            </span>
-                          </div>
-                        </div>
+                    {availableCategories.map((cat, catIdx) => {
+                      const catImage = (cat.images && cat.images.length > 0) 
+                        ? getImageUrl(cat.images[0]) 
+                        : (cat.coverImage ? getImageUrl(cat.coverImage) : fallbackPropertyImages[(catIdx + 1) % fallbackPropertyImages.length]);
 
-                        {/* Room Numbers Buttons */}
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                            Available Room Numbers ({cat.availableCount} open):
-                          </span>
-                          {cat.availableRooms?.length === 0 ? (
-                            <span className="text-xs text-rose-500 font-semibold italic">Sold out for these dates</span>
-                          ) : (
-                            <div className="flex flex-wrap gap-2">
-                              {cat.availableRooms.map((roomNo) => {
-                                const isSelected = selectedRooms.some(r => String(r.roomNumber) === String(roomNo));
-                                return (
-                                  <button
-                                    key={roomNo}
-                                    type="button"
-                                    onClick={() => handleAddRoom(cat, roomNo)}
-                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all border flex items-center gap-1.5 ${
-                                      isSelected 
-                                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' 
-                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                                    }`}
-                                  >
-                                    {isSelected ? <Check size={12} className="stroke-[3]" /> : <Plus size={12} />}
-                                    <span>Room {roomNo}</span>
-                                  </button>
-                                );
-                              })}
+                      return (
+                        <div 
+                          key={cat.categoryId} 
+                          className="border border-slate-200 rounded-2xl p-4 bg-white hover:border-slate-300 transition-colors shadow-2xs"
+                        >
+                          <div className="flex flex-col sm:flex-row gap-4 items-start">
+                            {/* Room Photo Thumbnail */}
+                            <div className="w-full sm:w-44 h-32 sm:h-32 rounded-xl overflow-hidden relative shrink-0 border border-slate-200/80 bg-slate-100 group">
+                              <img 
+                                src={catImage} 
+                                alt={cat.categoryName} 
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+                                onError={(e) => { e.currentTarget.src = fallbackPropertyImages[1]; }}
+                              />
+                              {cat.images && cat.images.length > 1 && (
+                                <span className="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-md bg-slate-900/75 text-white text-[9px] font-black uppercase tracking-wider backdrop-blur-xs">
+                                  +{cat.images.length} Photos
+                                </span>
+                              )}
                             </div>
-                          )}
+
+                            {/* Room Info & Rates */}
+                            <div className="flex-1 w-full space-y-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="text-sm font-black text-slate-900">{cat.categoryName}</h4>
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                                      {cat.roomType}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 font-medium mt-1">
+                                    {cat.bedType} • Max {cat.maxAdults} Adults, {cat.maxChildren} Child {cat.roomSize ? `• ${cat.roomSize} sq.ft` : ''}
+                                  </p>
+                                </div>
+                                <div className="text-left sm:text-right">
+                                  <span className="text-[10px] font-black uppercase tracking-wider block text-slate-400">
+                                    {linkType === 'agent' ? 'B2B Partner Rate' : 'Direct Guest Tariff'}
+                                  </span>
+                                  <span className="text-base font-black text-slate-900">
+                                    ₹{Number(cat.basePrice).toLocaleString()}
+                                    <span className="text-xs font-semibold text-slate-400"> /night</span>
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Room Numbers Buttons */}
+                              <div>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                                  Available Room Numbers ({cat.availableCount} open):
+                                </span>
+                                {cat.availableRooms?.length === 0 ? (
+                                  <span className="text-xs text-rose-500 font-semibold italic">Sold out for these dates</span>
+                                ) : (
+                                  <div className="flex flex-wrap gap-2">
+                                    {cat.availableRooms.map((roomNo) => {
+                                      const isSelected = selectedRooms.some(r => String(r.roomNumber) === String(roomNo));
+                                      return (
+                                        <button
+                                          key={roomNo}
+                                          type="button"
+                                          onClick={() => handleAddRoom(cat, roomNo)}
+                                          className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all border flex items-center gap-1.5 ${
+                                            isSelected 
+                                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' 
+                                              : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                                          }`}
+                                        >
+                                          {isSelected ? <Check size={12} className="stroke-[3]" /> : <Plus size={12} />}
+                                          <span>Room {roomNo}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1457,9 +1498,19 @@ export default function PublicBookingCalendar() {
                     {selectedRooms.map((rm, idx) => (
                       <div key={rm.roomNumber} className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-3">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-black text-slate-900">
-                            Room {rm.roomNumber} — {rm.categoryName}
-                          </span>
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-9 h-9 rounded-lg overflow-hidden shrink-0 border border-slate-200 bg-slate-100">
+                              <img 
+                                src={(rm.images && rm.images[0]) ? getImageUrl(rm.images[0]) : (rm.coverImage ? getImageUrl(rm.coverImage) : fallbackPropertyImages[1])} 
+                                alt={rm.categoryName} 
+                                className="w-full h-full object-cover"
+                                onError={(e) => { e.currentTarget.src = fallbackPropertyImages[1]; }}
+                              />
+                            </div>
+                            <span className="text-xs font-black text-slate-900">
+                              Room {rm.roomNumber} — {rm.categoryName}
+                            </span>
+                          </div>
                           <button
                             type="button"
                             onClick={() => setSelectedRooms(selectedRooms.filter((_, i) => i !== idx))}

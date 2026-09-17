@@ -346,7 +346,7 @@ export default function GuestDetails() {
           )}
 
           <button
-            onClick={() => navigate(`/homestay-owner/bookings/${guest.dbId || guest.id}/invoice`)}
+            onClick={() => navigate(`/homestay-owner/bookings/invoice/${guest.dbId || guest.id}`)}
             className="flex-1 md:flex-none px-4 py-2.5 border border-slate-205 hover:bg-slate-50 text-slate-707 font-bold rounded-xl text-[10px] uppercase tracking-wider cursor-pointer bg-white flex items-center justify-center gap-1.5 shadow-sm transition-all"
           >
             <Printer size={13} className="text-slate-400" />
@@ -354,7 +354,7 @@ export default function GuestDetails() {
           </button>
 
           <button
-            onClick={() => navigate(`/homestay-owner/bookings/${guest.dbId || guest.id}/quotation`)}
+            onClick={() => navigate(`/homestay-owner/bookings/quotation/${guest.dbId || guest.id}`)}
             className="w-full md:w-auto px-4 py-2.5 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider cursor-pointer border-none flex items-center justify-center gap-1.5 shadow-sm transition-all"
           >
             <Eye size={13} />
@@ -655,7 +655,7 @@ export default function GuestDetails() {
         )}
 
         <button
-          onClick={() => navigate(`/homestay-owner/bookings/${guest.dbId || guest.id}/invoice`)}
+          onClick={() => navigate(`/homestay-owner/bookings/invoice/${guest.dbId || guest.id}`)}
           className="px-5 py-3 border border-slate-205 hover:bg-slate-50 text-slate-707 font-bold rounded-xl text-[10px] uppercase tracking-wider cursor-pointer bg-white flex items-center justify-center gap-1.5 transition-all"
         >
           <Printer size={13} className="text-slate-400" />

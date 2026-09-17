@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import Swal from 'sweetalert2';
 import { 
   ArrowLeft,
   CircleDollarSign,
@@ -12,6 +13,7 @@ import {
   RefreshCw,
   Printer,
   CheckCircle2,
+  CheckCircle,
   Clock,
   Search,
   FileText,
@@ -24,8 +26,13 @@ import {
   X,
   ExternalLink,
   CalendarCheck,
+  CalendarDays,
   AlertCircle,
-  Filter
+  Filter,
+  Trash2,
+  Ban,
+  Check,
+  BedDouble
 } from 'lucide-react';
 
 const getApiUrl = (path) => {
@@ -77,8 +84,19 @@ export default function Revenue() {
   const daysInSelectedMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const daysList = Array.from({ length: daysInSelectedMonth }, (_, i) => i + 1);
 
-  // Search and filter states for booking tables
+  // Search and filter states for booking tables (matching Manage Bookings)
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeStatusTab, setActiveStatusTab] = useState('all');
+  const [startDateFilter, setStartDateFilter] = useState('');
+  const [endDateFilter, setEndDateFilter] = useState('');
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState('');
+  const [selectedYearFilter, setSelectedYearFilter] = useState('');
+  const [appliedDateFilters, setAppliedDateFilters] = useState({
+    startDate: '',
+    endDate: '',
+    month: '',
+    year: ''
+  });
   const [paymentStatusFilter, setPaymentStatusFilter] = useState('all');
   const [paymentModeFilter, setPaymentModeFilter] = useState('all');
   const [viewTableMode, setViewTableMode] = useState('bookings'); // 'bookings' | 'periods'
@@ -102,6 +120,125 @@ export default function Revenue() {
   const [chartPoints, setChartPoints] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [selectedBookingModal, setSelectedBookingModal] = useState(null);
+  const [selectedBooking, setSelectedBooking] = useState(null);
+
+  const handleApplyFilter = () => {
+    setAppliedDateFilters({
+      startDate: startDateFilter,
+      endDate: endDateFilter,
+      month: selectedMonthFilter,
+      year: selectedYearFilter
+    });
+  };
+
+  const handleClearFilter = () => {
+    setActiveStatusTab('all');
+    setSearchQuery('');
+    setSelectedPropertyId('all');
+    setStartDateFilter('');
+    setEndDateFilter('');
+    setSelectedMonthFilter('');
+    setSelectedYearFilter('');
+    setAppliedDateFilters({
+      startDate: '',
+      endDate: '',
+      month: '',
+      year: ''
+    });
+  };
+
+  const formatDateDisplay = (dateVal) => {
+    if (!dateVal) return 'N/A';
+    try {
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return String(dateVal);
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch (e) {
+      return String(dateVal);
+    }
+  };
+
+  const handleConfirmHold = async (b) => {
+    const bookingId = b._id || b.id;
+    try {
+      const result = await Swal.fire({
+        title: 'Confirm Booking?',
+        text: `Convert Hold booking ${b.bookingId || ''} to Confirmed?`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#10b981',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Yes, Confirm It!'
+      });
+
+      if (!result.isConfirmed) return;
+
+      const token = getAuthToken();
+      const res = await axios.patch(getApiUrl(`/api/homestay-owner/bookings/${bookingId}/confirm-hold`), {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data?.success) {
+        Swal.fire({
+          icon: 'success',
+          title: 'Booking Confirmed!',
+          text: 'The booking has been successfully confirmed.',
+          timer: 1500,
+          showConfirmButton: false
+        });
+        fetchRevenueData();
+        if (selectedBooking && (selectedBooking._id === bookingId || selectedBooking.id === bookingId)) {
+          setSelectedBooking({ ...selectedBooking, bookingStatus: 'Confirmed' });
+        }
+      }
+    } catch (err) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Confirmation Failed',
+        text: err.response?.data?.message || 'Failed to confirm hold booking.'
+      });
+    }
+  };
+
+  const handleRemoveHold = async (b) => {
+    const bookingId = b._id || b.id;
+    try {
+      const result = await Swal.fire({
+        title: 'Remove Hold?',
+        text: `Are you sure you want to remove hold for ${b.bookingId || ''}? Dates will be released.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#e11d48',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Yes, Remove Hold!'
+      });
+
+      if (!result.isConfirmed) return;
+
+      const token = getAuthToken();
+      const res = await axios.delete(getApiUrl(`/api/homestay-owner/bookings/${bookingId}/hold`), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data?.success) {
+        Swal.fire({
+          icon: 'success',
+          title: 'Hold Removed',
+          text: 'The hold booking has been removed.',
+          timer: 1500,
+          showConfirmButton: false
+        });
+        setSelectedBooking(null);
+        fetchRevenueData();
+      }
+    } catch (err) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Action Failed',
+        text: err.response?.data?.message || 'Failed to remove hold.'
+      });
+    }
+  };
 
   useEffect(() => {
     fetchRevenueData();
@@ -189,34 +326,84 @@ export default function Revenue() {
 
   // Filtered transactions
   const filteredTransactions = transactions.filter((t) => {
-    // Property Filter
-    if (selectedPropertyId !== 'all') {
-      const propMatch = properties.find(p => p.id === selectedPropertyId)?.name;
-      if (propMatch && t.propertyName && !t.propertyName.toLowerCase().includes(propMatch.toLowerCase())) {
+    // 1. Status Filter Tab
+    if (activeStatusTab !== 'all') {
+      const bStatus = (t.bookingStatus || '').toLowerCase();
+      const tab = activeStatusTab.toLowerCase();
+      if (tab === 'hold' || tab === 'on hold') {
+        if (bStatus !== 'hold' && bStatus !== 'on hold') return false;
+      } else if (bStatus !== tab) {
         return false;
       }
     }
 
-    // Status Filter
+    // 2. Property Filter
+    if (selectedPropertyId !== 'all') {
+      const propMatch = properties.find(p => String(p.id || p._id) === String(selectedPropertyId))?.name;
+      const tPropId = String(t.propertyId || '');
+      const tPropName = (t.propertyName || '').toLowerCase();
+      if (propMatch) {
+        if (!tPropName.includes(propMatch.toLowerCase()) && tPropId !== String(selectedPropertyId)) {
+          return false;
+        }
+      } else if (tPropId !== String(selectedPropertyId)) {
+        return false;
+      }
+    }
+
+    // 3. Payment Status Filter (if set in payments tab)
     if (paymentStatusFilter !== 'all') {
       if (paymentStatusFilter === 'completed' && t.paymentStatus !== 'Completed') return false;
       if (paymentStatusFilter === 'partial' && t.paymentStatus !== 'Partial') return false;
       if (paymentStatusFilter === 'pending' && t.paymentStatus !== 'Pending') return false;
     }
 
-    // Payment Mode Filter
+    // 4. Payment Mode Filter
     if (paymentModeFilter !== 'all') {
       if (t.paymentMode?.toLowerCase() !== paymentModeFilter.toLowerCase()) return false;
     }
 
-    // Search query
+    // 5. Search query (guest name, phone, booking ID, property, room)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
-      const matchName = t.guestName?.toLowerCase().includes(q);
-      const matchPhone = t.phone?.toLowerCase().includes(q);
+      const matchName = t.guestName?.toLowerCase().includes(q) || t.customer?.name?.toLowerCase().includes(q);
+      const matchPhone = t.phone?.toLowerCase().includes(q) || t.customer?.mobile?.includes(q);
       const matchBookingId = t.bookingId?.toLowerCase().includes(q);
       const matchProp = t.propertyName?.toLowerCase().includes(q);
-      return matchName || matchPhone || matchBookingId || matchProp;
+      const matchRoom = String(t.roomNumber || '').toLowerCase().includes(q);
+      if (!matchName && !matchPhone && !matchBookingId && !matchProp && !matchRoom) {
+        return false;
+      }
+    }
+
+    // 6. Date Range Filter (Applied)
+    if (appliedDateFilters.startDate && appliedDateFilters.endDate) {
+      const start = new Date(appliedDateFilters.startDate);
+      const end = new Date(appliedDateFilters.endDate);
+      end.setHours(23, 59, 59, 999);
+      const checkIn = new Date(t.rawCheckIn || t.checkInDate);
+      const checkOut = new Date(t.rawCheckOut || t.checkOutDate);
+      if (checkIn > end || checkOut < start) return false;
+    } else if (appliedDateFilters.startDate) {
+      const start = new Date(appliedDateFilters.startDate);
+      const checkOut = new Date(t.rawCheckOut || t.checkOutDate);
+      if (checkOut < start) return false;
+    } else if (appliedDateFilters.endDate) {
+      const end = new Date(appliedDateFilters.endDate);
+      end.setHours(23, 59, 59, 999);
+      const checkIn = new Date(t.rawCheckIn || t.checkInDate);
+      if (checkIn > end) return false;
+    }
+
+    // 7. Month & Year Filter (Applied)
+    if (appliedDateFilters.year || appliedDateFilters.month) {
+      const checkIn = new Date(t.rawCheckIn || t.checkInDate);
+      if (appliedDateFilters.year && checkIn.getFullYear() !== Number(appliedDateFilters.year)) {
+        return false;
+      }
+      if (appliedDateFilters.month && (checkIn.getMonth() + 1) !== Number(appliedDateFilters.month)) {
+        return false;
+      }
     }
 
     return true;
@@ -785,34 +972,183 @@ export default function Revenue() {
             </div>
           </div>
 
+          {/* FILTER & TABS CARD (Exact match to Manage Bookings) */}
+          <div className="bg-white border border-slate-100 p-5 sm:p-6 rounded-3xl shadow-sm space-y-5">
+            {/* Row 1: Status Tabs, Property Selector, Search & Refresh in ONE SINGLE ROW */}
+            <div className="flex items-center justify-between gap-2 flex-nowrap w-full overflow-x-auto pb-1 sm:pb-0">
+              {/* Status Capsule Tabs */}
+              <div className="bg-slate-100/70 p-1 rounded-xl flex items-center gap-0.5 border border-slate-200/50 flex-nowrap shrink-0">
+                {[
+                  { id: 'all', label: 'All Bookings' },
+                  { id: 'Confirmed', label: 'Confirmed' },
+                  { id: 'Hold', label: 'On Hold' },
+                  { id: 'Checked In', label: 'Checked In' },
+                  { id: 'Checked Out', label: 'Checked Out' },
+                  { id: 'Cancelled', label: 'Cancelled' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveStatusTab(tab.id)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${
+                      activeStatusTab === tab.id
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 bg-transparent'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Right Side: Compact Property Selector, Search & Refresh */}
+              <div className="flex items-center gap-1.5 shrink-0 flex-nowrap">
+                {/* Compact Property Selector Dropdown */}
+                <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-1 rounded-xl shadow-2xs shrink-0 max-w-[140px]">
+                  <Building2 size={12} className="text-rose-600 shrink-0" />
+                  <select
+                    value={selectedPropertyId}
+                    onChange={(e) => setSelectedPropertyId(e.target.value)}
+                    className="text-xs font-bold text-slate-700 bg-transparent border-none focus:outline-none cursor-pointer truncate"
+                  >
+                    <option value="all">All Homestays</option>
+                    {properties.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Compact Search Input */}
+                <div className="relative w-36 sm:w-44 lg:w-52 shrink-0">
+                  <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search guest / ID..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-7 pr-2.5 py-1 bg-slate-50 border border-slate-200/80 rounded-xl text-xs font-semibold focus:outline-none focus:bg-white focus:border-rose-400"
+                  />
+                </div>
+
+                {/* Compact Refresh Button */}
+                <button
+                  onClick={() => fetchRevenueData()}
+                  className="w-7 h-7 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200/80 transition-colors cursor-pointer shrink-0"
+                  title="Refresh List"
+                >
+                  <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
+                </button>
+              </div>
+            </div>
+
+            {/* Row 2: Filter by Date Range OR Filter by Month & Year */}
+            <div className="pt-4 border-t border-slate-100 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-5">
+              <div className="flex flex-col md:flex-row items-start md:items-center gap-4 xl:gap-8 flex-1">
+                {/* Filter by Date Range */}
+                <div className="space-y-1.5 flex-1 w-full">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-slate-700">
+                    <Calendar size={13} className="text-rose-600" />
+                    <span>Filter by Date Range</span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex-1">
+                      <span className="block text-[10px] font-bold text-slate-400 mb-0.5">From Date</span>
+                      <input
+                        type="date"
+                        value={startDateFilter}
+                        onChange={(e) => setStartDateFilter(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-rose-400 cursor-pointer"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <span className="block text-[10px] font-bold text-slate-400 mb-0.5">To Date</span>
+                      <input
+                        type="date"
+                        value={endDateFilter}
+                        onChange={(e) => setEndDateFilter(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-rose-400 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* OR text */}
+                <div className="hidden md:flex items-center justify-center pt-5">
+                  <span className="text-xs font-black text-slate-300 uppercase tracking-widest">OR</span>
+                </div>
+
+                {/* Filter by Month & Year */}
+                <div className="space-y-1.5 flex-1 w-full">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-slate-700">
+                    <span>Filter by Month & Year</span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex-1">
+                      <span className="block text-[10px] font-bold text-slate-400 mb-0.5">Select Month</span>
+                      <select
+                        value={selectedMonthFilter}
+                        onChange={(e) => setSelectedMonthFilter(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-rose-400 cursor-pointer"
+                      >
+                        <option value="">Select month</option>
+                        {monthsList.map((m) => (
+                          <option key={m.value} value={m.value}>{m.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex-1">
+                      <span className="block text-[10px] font-bold text-slate-400 mb-0.5">Select Year</span>
+                      <select
+                        value={selectedYearFilter}
+                        onChange={(e) => setSelectedYearFilter(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-rose-400 cursor-pointer"
+                      >
+                        <option value="">Select year</option>
+                        {yearsList.map((y) => (
+                          <option key={y} value={y}>{y}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2.5 pt-2 xl:pt-5 self-end xl:self-center">
+                <button
+                  onClick={handleApplyFilter}
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm shadow-rose-200 transition-colors border-none cursor-pointer"
+                >
+                  <Filter size={13} />
+                  <span>Apply Filter</span>
+                </button>
+                <button
+                  onClick={handleClearFilter}
+                  className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 transition-colors cursor-pointer"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* BOOKING-WISE TRANSACTION TABLE (Below Chart) */}
           <div className="bg-white border border-slate-100 rounded-3xl shadow-sm overflow-hidden space-y-4">
             <div className="p-6 pb-0 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h3 className="text-sm font-black text-slate-800 tracking-tight">
-                  Booking-wise Revenue & Transaction Ledger
+                  {activeStatusTab === 'all' ? 'All Bookings Ledger' : `${activeStatusTab} Bookings Ledger`} ({filteredTransactions.length})
                 </h3>
                 <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                  Detailed financial transactions mapped to individual guest bookings.
+                  Detailed financial transactions mapped to individual guest bookings. Click view icon for full booking operations drawer.
                 </p>
               </div>
 
-              {/* Controls: Search, View Mode Toggle */}
+              {/* View Mode Toggle */}
               <div className="flex items-center gap-2.5 w-full sm:w-auto">
-                <div className="relative flex-1 sm:w-64">
-                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Search guest, phone, booking ID..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:bg-white focus:border-rose-500"
-                  />
-                </div>
-
                 <button
                   onClick={() => setViewTableMode(viewTableMode === 'bookings' ? 'periods' : 'bookings')}
-                  className="px-3 py-2 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-600 flex items-center gap-1.5 cursor-pointer"
+                  className="px-3 py-2 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-600 flex items-center gap-1.5 cursor-pointer shadow-2xs"
                 >
                   <Filter size={12} />
                   <span>{viewTableMode === 'bookings' ? 'View Periods' : 'View Bookings'}</span>
@@ -860,7 +1196,7 @@ export default function Revenue() {
                             <div className="text-[10px] text-rose-600 font-extrabold">{t.roomNumber} ({t.roomType})</div>
                           </td>
                           <td className="py-3.5 px-3 font-mono text-[11px] text-slate-600">
-                            {t.checkInDate} → {t.checkOutDate}
+                            {formatDateDisplay(t.checkInDate)} → {formatDateDisplay(t.checkOutDate)}
                           </td>
                           <td className="py-3.5 px-3 text-right font-mono font-bold text-slate-800">
                             ₹ {Number(t.totalAmount || 0).toLocaleString()}
@@ -877,24 +1213,54 @@ export default function Revenue() {
                             </span>
                           </td>
                           <td className="py-3.5 px-3 text-center">
-                            <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider ${
-                              t.paymentStatus === 'Completed'
-                                ? 'bg-emerald-50 text-emerald-700'
-                                : t.paymentStatus === 'Partial'
-                                ? 'bg-amber-50 text-amber-700'
-                                : 'bg-rose-50 text-rose-700'
+                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-block ${
+                              t.bookingStatus === 'Confirmed'
+                                ? 'bg-[#dcfce7] text-[#16a34a]'
+                                : t.bookingStatus === 'Hold'
+                                ? 'bg-[#fef9c3] text-[#ca8a04]'
+                                : t.bookingStatus === 'Checked In'
+                                ? 'bg-[#e0e7ff] text-[#4f46e5]'
+                                : t.bookingStatus === 'Checked Out'
+                                ? 'bg-slate-100 text-slate-600'
+                                : 'bg-[#ffe4e6] text-[#e11d48]'
                             }`}>
-                              {t.paymentStatus || 'Pending'}
+                              {t.bookingStatus === 'Hold' ? 'HOLD' : (t.bookingStatus || 'Confirmed')}
                             </span>
                           </td>
                           <td className="py-3.5 px-3 text-center">
-                            <button
-                              onClick={() => setSelectedBookingModal(t)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-lg text-[10px] uppercase tracking-wider transition-colors cursor-pointer bg-white shadow-xs"
-                            >
-                              <Eye size={11} className="stroke-[2.5]" />
-                              <span>Show Detail</span>
-                            </button>
+                            <div className="flex items-center justify-center gap-1.5">
+                              {/* View Full Booking Operations Drawer */}
+                              <button
+                                onClick={() => setSelectedBooking(t.rawBooking || t)}
+                                className="w-7 h-7 rounded-full bg-white border border-slate-200/80 hover:bg-slate-50 text-slate-600 flex items-center justify-center transition-colors cursor-pointer shadow-2xs"
+                                title="View Details (Booking Drawer)"
+                              >
+                                <Eye size={12} />
+                              </button>
+
+                              {/* Quick Tax Invoice Navigation */}
+                              <button
+                                onClick={() => {
+                                  const id = t.dbId || t.id || t.rawBooking?._id || t.rawBooking?.id;
+                                  navigate(`/homestay-owner/bookings/invoice/${id}`);
+                                }}
+                                className="w-7 h-7 rounded-full bg-white border border-slate-200/80 hover:bg-slate-50 text-slate-600 flex items-center justify-center transition-colors cursor-pointer shadow-2xs"
+                                title="Tax Invoice"
+                              >
+                                <FileText size={12} />
+                              </button>
+
+                              {/* If Hold, Quick Confirm Button */}
+                              {t.bookingStatus === 'Hold' && (
+                                <button
+                                  onClick={() => handleConfirmHold(t.rawBooking || t)}
+                                  className="w-7 h-7 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 hover:bg-emerald-100 flex items-center justify-center transition-colors cursor-pointer shadow-2xs"
+                                  title="Confirm Hold Booking"
+                                >
+                                  <CheckCircle size={12} />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -1161,22 +1527,22 @@ export default function Revenue() {
                         <td className="py-3.5 px-3 text-center">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
-                              onClick={() => setSelectedBookingModal(t)}
-                              className="p-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-707 rounded-lg transition-colors cursor-pointer"
-                              title="Show Booking Details"
+                              onClick={() => setSelectedBooking(t.rawBooking || t)}
+                              className="p-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition-colors cursor-pointer"
+                              title="Show Booking Operations Drawer"
                             >
                               <Eye size={12} className="stroke-[2.5]" />
                             </button>
                             <button
                               onClick={() => navigate(`/homestay-owner/bookings/confirmation-slip/${t.dbId || t.id}`)}
-                              className="p-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-707 rounded-lg transition-colors cursor-pointer"
+                              className="p-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition-colors cursor-pointer"
                               title="Confirmation Slip"
                             >
                               <Receipt size={12} />
                             </button>
                             <button
                               onClick={() => navigate(`/homestay-owner/bookings/invoice/${t.dbId || t.id}`)}
-                              className="p-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-707 rounded-lg transition-colors cursor-pointer"
+                              className="p-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition-colors cursor-pointer"
                               title="Tax Invoice"
                             >
                               <FileText size={12} />
@@ -1193,164 +1559,248 @@ export default function Revenue() {
         </div>
       )}
 
-      {/* Booking Details Modal */}
-      {selectedBookingModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 border border-slate-100 max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="flex justify-between items-start border-b border-slate-100 pb-4">
-              <div>
-                <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest block">
-                  Booking & Transaction Overview
-                </span>
-                <h2 className="text-base font-black text-slate-800 tracking-tight mt-0.5">
-                  {selectedBookingModal.bookingId || 'Booking Details'}
-                </h2>
-              </div>
-              <button 
-                onClick={() => setSelectedBookingModal(null)}
-                className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-600 cursor-pointer bg-transparent border-none transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
+      {/* FULL BOOKING OPERATIONS & LEDGER DRAWER (Same as Manage Bookings) */}
+      {(selectedBooking || selectedBookingModal) && (() => {
+        const b = selectedBooking || selectedBookingModal;
+        const raw = b.rawBooking || b;
+        const bId = raw.bookingId || raw._id || b.bookingId || b.id;
+        const dbId = raw._id || raw.id || b.dbId || b.id;
+        const guestName = raw.customer?.name || b.guestName || 'Guest';
+        const guestPhone = raw.customer?.mobile || b.phone || '';
+        const guestEmail = raw.customer?.email || b.email || '';
+        const propName = raw.propertyId?.name || b.propertyName || 'Homestay';
+        const roomInfo = raw.roomDetails?.roomNumber 
+          ? `${raw.roomDetails.roomNumber} (${raw.roomDetails.categoryName || 'Room'})`
+          : (b.roomNumber ? `${b.roomNumber} (${b.roomType || 'Room'})` : (b.roomType || 'Standard Room'));
+        const checkIn = raw.checkInDate || b.checkInDate;
+        const checkOut = raw.checkOutDate || b.checkOutDate;
+        const basePrice = raw.pricing?.basePrice ?? b.baseTariff ?? 0;
+        const taxes = raw.pricing?.tax ?? b.tax ?? 0;
+        const addOns = raw.pricing?.addOns ?? b.addOns ?? 0;
+        const totalBill = raw.pricing?.finalAmount ?? b.totalAmount ?? raw.amount ?? 0;
+        const paidAmt = raw.pricing?.paidAmount ?? b.paidAmount ?? 0;
+        const pendAmt = raw.pricing?.pendingAmount ?? b.pendingAmount ?? Math.max(0, totalBill - paidAmt);
+        const status = raw.bookingStatus || b.bookingStatus || 'Confirmed';
+        const pHistory = raw.paymentHistory || b.paymentHistory || [];
+        const specRequests = raw.specialRequests || b.specialRequests || '';
 
-            {/* Guest Header Info */}
-            <div className="flex items-center gap-3.5 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center font-black text-lg border border-white shadow-xs">
-                {selectedBookingModal.guestName ? selectedBookingModal.guestName.charAt(0).toUpperCase() : 'G'}
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-5 border border-slate-100 max-h-[90vh] overflow-y-auto">
+              {/* Header */}
+              <div className="flex justify-between items-start border-b border-slate-100 pb-4">
+                <div>
+                  <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest block">
+                    Booking Operations &amp; Ledger
+                  </span>
+                  <h2 className="text-base font-black text-slate-800 tracking-tight mt-0.5">
+                    {bId}
+                  </h2>
+                </div>
+                <button 
+                  onClick={() => { setSelectedBooking(null); setSelectedBookingModal(null); }}
+                  className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-600 cursor-pointer bg-transparent border-none transition-colors"
+                >
+                  <X size={18} />
+                </button>
               </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-black text-slate-800 truncate">{selectedBookingModal.guestName}</h3>
-                <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 font-semibold">
-                  <span>{selectedBookingModal.phone || 'No phone'}</span>
-                  {selectedBookingModal.email && <span>• {selectedBookingModal.email}</span>}
+
+              {/* Guest Summary Card */}
+              <div className="flex items-center gap-3.5 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center font-black text-lg border border-white shadow-xs">
+                  {guestName.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-sm font-black text-slate-800 truncate">{guestName}</h3>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 font-semibold">
+                    <span>{guestPhone || 'No phone'}</span>
+                    {guestEmail && <span>• {guestEmail}</span>}
+                  </div>
+                </div>
+
+                {guestPhone && (
+                  <div className="flex items-center gap-1.5">
+                    <a 
+                      href={`tel:${guestPhone}`}
+                      className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-rose-600 flex items-center justify-center hover:bg-rose-50"
+                      title="Call"
+                    >
+                      <Phone size={13} className="stroke-[2.5]" />
+                    </a>
+                    <a 
+                      href={`https://wa.me/${guestPhone.replace(/[^0-9]/g, '')}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-emerald-600 flex items-center justify-center hover:bg-emerald-50"
+                      title="WhatsApp"
+                    >
+                      <MessageSquare size={13} className="stroke-[2.5]" />
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* Room & Stay Grid */}
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                  <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Property &amp; Room</span>
+                  <span className="font-bold text-slate-800 block mt-1">{propName}</span>
+                  <span className="text-[11px] font-extrabold text-rose-600 block mt-0.5">
+                    {roomInfo}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                  <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Stay Schedule</span>
+                  <span className="font-bold text-slate-800 block mt-1 font-mono text-[11px]">
+                    Check-in: {formatDateDisplay(checkIn)}
+                  </span>
+                  <span className="font-bold text-slate-800 block mt-0.5 font-mono text-[11px]">
+                    Check-out: {formatDateDisplay(checkOut)}
+                  </span>
                 </div>
               </div>
 
-              {/* Direct Contact Icons */}
-              {selectedBookingModal.phone && (
-                <div className="flex items-center gap-1.5">
-                  <a 
-                    href={`tel:${selectedBookingModal.phone}`}
-                    className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-rose-600 flex items-center justify-center hover:bg-rose-50 transition-colors"
-                    title="Call Guest"
-                  >
-                    <Phone size={13} className="stroke-[2.5]" />
-                  </a>
-                  <a 
-                    href={`https://wa.me/${selectedBookingModal.phone.replace(/[^0-9]/g, '')}`}
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-emerald-600 flex items-center justify-center hover:bg-emerald-50 transition-colors"
-                    title="WhatsApp Guest"
-                  >
-                    <MessageSquare size={13} className="stroke-[2.5]" />
-                  </a>
+              {/* Financial Breakdown */}
+              <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-100 space-y-2 text-xs">
+                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Financial Breakdown</span>
+                <div className="flex justify-between text-slate-600">
+                  <span>Base Room Tariff:</span>
+                  <span className="font-mono font-bold">₹{Number(basePrice).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Taxes &amp; Fees:</span>
+                  <span className="font-mono font-bold">₹{Number(taxes).toLocaleString()}</span>
+                </div>
+                {addOns > 0 && (
+                  <div className="flex justify-between text-slate-600">
+                    <span>Add-ons:</span>
+                    <span className="font-mono font-bold">₹{Number(addOns).toLocaleString()}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-2 border-t border-slate-200 text-slate-800 font-black">
+                  <span>Total Bill:</span>
+                  <span className="text-sm font-mono">₹{Number(totalBill).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-emerald-700 font-bold">
+                  <span>Paid / Collected:</span>
+                  <span className="font-mono">₹{Number(paidAmt).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-rose-700 font-bold">
+                  <span>Balance Pending:</span>
+                  <span className="font-mono">₹{Number(pendAmt).toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Payment History */}
+              {pHistory && pHistory.length > 0 && (
+                <div className="border border-slate-100 p-4 rounded-2xl bg-white space-y-2">
+                  <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Payment Transactions</span>
+                  <div className="space-y-1.5 max-h-28 overflow-y-auto pr-1">
+                    {pHistory.map((ph, idx) => (
+                      <div key={idx} className="flex justify-between items-center text-xs p-2 bg-slate-50 rounded-xl border border-slate-100">
+                        <div>
+                          <span className="font-bold text-slate-800 block">₹{Number(ph.amount).toLocaleString()}</span>
+                          <span className="text-[9px] text-slate-400">
+                            {ph.method} • {formatDateDisplay(ph.date)} {ph.remark ? `(${ph.remark})` : ''}
+                          </span>
+                        </div>
+                        <span className="text-[9px] font-black px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded uppercase">
+                          Settled
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
-            </div>
 
-            {/* Stay & Room Details */}
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Property & Room</span>
-                <span className="font-bold text-slate-800 block mt-1">{selectedBookingModal.propertyName || 'Homestay'}</span>
-                <span className="text-[11px] font-extrabold text-rose-600 block mt-0.5">{selectedBookingModal.roomNumber || selectedBookingModal.roomType || 'Standard Room'}</span>
-              </div>
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Stay Dates</span>
-                <span className="font-bold text-slate-800 block mt-1 font-mono text-[11px]">Check-in: {selectedBookingModal.checkInDate}</span>
-                <span className="font-bold text-slate-800 block mt-0.5 font-mono text-[11px]">Check-out: {selectedBookingModal.checkOutDate}</span>
-              </div>
-            </div>
+              {/* Special Requests */}
+              {specRequests && (
+                <div className="p-3 bg-amber-50/60 rounded-2xl border border-amber-200 text-xs">
+                  <span className="text-[9px] font-black text-amber-700 uppercase tracking-wider block">Special Requests</span>
+                  <p className="text-slate-700 mt-1">{specRequests}</p>
+                </div>
+              )}
 
-            {/* Financial Breakdown */}
-            <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-100 space-y-2 text-xs">
-              <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Financial Breakdown</span>
-              
-              <div className="flex justify-between text-slate-600">
-                <span>Base Tariff</span>
-                <span className="font-mono font-bold">₹ {Number(selectedBookingModal.baseTariff || 0).toLocaleString()}</span>
-              </div>
+              {/* Operations Action Buttons */}
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Operations &amp; Documents</span>
+                
+                {/* If Hold Booking: Confirm and Remove Hold */}
+                {status === 'Hold' && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => handleConfirmHold(raw)}
+                      className="py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-sm flex items-center justify-center gap-1.5"
+                    >
+                      <CheckCircle size={14} />
+                      <span>Confirm Booking</span>
+                    </button>
+                    <button
+                      onClick={() => handleRemoveHold(raw)}
+                      className="py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border border-rose-200 flex items-center justify-center gap-1.5"
+                    >
+                      <Trash2 size={13} />
+                      <span>Remove Hold</span>
+                    </button>
+                  </div>
+                )}
 
-              <div className="flex justify-between text-slate-600">
-                <span>Add-ons & Extras</span>
-                <span className="font-mono font-bold">₹ {Number(selectedBookingModal.addOns || 0).toLocaleString()}</span>
-              </div>
+                {/* Printable Documents Row */}
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  <button
+                    onClick={() => {
+                      setSelectedBooking(null);
+                      setSelectedBookingModal(null);
+                      navigate(`/homestay-owner/bookings/confirmation-slip/${dbId}`);
+                    }}
+                    className="py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer bg-white"
+                  >
+                    <Receipt size={12} />
+                    <span>Slip</span>
+                  </button>
 
-              <div className="flex justify-between text-slate-600">
-                <span>Taxes (GST)</span>
-                <span className="font-mono font-bold">₹ {Number(selectedBookingModal.tax || 0).toLocaleString()}</span>
-              </div>
+                  <button
+                    onClick={() => {
+                      setSelectedBooking(null);
+                      setSelectedBookingModal(null);
+                      navigate(`/homestay-owner/bookings/quotation/${dbId}`);
+                    }}
+                    className="py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer bg-white"
+                  >
+                    <FileText size={12} />
+                    <span>Quotation</span>
+                  </button>
 
-              <div className="flex justify-between items-center pt-2 border-t border-slate-200">
-                <span className="text-slate-800 font-black">Total Bill</span>
-                <span className="text-sm font-black font-mono text-slate-800">
-                  ₹ {Number(selectedBookingModal.totalAmount || 0).toLocaleString()}
-                </span>
-              </div>
+                  <button
+                    onClick={() => {
+                      setSelectedBooking(null);
+                      setSelectedBookingModal(null);
+                      navigate(`/homestay-owner/bookings/invoice/${dbId}`);
+                    }}
+                    className="py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer bg-white"
+                  >
+                    <FileText size={12} />
+                    <span>Tax Invoice</span>
+                  </button>
+                </div>
 
-              <div className="flex justify-between items-center text-emerald-700 font-bold">
-                <span>Amount Paid</span>
-                <span className="font-mono">₹ {Number(selectedBookingModal.paidAmount || 0).toLocaleString()}</span>
-              </div>
-
-              <div className="flex justify-between items-center text-rose-700 font-bold">
-                <span>Balance Pending</span>
-                <span className="font-mono">₹ {Number(selectedBookingModal.pendingAmount || 0).toLocaleString()}</span>
-              </div>
-            </div>
-
-            {/* Special Requests */}
-            {selectedBookingModal.specialRequests && (
-              <div className="p-3 bg-amber-50/60 rounded-2xl border border-amber-200 text-xs">
-                <span className="text-[9px] font-black text-amber-700 uppercase tracking-wider block">Special Requests</span>
-                <p className="text-slate-700 mt-1">{selectedBookingModal.specialRequests}</p>
-              </div>
-            )}
-
-            {/* Action Links */}
-            <div className="space-y-2 pt-2">
-              <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => {
-                    const id = selectedBookingModal.dbId || selectedBookingModal.id;
+                    setSelectedBooking(null);
                     setSelectedBookingModal(null);
-                    navigate(`/homestay-owner/bookings/confirmation-slip/${id}`);
+                    navigate('/homestay-owner/bookings/manage');
                   }}
-                  className="py-2.5 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-rose-200 flex items-center justify-center gap-2 transition-colors mt-2"
                 >
-                  <Receipt size={13} />
-                  <span>Confirmation Slip</span>
-                </button>
-                <button
-                  onClick={() => {
-                    const id = selectedBookingModal.dbId || selectedBookingModal.id;
-                    setSelectedBookingModal(null);
-                    navigate(`/homestay-owner/bookings/invoice/${id}`);
-                  }}
-                  className="py-2.5 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-707 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <FileText size={13} />
-                  <span>Tax Invoice</span>
+                  <CalendarCheck size={15} />
+                  <span>Open in Manage Bookings</span>
                 </button>
               </div>
-
-              <button
-                onClick={() => {
-                  setSelectedBookingModal(null);
-                  navigate('/homestay-owner/bookings/manage');
-                }}
-                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-rose-200 flex items-center justify-center gap-2 transition-colors"
-              >
-                <CalendarCheck size={15} />
-                <span>Open in Manage Bookings</span>
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Global Footer */}
       <footer className="mt-8 flex flex-col sm:flex-row justify-between items-center text-[10px] font-bold text-slate-400 border-t border-slate-100 pt-6 gap-3 print:hidden">

@@ -109,15 +109,28 @@ export default function BookingConfirmationSlip() {
     }
   };
 
-  // Dynamic values with robust fallbacks
-  const propertyName = booking?.propertyId?.name || booking?.propertyDetails?.propertyName || 'Homestay Sanctuary';
-  const propertyAddress = [
-    booking?.propertyId?.address,
-    booking?.propertyId?.city,
-    booking?.propertyId?.state
+  // Dynamic values with robust fallbacks from homestay business details
+  const property = booking?.propertyId || {};
+  const business = property?.businessDetails || booking?.businessDetails || {};
+
+  const homestayLogo = business?.logo || property?.logo || '';
+  const propertyName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'Homestay Sanctuary';
+  const propertyAddress = business?.fullAddress || [
+    property?.address,
+    property?.city,
+    property?.state
   ].filter(Boolean).join(', ') || booking?.propertyDetails?.location || 'Himachal Pradesh, India';
-  const ownerName = booking?.propertyId?.ownerName || booking?.propertyDetails?.ownerName || 'Homestay Host';
-  const ownerPhone = booking?.propertyId?.phone || booking?.propertyId?.ownerMobile || '+91 98765 43210';
+  const propertyContact = business?.contactNumber || property?.ownerMobile || property?.phone || '+91 98765 43210';
+  const propertyEmail = business?.emailId || property?.ownerEmail || '';
+  const propertyGstin = business?.gstNumber || property?.gstNumber || '';
+
+  const signatoryName = business?.authorizedSignatoryName || property?.ownerName || booking?.propertyDetails?.ownerName || 'Homestay Host';
+  const signatoryDesignation = business?.designation || 'Authorized Signatory';
+  const signatureImage = business?.signatureImage || '';
+  const stampImage = business?.stampImage || '';
+
+  const ownerName = signatoryName;
+  const ownerPhone = propertyContact;
 
   const guestName = booking?.customer?.name || booking?.guestDetails?.fullName || 'Guest';
   const guestPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '+91 98765 43210';
@@ -293,18 +306,26 @@ ${propertyName} Team`;
         
         {/* Top Property Info */}
         <div className="text-center space-y-2">
-          <div className="w-14 h-14 bg-rose-50 text-rose-700 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
-            <Home size={26} />
-          </div>
+          {homestayLogo ? (
+            <img 
+              src={homestayLogo} 
+              alt={propertyName} 
+              className="w-16 h-16 object-contain rounded-2xl border border-slate-200 p-1 bg-white mx-auto shadow-sm"
+            />
+          ) : (
+            <div className="w-14 h-14 bg-rose-50 text-rose-700 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+              <Home size={26} />
+            </div>
+          )}
           <div>
-            <h2 className="text-sm font-black text-rose-700 uppercase tracking-wider">{propertyName}</h2>
-            <p className="text-[9px] text-slate-400 font-bold max-w-sm mx-auto leading-relaxed">
+            <h2 className="text-base font-black text-rose-700 uppercase tracking-wider">{propertyName}</h2>
+            <p className="text-[10px] text-slate-500 font-medium max-w-md mx-auto leading-relaxed">
               {propertyAddress}
             </p>
-            <div className="flex justify-center items-center gap-4 text-[8px] font-black uppercase text-slate-400 mt-1.5">
-              <span>Owner: <strong className="text-slate-800">{ownerName}</strong></span>
-              <span>•</span>
-              <span>Phone: <strong className="text-slate-800">{ownerPhone}</strong></span>
+            <div className="flex flex-wrap justify-center items-center gap-x-4 gap-y-1 text-[9px] font-bold text-slate-500 mt-1.5">
+              {propertyContact && <span>Tel: <strong className="text-slate-800">{propertyContact}</strong></span>}
+              {propertyEmail && <span>Email: <strong className="text-slate-800">{propertyEmail}</strong></span>}
+              {propertyGstin && <span>GSTIN: <strong className="text-slate-800 font-mono">{propertyGstin}</strong></span>}
             </div>
           </div>
         </div>
@@ -455,11 +476,34 @@ ${propertyName} Team`;
           </div>
         </div>
 
-        {/* Signature Line */}
+        {/* Signature & Stamp Line */}
         <div className="flex justify-end pt-6">
-          <div className="text-center space-y-1 border-t border-slate-100 pt-3.5 w-44">
-            <span className="font-serif italic text-base text-slate-700 block">{ownerName}</span>
-            <span className="block text-[8px] font-black text-slate-400 uppercase tracking-wider">Authorized Signature</span>
+          <div className="text-center relative w-56 flex flex-col items-center">
+            <div className="relative h-20 w-full flex items-center justify-center">
+              {stampImage && (
+                <img 
+                  src={stampImage} 
+                  alt="Official Seal / Stamp" 
+                  className="absolute right-0 top-0 h-20 w-20 object-contain opacity-85 pointer-events-none drop-shadow-xs"
+                />
+              )}
+              {signatureImage ? (
+                <img 
+                  src={signatureImage} 
+                  alt="Authorized Signature" 
+                  className="relative z-10 max-h-16 max-w-[170px] object-contain drop-shadow-xs"
+                />
+              ) : (
+                <span className="font-serif italic text-base text-slate-700 block">{signatoryName}</span>
+              )}
+            </div>
+
+            <div className="w-full border-t border-slate-300 pt-1 mt-1 text-center">
+              <span className="block font-black text-xs text-slate-900 tracking-tight">{signatoryName}</span>
+              <span className="block text-[8px] font-black text-rose-700 uppercase tracking-wider">
+                {signatoryDesignation}
+              </span>
+            </div>
           </div>
         </div>
 

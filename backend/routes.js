@@ -3842,13 +3842,153 @@ router.get('/homestays-list/:id', async (req, res) => {
           }
         })),
         amenities: resolvedAmenities.map(a => a.name),
-        resolvedAmenities
+        resolvedAmenities,
+        businessDetails: p.businessDetails || {}
       };
     }
     res.json(item);
   } catch (error) {
     console.error('Error fetching homestay details:', error.message);
     res.status(500).json({ error: 'Failed to fetch homestay details', message: error.message });
+  }
+});
+
+// Helper to find a Property or Homestay record across MongoDB and mock databases
+const findHomestayPropertyDoc = async (id) => {
+  if (!id) return null;
+  if (isMongoConnected()) {
+    if (mongoose.isValidObjectId(id)) {
+      const p = await Property.findById(id);
+      if (p) return p;
+      const h = await Homestay.findById(id);
+      if (h) return h;
+    }
+    const byCode = await Property.findOne({ $or: [{ propertyId: id }, { name: id }] });
+    if (byCode) return byCode;
+  }
+  let mockP = mockPropertiesDatabase.find(x => String(x._id) === String(id) || x.propertyId === id);
+  if (!mockP) mockP = mockHomestaysDatabase.find(x => String(x._id) === String(id));
+  return mockP || null;
+};
+
+// GET Homestay Signature, Stamp & Business Details
+router.get(['/dashboard/homestays-list/:id/business-details', '/homestay-owner/properties/:id/business-details', '/properties/:id/business-details'], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const prop = await findHomestayPropertyDoc(id);
+    if (!prop) {
+      return res.status(404).json({ error: 'PropertyNotFound', message: 'Homestay property not found.' });
+    }
+
+    const b = prop.businessDetails || {};
+    const businessDetails = {
+      logo: b.logo || '',
+      homestayName: b.homestayName || prop.name || '',
+      fullAddress: b.fullAddress || prop.address || [prop.city, prop.state].filter(Boolean).join(', ') || '',
+      contactNumber: b.contactNumber || prop.ownerMobile || prop.ownerPhone || '',
+      emailId: b.emailId || prop.ownerEmail || '',
+      gstNumber: b.gstNumber || prop.gstNumber || '',
+      authorizedSignatoryName: b.authorizedSignatoryName || prop.ownerName || '',
+      designation: b.designation || 'Authorized Signatory',
+      stampImage: b.stampImage || '',
+      signatureImage: b.signatureImage || ''
+    };
+
+    res.json({
+      success: true,
+      data: businessDetails,
+      businessDetails,
+      propertyId: prop._id || prop.propertyId,
+      propertyName: prop.name
+    });
+  } catch (err) {
+    console.error('Error fetching homestay business details:', err);
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// PUT Homestay Signature, Stamp & Business Details
+router.put(['/dashboard/homestays-list/:id/business-details', '/homestay-owner/properties/:id/business-details', '/properties/:id/business-details'], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const prop = await findHomestayPropertyDoc(id);
+    if (!prop) {
+      return res.status(404).json({ error: 'PropertyNotFound', message: 'Homestay property not found.' });
+    }
+
+    const payload = req.body || {};
+    const updatedBusinessDetails = {
+      logo: payload.logo !== undefined ? payload.logo : (prop.businessDetails?.logo || ''),
+      homestayName: payload.homestayName !== undefined ? payload.homestayName : (prop.businessDetails?.homestayName || prop.name || ''),
+      fullAddress: payload.fullAddress !== undefined ? payload.fullAddress : (prop.businessDetails?.fullAddress || prop.address || ''),
+      contactNumber: payload.contactNumber !== undefined ? payload.contactNumber : (prop.businessDetails?.contactNumber || prop.ownerMobile || ''),
+      emailId: payload.emailId !== undefined ? payload.emailId : (prop.businessDetails?.emailId || prop.ownerEmail || ''),
+      gstNumber: payload.gstNumber !== undefined ? payload.gstNumber : (prop.businessDetails?.gstNumber || prop.gstNumber || ''),
+      authorizedSignatoryName: payload.authorizedSignatoryName !== undefined ? payload.authorizedSignatoryName : (prop.businessDetails?.authorizedSignatoryName || prop.ownerName || ''),
+      designation: payload.designation !== undefined ? payload.designation : (prop.businessDetails?.designation || 'Authorized Signatory'),
+      stampImage: payload.stampImage !== undefined ? payload.stampImage : (prop.businessDetails?.stampImage || ''),
+      signatureImage: payload.signatureImage !== undefined ? payload.signatureImage : (prop.businessDetails?.signatureImage || '')
+    };
+
+    prop.businessDetails = updatedBusinessDetails;
+    if (prop.save) {
+      await prop.save();
+    }
+
+    if (isMongoConnected()) {
+      if (mongoose.isValidObjectId(id)) {
+        await Property.updateOne({ _id: id }, { $set: { businessDetails: updatedBusinessDetails } });
+        await Homestay.updateOne({ _id: id }, { $set: { businessDetails: updatedBusinessDetails } }).catch(() => {});
+      } else {
+        await Property.updateOne({ propertyId: id }, { $set: { businessDetails: updatedBusinessDetails } });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Homestay signature, stamp, and business details updated successfully.',
+      data: updatedBusinessDetails,
+      businessDetails: updatedBusinessDetails
+    });
+  } catch (err) {
+    console.error('Error updating homestay business details:', err);
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// POST Upload Homestay Signature, Stamp or Logo Asset
+router.post(['/dashboard/homestays-list/:id/upload-business-asset', '/homestay-owner/properties/:id/upload-business-asset', '/properties/:id/upload-business-asset'], upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      if (req.body?.dataUrl) {
+        return res.json({ success: true, url: req.body.dataUrl });
+      }
+      return res.status(400).json({ error: 'NoFileUploaded', message: 'No file was uploaded.' });
+    }
+
+    const dataUrl = getFileDataUrl(req.file);
+    let fileUrl = dataUrl;
+    if (isMongoConnected()) {
+      try {
+        const mediaDoc = new Media({
+          data: dataUrl,
+          mimeType: req.file.mimetype || 'image/png'
+        });
+        await mediaDoc.save();
+        fileUrl = `/api/media/${mediaDoc._id}`;
+      } catch (mErr) {
+        console.warn('Failed saving media document, defaulting to dataUrl:', mErr);
+      }
+    }
+
+    res.json({
+      success: true,
+      url: fileUrl,
+      dataUrl: dataUrl
+    });
+  } catch (err) {
+    console.error('Error uploading business asset:', err);
+    res.status(500).json({ error: 'UploadError', message: err.message });
   }
 });
 
@@ -12900,8 +13040,12 @@ router.get('/homestay-owner/bookings/:id', authenticateToken, async (req, res) =
     const bObj = booking.toObject ? booking.toObject() : booking;
     let propPay = {};
     if (booking.propertyId) {
-      const propDoc = await Property.findById(booking.propertyId).select('paymentSettings name city state');
+      const propIdVal = booking.propertyId._id || booking.propertyId;
+      const propDoc = await Property.findById(propIdVal).select('paymentSettings name city state address ownerMobile ownerEmail ownerName gstNumber businessDetails');
       if (propDoc?.paymentSettings) propPay = propDoc.paymentSettings;
+      if (typeof bObj.propertyId === 'object' && bObj.propertyId !== null) {
+        bObj.propertyId.businessDetails = propDoc?.businessDetails || bObj.propertyId.businessDetails || {};
+      }
     }
 
     let ownerDoc = null;
@@ -15816,8 +15960,12 @@ router.get('/public/booking/:id', async (req, res) => {
     const bObj = booking.toObject ? booking.toObject() : booking;
     let propPay = {};
     if (booking.propertyId) {
-      const propDoc = await Property.findById(booking.propertyId).select('paymentSettings name city state');
+      const propIdVal = booking.propertyId._id || booking.propertyId;
+      const propDoc = await Property.findById(propIdVal).select('paymentSettings name city state address ownerMobile ownerEmail ownerName gstNumber businessDetails');
       if (propDoc?.paymentSettings) propPay = propDoc.paymentSettings;
+      if (typeof bObj.propertyId === 'object' && bObj.propertyId !== null) {
+        bObj.propertyId.businessDetails = propDoc?.businessDetails || bObj.propertyId.businessDetails || {};
+      }
     }
 
     let ownerDoc = null;

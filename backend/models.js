@@ -1225,7 +1225,19 @@ const PropertySchema = new mongoose.Schema({
     advanceType: { type: String, default: 'percent' },
     advanceAmount: { type: Number, default: 0 }
   },
-  extraRoomsPurchased: { type: Number, default: 0 }
+  extraRoomsPurchased: { type: Number, default: 0 },
+  businessDetails: {
+    logo: { type: String, default: '' },
+    homestayName: { type: String, default: '' },
+    fullAddress: { type: String, default: '' },
+    contactNumber: { type: String, default: '' },
+    emailId: { type: String, default: '' },
+    gstNumber: { type: String, default: '' },
+    authorizedSignatoryName: { type: String, default: '' },
+    designation: { type: String, default: '' },
+    stampImage: { type: String, default: '' },
+    signatureImage: { type: String, default: '' }
+  }
 }, { timestamps: true });
 
 // Ensure unique property name per owner

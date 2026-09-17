@@ -96,14 +96,27 @@ export default function BookingQuotation() {
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
-  const propertyName = booking?.propertyId?.name || booking?.propertyDetails?.propertyName || 'Homestay Sanctuary';
-  const propertyLocation = [
-    booking?.propertyId?.address,
-    booking?.propertyId?.city,
-    booking?.propertyId?.state
+  const property = booking?.propertyId || {};
+  const business = property?.businessDetails || booking?.businessDetails || {};
+
+  const homestayLogo = business?.logo || property?.logo || '';
+  const propertyName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'Homestay Sanctuary';
+  const propertyLocation = business?.fullAddress || [
+    property?.address,
+    property?.city,
+    property?.state
   ].filter(Boolean).join(', ') || booking?.propertyDetails?.location || 'Himachal Pradesh, India';
-  const ownerPhone = booking?.propertyId?.phone || booking?.propertyId?.ownerMobile || '+91 98765 43210';
-  const ownerName = booking?.propertyId?.ownerName || booking?.propertyDetails?.ownerName || 'Host';
+  const propertyContact = business?.contactNumber || property?.ownerMobile || property?.phone || '+91 98765 43210';
+  const propertyEmail = business?.emailId || property?.ownerEmail || '';
+  const propertyGstin = business?.gstNumber || property?.gstNumber || '';
+
+  const signatoryName = business?.authorizedSignatoryName || property?.ownerName || booking?.propertyDetails?.ownerName || 'Host';
+  const signatoryDesignation = business?.designation || 'Authorized Signatory';
+  const signatureImage = business?.signatureImage || '';
+  const stampImage = business?.stampImage || '';
+
+  const ownerPhone = propertyContact;
+  const ownerName = signatoryName;
 
   const guestName = booking?.customer?.name || booking?.guestDetails?.fullName || 'Guest';
   const guestPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '+91 98765 43210';
@@ -275,18 +288,54 @@ export default function BookingQuotation() {
       {/* Quotation Main Layout Card */}
       <div ref={quotationRef} className="printable-document max-w-[850px] mx-auto bg-white border border-slate-150 rounded-[28px] overflow-hidden shadow-xl space-y-6 pb-8 print:border-none print:shadow-none print:p-0 print:max-w-none print:w-full">
         
-        {/* Large Property Banner (CSS Gradient with text for zero external CORS issues) */}
-        <div className="h-44 relative bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 print:hidden flex flex-col justify-end p-8 text-white">
-          <h1 className="text-xl font-black uppercase tracking-wide leading-none">{propertyName}</h1>
-          <p className="text-[10px] text-slate-300 font-bold mt-1.5">
-            📍 {propertyLocation}
-          </p>
+        {/* Large Property Banner with Homestay Logo & Details */}
+        <div className="relative bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 print:hidden p-8 text-white">
+          <div className="flex items-center gap-4">
+            {homestayLogo && (
+              <img 
+                src={homestayLogo} 
+                alt={propertyName} 
+                className="w-16 h-16 object-contain rounded-2xl border border-white/20 p-1 bg-white/10 shrink-0 backdrop-blur-sm"
+              />
+            )}
+            <div className="space-y-1">
+              <span className="px-2.5 py-0.5 bg-rose-600/30 text-rose-300 font-bold text-[9px] rounded-full uppercase tracking-wider border border-rose-500/30 inline-block">
+                Official Booking Quotation
+              </span>
+              <h1 className="text-xl font-black uppercase tracking-wide leading-tight">{propertyName}</h1>
+              <p className="text-[11px] text-slate-300 font-medium">
+                📍 {propertyLocation}
+              </p>
+              <div className="flex flex-wrap gap-x-3 text-[10px] text-slate-300 pt-0.5">
+                {propertyContact && <span>Tel: <strong className="text-white">{propertyContact}</strong></span>}
+                {propertyEmail && <span>Email: <strong className="text-white">{propertyEmail}</strong></span>}
+                {propertyGstin && <span>GSTIN: <strong className="text-white font-mono">{propertyGstin}</strong></span>}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Clean Print-Only Header */}
         <div className="hidden print:block p-6 border-b border-slate-200">
-          <h1 className="text-lg font-black text-rose-700 uppercase tracking-wide">{propertyName}</h1>
-          <p className="text-xs text-slate-500 font-medium mt-1">📍 {propertyLocation} • Host: {ownerName} ({ownerPhone})</p>
+          <div className="flex items-center gap-3.5">
+            {homestayLogo && (
+              <img 
+                src={homestayLogo} 
+                alt={propertyName} 
+                className="w-16 h-16 object-contain rounded-xl border border-slate-200 p-1 bg-white shrink-0"
+              />
+            )}
+            <div>
+              <span className="text-[9px] font-black uppercase tracking-wider text-rose-700 block">OFFICIAL BOOKING QUOTATION</span>
+              <h1 className="text-lg font-black text-slate-900 uppercase tracking-wide">{propertyName}</h1>
+              <p className="text-xs text-slate-600 font-medium mt-0.5">📍 {propertyLocation}</p>
+              <div className="flex flex-wrap gap-x-3 text-[10px] text-slate-500 pt-0.5">
+                {propertyContact && <span>Tel: {propertyContact}</span>}
+                {propertyEmail && <span>Email: {propertyEmail}</span>}
+                {propertyGstin && <span>GSTIN: {propertyGstin}</span>}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Quotation Details Summary */}
@@ -457,6 +506,45 @@ export default function BookingQuotation() {
         <div className="px-8">
           <div className="p-4 bg-slate-50/50 border border-slate-100 rounded-2xl text-[9px] font-bold text-slate-400 leading-relaxed">
             ⚠️ Disclaimer: This is an official booking quotation. {hasAdvancePaid ? 'Advance payment has been submitted. Check-in is subject to host verification.' : 'The booking will remain on hold until the deposit is verified.'}
+          </div>
+        </div>
+
+        {/* Official Signature & Stamp Section */}
+        <div className="px-8 pt-2">
+          <div className="p-6 border border-slate-150 rounded-2xl bg-white shadow-xs flex flex-col sm:flex-row justify-between items-end gap-6">
+            <div className="text-[10px] text-slate-400 font-medium space-y-0.5 text-center sm:text-left">
+              <p className="font-bold text-slate-600">Official Booking Quotation</p>
+              <p>Issued by {propertyName}. This quotation is valid for booking upon advance payment.</p>
+              {propertyGstin && <p className="font-mono text-slate-500 font-bold">GSTIN: {propertyGstin}</p>}
+            </div>
+
+            <div className="text-center relative w-56 flex flex-col items-center">
+              <div className="relative h-20 w-full flex items-center justify-center">
+                {stampImage && (
+                  <img 
+                    src={stampImage} 
+                    alt="Official Seal / Stamp" 
+                    className="absolute right-0 top-0 h-20 w-20 object-contain opacity-85 pointer-events-none drop-shadow-xs"
+                  />
+                )}
+                {signatureImage ? (
+                  <img 
+                    src={signatureImage} 
+                    alt="Authorized Signature" 
+                    className="relative z-10 max-h-16 max-w-[170px] object-contain drop-shadow-xs"
+                  />
+                ) : (
+                  <span className="font-serif italic text-base text-slate-700 block">{signatoryName}</span>
+                )}
+              </div>
+
+              <div className="w-full border-t border-slate-300 pt-1 mt-1 text-center">
+                <span className="block font-black text-xs text-slate-900 tracking-tight">{signatoryName}</span>
+                <span className="block text-[8px] font-black text-rose-700 uppercase tracking-wider">
+                  {signatoryDesignation}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 

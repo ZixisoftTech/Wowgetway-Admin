@@ -36,11 +36,13 @@ import {
   Activity,
   Layers,
   Crown,
-  CreditCard
+  CreditCard,
+  Stamp
 } from 'lucide-react';
 import MetricCard from '../components/widgets/MetricCard.jsx';
 import PropertySetupWizard from '../../Homestay-Owner-Admin/pages/PropertySetupWizard.jsx';
 import ManageOwnerSubscriptionModal from '../components/ManageOwnerSubscriptionModal.jsx';
+import HomestayBusinessDetailsModal from '../components/HomestayBusinessDetailsModal.jsx';
 
 const getApiUrl = (path) => {
   const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
@@ -75,6 +77,7 @@ export default function ManageHomestays() {
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
   const [reviewComment, setReviewComment] = useState('');
   const [subModalOwner, setSubModalOwner] = useState(null);
+  const [businessDetailsModalHomestay, setBusinessDetailsModalHomestay] = useState(null);
 
   const handleReviewAction = async (actionStatus) => {
     if ((actionStatus === 'Rejected' || actionStatus === 'Changes Requested') && !reviewComment.trim()) {
@@ -975,6 +978,13 @@ export default function ManageHomestays() {
                                 </button>
                               )}
                               <button
+                                onClick={() => setBusinessDetailsModalHomestay({ id: prop._id, name: prop.name })}
+                                className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
+                                title="Configure Signature & Stamp Details"
+                              >
+                                <Stamp size={15} />
+                              </button>
+                              <button
                                 onClick={() => { setSelectedId(prop._id); setViewMode('details'); }}
                                 className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
                                 title="View details"
@@ -1086,7 +1096,14 @@ export default function ManageHomestays() {
                       </div>
                     </div>
 
-                    <div className="flex gap-2 pt-3 border-t border-slate-50 justify-end">
+                    <div className="flex gap-2 pt-3 border-t border-slate-50 justify-end flex-wrap">
+                      <button
+                        onClick={() => setBusinessDetailsModalHomestay({ id: prop._id, name: prop.name })}
+                        className="px-3 py-1.5 bg-rose-50 text-rose-700 text-[11px] font-bold rounded-lg cursor-pointer flex items-center gap-1"
+                      >
+                        <Stamp size={12} />
+                        <span>Stamp & Sign</span>
+                      </button>
                       <button
                         onClick={() => { setSelectedId(prop._id); setViewMode('details'); }}
                         className="px-3 py-1.5 bg-blue-50 text-blue-600 text-[11px] font-bold rounded-lg cursor-pointer"
@@ -1195,7 +1212,15 @@ export default function ManageHomestays() {
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => setBusinessDetailsModalHomestay({ id: propertyDetails._id, name: propertyDetails.name })}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs"
+                title="Configure Signature, Stamp & Official Business Details"
+              >
+                <Stamp size={14} className="text-rose-600" />
+                <span>Signature & Stamp</span>
+              </button>
               <button
                 onClick={() => handleEditClick(propertyDetails)}
                 className="flex items-center gap-1.5 px-4.5 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
@@ -1672,6 +1697,18 @@ export default function ManageHomestays() {
         ownerId={subModalOwner?.id}
         ownerName={subModalOwner?.name}
         onSuccess={() => {
+          queryClient.invalidateQueries(['homestaysList']);
+        }}
+      />
+
+      {/* Homestay Signature, Stamp & Business Details Modal */}
+      <HomestayBusinessDetailsModal
+        isOpen={Boolean(businessDetailsModalHomestay)}
+        onClose={() => setBusinessDetailsModalHomestay(null)}
+        homestayId={businessDetailsModalHomestay?.id}
+        homestayName={businessDetailsModalHomestay?.name}
+        onSuccess={() => {
+          queryClient.invalidateQueries(['homestayDetails', selectedId]);
           queryClient.invalidateQueries(['homestaysList']);
         }}
       />

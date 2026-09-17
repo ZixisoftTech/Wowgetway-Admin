@@ -28,8 +28,10 @@ import {
   CheckCircle2,
   Waves,
   Coffee,
-  Camera
+  Camera,
+  Stamp
 } from 'lucide-react';
+import HomestayBusinessDetailsModal from '../../WoWSuper-Admin/components/HomestayBusinessDetailsModal.jsx';
 
 const getApiUrl = (path) => {
   const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
@@ -51,6 +53,7 @@ export default function PropertyDetails() {
   const [property, setProperty] = useState(null);
   const [lightboxImage, setLightboxImage] = useState(null);
   const [deleteRoomId, setDeleteRoomId] = useState(null);
+  const [showBusinessModal, setShowBusinessModal] = useState(false);
 
   useEffect(() => {
     fetchPropertyDetails();
@@ -199,6 +202,15 @@ export default function PropertyDetails() {
           >
             <Grid size={13} className="text-slate-400" />
             <span>Rate Chart</span>
+          </button>
+
+          <button
+            onClick={() => setShowBusinessModal(true)}
+            className="px-4 py-2.5 border border-rose-200 hover:bg-rose-50 text-rose-700 font-bold rounded-2xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer bg-white"
+            title="Configure Signature, Stamp & Official Business Details"
+          >
+            <Stamp size={13} className="text-rose-600" />
+            <span>Signature & Stamp</span>
           </button>
 
           <button
@@ -583,6 +595,17 @@ export default function PropertyDetails() {
             />
           </div>
         </div>
+      )}
+
+      {/* Signature & Stamp Modal */}
+      {property && (
+        <HomestayBusinessDetailsModal
+          isOpen={showBusinessModal}
+          onClose={() => setShowBusinessModal(false)}
+          homestayId={property._id || property.id}
+          homestayName={property.name}
+          onSuccess={() => fetchPropertyDetails()}
+        />
       )}
     </div>
   );

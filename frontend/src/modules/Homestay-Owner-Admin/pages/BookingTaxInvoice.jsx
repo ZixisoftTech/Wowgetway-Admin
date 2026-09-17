@@ -122,16 +122,28 @@ export default function BookingTaxInvoice() {
     }
   };
 
-  // Dynamic values with robust fallbacks
-  const propertyName = booking?.propertyId?.name || booking?.propertyDetails?.propertyName || 'Homestay Sanctuary';
-  const propertyAddress = [
-    booking?.propertyId?.address,
-    booking?.propertyId?.city,
-    booking?.propertyId?.state
+  // Dynamic values with robust fallbacks from homestay business details
+  const property = booking?.propertyId || {};
+  const business = property?.businessDetails || booking?.businessDetails || {};
+
+  const homestayLogo = business?.logo || property?.logo || '';
+  const propertyName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'Homestay Sanctuary';
+  const propertyAddress = business?.fullAddress || [
+    property?.address,
+    property?.city,
+    property?.state
   ].filter(Boolean).join(', ') || booking?.propertyDetails?.location || 'Himachal Pradesh, India';
-  const propertyGstin = booking?.propertyId?.gstNumber || '02AABCT1332F1Z8';
-  const ownerName = booking?.propertyId?.ownerName || booking?.propertyDetails?.ownerName || 'Homestay Host';
-  const ownerPhone = booking?.propertyId?.phone || booking?.propertyId?.ownerMobile || '+91 98765 43210';
+  const propertyContact = business?.contactNumber || property?.ownerMobile || property?.phone || '+91 98765 43210';
+  const propertyEmail = business?.emailId || property?.ownerEmail || '';
+  const propertyGstin = business?.gstNumber || property?.gstNumber || '02AABCT1332F1Z8';
+
+  const signatoryName = business?.authorizedSignatoryName || property?.ownerName || booking?.propertyDetails?.ownerName || 'Homestay Host';
+  const signatoryDesignation = business?.designation || 'Authorized Signatory';
+  const signatureImage = business?.signatureImage || '';
+  const stampImage = business?.stampImage || '';
+
+  const ownerName = signatoryName;
+  const ownerPhone = propertyContact;
 
   const guestName = booking?.customer?.name || booking?.guestDetails?.fullName || 'Guest';
   const guestPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '+91 98765 43210';
@@ -267,27 +279,40 @@ Thank you for choosing ${propertyName}!`;
         
         {/* Top Header: Property Details and Invoice Meta */}
         <div className="flex flex-col sm:flex-row justify-between items-start gap-4 border-b border-slate-200 pb-6">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-1 bg-rose-50 text-rose-700 font-black text-xs rounded-lg uppercase tracking-wider border border-rose-100">
-                TAX INVOICE
-              </span>
-              <span className={`px-2.5 py-0.5 rounded text-[10px] font-black uppercase ${
-                isPaid ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
-              }`}>
-                {isPaid ? 'Paid in Full' : `Pending ₹${balanceAmount.toLocaleString()}`}
-              </span>
+          <div className="flex items-start gap-3.5">
+            {homestayLogo && (
+              <img 
+                src={homestayLogo} 
+                alt={propertyName} 
+                className="w-16 h-16 object-contain rounded-xl border border-slate-200 p-1 bg-white shrink-0"
+              />
+            )}
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 bg-rose-50 text-rose-700 font-black text-xs rounded-lg uppercase tracking-wider border border-rose-100">
+                  TAX INVOICE
+                </span>
+                <span className={`px-2.5 py-0.5 rounded text-[10px] font-black uppercase ${
+                  isPaid ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+                }`}>
+                  {isPaid ? 'Paid in Full' : `Pending ₹${balanceAmount.toLocaleString()}`}
+                </span>
+              </div>
+              <h1 className="text-xl font-black text-slate-900 uppercase tracking-tight">{propertyName}</h1>
+              <p className="text-xs text-slate-500 max-w-sm leading-relaxed">{propertyAddress}</p>
+              <div className="flex flex-wrap gap-x-3 text-[11px] text-slate-500">
+                {propertyContact && <span>Tel: <strong className="text-slate-800">{propertyContact}</strong></span>}
+                {propertyEmail && <span>Email: <strong className="text-slate-800">{propertyEmail}</strong></span>}
+              </div>
+              <p className="text-[11px] text-slate-400 font-bold">GSTIN: <span className="text-slate-800 font-mono">{propertyGstin}</span></p>
             </div>
-            <h1 className="text-xl font-black text-slate-900 uppercase tracking-tight">{propertyName}</h1>
-            <p className="text-xs text-slate-500 max-w-sm leading-relaxed">{propertyAddress}</p>
-            <p className="text-[11px] text-slate-400 font-bold">GSTIN: <span className="text-slate-800 font-mono">{propertyGstin}</span></p>
           </div>
 
-          <div className="sm:text-right space-y-1 text-xs">
+          <div className="sm:text-right space-y-1 text-xs shrink-0">
             <div className="font-mono font-black text-slate-900 text-base">{invoiceNo}</div>
             <div className="text-slate-500 font-medium">Date: <strong className="text-slate-800">{invoiceDate}</strong></div>
             <div className="text-slate-500 font-medium">Booking Ref: <strong className="text-rose-700">#{bookingIdDisplay}</strong></div>
-            <div className="text-slate-500 font-medium">Host: <strong className="text-slate-800">{ownerName}</strong> ({ownerPhone})</div>
+            <div className="text-slate-500 font-medium">Signatory: <strong className="text-slate-800">{signatoryName}</strong></div>
           </div>
         </div>
 
@@ -418,18 +443,40 @@ Thank you for choosing ${propertyName}!`;
           )}
         </div>
 
-        {/* Signature & Legal Footer */}
-        <div className="pt-6 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-4">
+        {/* Signature & Stamp Legal Footer */}
+        <div className="pt-6 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-end gap-6">
           <div className="text-[10px] text-slate-400 font-medium space-y-0.5 text-center sm:text-left">
             <p>Thank you for staying at {propertyName}!</p>
-            <p>This is a computer-generated tax invoice and requires no physical stamp.</p>
+            <p>This is an officially authorized tax invoice generated by {propertyName}.</p>
           </div>
 
-          <div className="text-center space-y-1 w-44">
-            <span className="font-serif italic text-base text-slate-700 block">{ownerName}</span>
-            <span className="block text-[8px] font-black text-slate-400 uppercase tracking-wider border-t border-slate-200 pt-1">
-              Authorized Signatory
-            </span>
+          {/* Official Signature and Stamp Box */}
+          <div className="text-center relative w-56 flex flex-col items-center">
+            <div className="relative h-20 w-full flex items-center justify-center">
+              {stampImage && (
+                <img 
+                  src={stampImage} 
+                  alt="Official Seal / Stamp" 
+                  className="absolute right-0 top-0 h-20 w-20 object-contain opacity-85 pointer-events-none drop-shadow-xs"
+                />
+              )}
+              {signatureImage ? (
+                <img 
+                  src={signatureImage} 
+                  alt="Authorized Signature" 
+                  className="relative z-10 max-h-16 max-w-[170px] object-contain drop-shadow-xs"
+                />
+              ) : (
+                <span className="font-serif italic text-base text-slate-700 block">{signatoryName}</span>
+              )}
+            </div>
+
+            <div className="w-full border-t border-slate-300 pt-1 mt-1 text-center">
+              <span className="block font-black text-xs text-slate-900 tracking-tight">{signatoryName}</span>
+              <span className="block text-[8px] font-black text-rose-700 uppercase tracking-wider">
+                {signatoryDesignation}
+              </span>
+            </div>
           </div>
         </div>
 

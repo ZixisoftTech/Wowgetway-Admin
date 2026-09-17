@@ -26,6 +26,7 @@ import Coupons from '../modules/Homestay-Owner-Admin/pages/Coupons.jsx';
 import StaffManagement from '../modules/Homestay-Owner-Admin/pages/StaffManagement.jsx';
 import Notifications from '../modules/Homestay-Owner-Admin/pages/Notifications.jsx';
 import ManageSubscription from '../modules/Homestay-Owner-Admin/pages/ManageSubscription.jsx';
+import SignaturesStamps from '../modules/Homestay-Owner-Admin/pages/SignaturesStamps.jsx';
 import { HomestayOwnerProtectedRoute } from './routeGuards.jsx';
 
 export const getHomestayOwnerRoutes = () => (
@@ -65,7 +66,7 @@ export const getHomestayOwnerRoutes = () => (
     {/* Other Routes */}
     <Route path="staff" element={<StaffManagement />} />
     <Route path="notifications" element={<Notifications />} />
-    <Route path="signatures-stamps" element={<ComingSoon title="Signatures / Stamps / Logo" />} />
+    <Route path="signatures-stamps" element={<SignaturesStamps />} />
     <Route path="coupons" element={<Coupons />} />
     <Route path="subscription" element={<ManageSubscription />} />
 

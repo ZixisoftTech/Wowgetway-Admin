@@ -19,7 +19,8 @@ import {
   ExternalLink,
   X,
   Copy,
-  Check
+  Check,
+  LogIn
 } from 'lucide-react';
 
 const getImageUrl = (url) => {
@@ -32,7 +33,7 @@ const getImageUrl = (url) => {
   return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
 };
 
-export default function HomestayOwnerDetails({ ownerId, onBack, onEdit, ownerDetails, loading }) {
+export default function HomestayOwnerDetails({ ownerId, onBack, onEdit, ownerDetails, loading, onImpersonate }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showEncryptedCopy, setShowEncryptedCopy] = useState(false);
   const [copiedField, setCopiedField] = useState('');
@@ -135,6 +136,16 @@ export default function HomestayOwnerDetails({ ownerId, onBack, onEdit, ownerDet
         </div>
 
         <div className="flex sm:flex-col gap-2 z-10">
+          {onImpersonate && ownerDetails.status !== 'Deleted' && (
+            <button 
+              onClick={() => onImpersonate(ownerDetails._id)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 rounded-xl text-[10px] font-bold text-white hover:bg-emerald-700 transition-all cursor-pointer shadow-md shadow-emerald-100"
+              title="Login directly as this Homestay Owner"
+            >
+              <LogIn size={11} />
+              <span>Login as Owner</span>
+            </button>
+          )}
           <button 
             onClick={() => onEdit(ownerDetails)}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 rounded-xl text-[10px] font-bold text-white hover:bg-blue-700 transition-all cursor-pointer shadow-md shadow-blue-100"

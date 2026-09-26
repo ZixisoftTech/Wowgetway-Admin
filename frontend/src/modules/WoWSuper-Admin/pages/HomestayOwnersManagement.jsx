@@ -28,7 +28,7 @@ import HomestayOwnerDetails from './HomestayOwnerDetails.jsx';
 import ManageOwnerSubscriptionModal from '../components/ManageOwnerSubscriptionModal.jsx';
 import { authSuccess as ownerAuthSuccess } from '../../Homestay-Owner-Admin/store/homestayOwnerAuthSlice.js';
 
-const API_BASE_URL = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/owners';
+const API_BASE_URL = ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? (import.meta.env.VITE_API_URL || 'http://localhost:5005') : 'https://backend-sand-nine-13.vercel.app') + '/api/dashboard/owners';
 
 export default function HomestayOwnersManagement() {
   const queryClient = useQueryClient();
@@ -251,9 +251,27 @@ export default function HomestayOwnersManagement() {
   // Direct login / impersonation action handler
   const handleImpersonateLogin = async (id) => {
     try {
-      const res = await axios.post(`${API_BASE_URL}/${id}/impersonate`);
+      const adminToken = localStorage.getItem('superAdminToken') || localStorage.getItem('token');
+      const res = await axios.post(
+        `${API_BASE_URL}/${id}/impersonate`,
+        {},
+        {
+          headers: adminToken ? { Authorization: `Bearer ${adminToken}` } : {}
+        }
+      );
+      
+      const ownerData = {
+        ...res.data.user,
+        isImpersonated: true
+      };
+      
+      // Store impersonation credentials and flags
+      localStorage.setItem('homestayOwnerToken', res.data.token);
+      localStorage.setItem('homestayOwnerUser', JSON.stringify(ownerData));
+      localStorage.setItem('isImpersonated', 'true');
+
       // Dispatch token and details to homestayOwnerAuthSlice Redux store
-      dispatch(ownerAuthSuccess({ token: res.data.token, user: res.data.user }));
+      dispatch(ownerAuthSuccess({ token: res.data.token, user: ownerData }));
       
       Swal.fire({
         title: 'Impersonating Owner',
@@ -265,9 +283,11 @@ export default function HomestayOwnersManagement() {
         window.location.href = '/homestay-owner/dashboard';
       });
     } catch (err) {
+      console.error('[Impersonation] Failed:', err);
+      const errMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Could not establish direct session.';
       Swal.fire({
         title: 'Impersonation Failed',
-        text: err.response?.data?.message || 'Could not establish direct session.',
+        text: errMsg,
         icon: 'error',
         confirmButtonColor: '#dc2626'
       });
@@ -585,6 +605,7 @@ export default function HomestayOwnersManagement() {
             loading={detailsLoading}
             onBack={() => navigate('/homestay-owners')}
             onEdit={(owner) => navigate(`/homestay-owners/edit/${owner._id}`)}
+            onImpersonate={handleImpersonateLogin}
           />
         </motion.div>
       )}

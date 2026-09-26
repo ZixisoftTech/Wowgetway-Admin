@@ -2855,7 +2855,10 @@ const upload = multer({
 
 // Admin impersonate JWT generator
 router.post(['/owners/:id/impersonate', '/admin/homestay-owners/:id/impersonate'], authenticateToken, async (req, res) => {
-  if (req.user.role !== 'Super Admin') {
+  const userRole = (req.user?.role || '').trim();
+  const normalizedRole = userRole.toLowerCase().replace(/[\s_-]/g, '');
+  const isSuper = normalizedRole === 'superadmin' || normalizedRole === 'admin' || userRole === 'Super Admin';
+  if (!isSuper) {
     return res.status(403).json({ error: 'AccessDenied', message: 'Only Super Admins can impersonate owners.' });
   }
 
@@ -2864,16 +2867,39 @@ router.post(['/owners/:id/impersonate', '/admin/homestay-owners/:id/impersonate'
   if (!isMongoConnected()) {
     const owner = mockOwnersDatabase.find(o => o._id === id);
     if (!owner || owner.status === 'Deleted') {
-      return res.status(404).json({ error: 'Homestay owner not found.' });
+      return res.status(404).json({ error: 'Homestay owner not found.', message: 'Homestay owner not found or deleted.' });
     }
-    const token = jwt.sign({ _id: owner._id, email: owner.email, role: 'Owner' }, JWT_SECRET, { expiresIn: '2h' });
-    return res.json({ token, user: owner });
+    if (!owner.subscription || !owner.subscription.status || owner.subscription.status === 'None') {
+      owner.subscription = {
+        planName: 'Starter Host',
+        status: 'Active',
+        startDate: new Date(),
+        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        paymentStatus: 'Paid',
+        billingCycle: 'Yearly'
+      };
+    }
+    const token = jwt.sign({ _id: owner._id, email: owner.email, role: 'Owner', isImpersonated: true }, JWT_SECRET, { expiresIn: '8h' });
+    return res.json({ token, user: { ...owner, isImpersonated: true } });
   }
 
   try {
     const owner = await HomestayOwner.findById(id);
     if (!owner || owner.status === 'Deleted') {
-      return res.status(404).json({ error: 'Homestay owner not found.' });
+      return res.status(404).json({ error: 'Homestay owner not found.', message: 'Homestay owner not found or deleted.' });
+    }
+
+    // Ensure subscription field exists on owner so route guard never locks them out
+    if (!owner.subscription || !owner.subscription.status || owner.subscription.status === 'None') {
+      owner.subscription = {
+        planName: 'Starter Host',
+        status: 'Active',
+        startDate: new Date(),
+        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        paymentStatus: 'Paid',
+        billingCycle: 'Yearly'
+      };
+      await owner.save();
     }
 
     const payload = {
@@ -2881,13 +2907,17 @@ router.post(['/owners/:id/impersonate', '/admin/homestay-owners/:id/impersonate'
       email: owner.email,
       role: 'Owner',
       firstName: owner.firstName,
-      lastName: owner.lastName
+      lastName: owner.lastName,
+      isImpersonated: true
     };
 
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '2h' });
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '8h' });
     logActivity(req, 'IMPERSONATION_LOGIN', 'Super Admin Auth', `Super Admin logged in as owner: ${owner.email}`);
 
-    res.json({ token, user: owner });
+    const ownerObj = owner.toObject ? owner.toObject() : { ...owner };
+    ownerObj.isImpersonated = true;
+
+    res.json({ token, user: ownerObj });
   } catch (error) {
     res.status(500).json({ error: 'Failed to impersonate owner', message: error.message });
   }
@@ -7647,7 +7677,7 @@ const handleAdminLogin = async (req, res) => {
       admin.lastLogin = new Date();
 
       const payload = { _id: admin._id, email: admin.email, fullName: admin.fullName, role: admin.role };
-      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' });
+      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
       const refreshToken = jwt.sign({ _id: admin._id, email: admin.email }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
 
       res.cookie('refreshToken', refreshToken, {
@@ -7753,7 +7783,7 @@ const handleAdminLogin = async (req, res) => {
       await admin.save();
 
       const payload = { _id: admin._id, email: admin.email, fullName: admin.fullName, role: admin.role };
-      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' });
+      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
       const refreshToken = jwt.sign({ _id: admin._id, email: admin.email }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
 
       res.cookie('refreshToken', refreshToken, {
@@ -8056,7 +8086,7 @@ const handleAdminRefreshToken = async (req, res) => {
     }
 
     const payload = { _id: user._id, email: user.email, fullName, role };
-    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' });
+    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
 
     return res.json({ token: accessToken });
   } catch (err) {

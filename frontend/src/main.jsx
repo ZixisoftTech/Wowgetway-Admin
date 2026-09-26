@@ -20,13 +20,14 @@ axios.interceptors.request.use((config) => {
     config.url = config.url.replace('https://wow-getway-api.onrender.com', targetBase);
   }
 
-  // Inject JWT from localStorage based on path
-  const isOwnerPath = config.url && config.url.includes('/homestay-owner');
+  // Inject JWT from localStorage based on URL or current browser path
+  const isOwnerPath = (config.url && config.url.includes('/homestay-owner')) || 
+                      (typeof window !== 'undefined' && window.location.pathname.startsWith('/homestay-owner'));
   const token = isOwnerPath 
-    ? localStorage.getItem('homestayOwnerToken')
-    : localStorage.getItem('superAdminToken');
+    ? (localStorage.getItem('homestayOwnerToken') || localStorage.getItem('superAdminToken') || localStorage.getItem('token'))
+    : (localStorage.getItem('superAdminToken') || localStorage.getItem('token'));
 
-  if (token) {
+  if (token && !config.headers['Authorization']) {
     config.headers['Authorization'] = `Bearer ${token}`;
   }
   
@@ -55,8 +56,13 @@ axios.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    // Check for 401 errors indicating expired access token
-    if (error.response && error.response.status === 401 && !originalRequest._retry) {
+    // Check for 401 or 403 errors indicating expired access token
+    const isTokenExpired = error.response && (
+      error.response.status === 401 ||
+      (error.response.status === 403 && (error.response.data?.code === 'TOKEN_EXPIRED' || error.response.data?.error?.includes('expired')))
+    );
+
+    if (isTokenExpired && !originalRequest._retry) {
       // If we are already renewing the token, queue the request
       if (isRefreshing) {
         return new Promise((resolve, reject) => {

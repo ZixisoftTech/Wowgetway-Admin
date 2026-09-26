@@ -15,6 +15,13 @@ export function HomestayOwnerProtectedRoute({ children }) {
     return <Navigate to="/homestay-owner/login" replace />;
   }
 
+  // If user is impersonated by Super Admin, or has an active Super Admin session, grant full dashboard access without subscription lock
+  const hasSuperAdminToken = typeof window !== 'undefined' && (!!localStorage.getItem('superAdminToken') || !!localStorage.getItem('token'));
+  const isImpersonated = user?.isImpersonated || (typeof window !== 'undefined' && localStorage.getItem('isImpersonated') === 'true') || hasSuperAdminToken;
+  if (isImpersonated) {
+    return children;
+  }
+
   // Check subscription status
   const sub = user?.subscription;
   const isExpired = sub && (sub.status === 'Expired' || (sub.expiresAt && new Date(sub.expiresAt) < new Date()));

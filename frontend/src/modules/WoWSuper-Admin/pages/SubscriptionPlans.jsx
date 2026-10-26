@@ -36,6 +36,14 @@ export default function SubscriptionPlans() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [expandedDescriptions, setExpandedDescriptions] = useState({});
+
+  const toggleDescription = (id) => {
+    setExpandedDescriptions(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
 
   // 8 Specific Form Fields:
   // 1. Plan Name
@@ -363,9 +371,34 @@ export default function SubscriptionPlans() {
                     </div>
                   </div>
 
-                  <p className="text-xs text-slate-500 mt-2 min-h-[32px] line-clamp-2">
-                    {plan.description || 'No description specified.'}
-                  </p>
+                  {(() => {
+                    const descText = plan.description || 'No description specified.';
+                    const isLong = descText.length > 85;
+                    const isExpanded = !!expandedDescriptions[plan._id];
+
+                    if (!isLong) {
+                      return (
+                        <p className="text-xs text-slate-500 mt-2 min-h-[36px]">
+                          {descText}
+                        </p>
+                      );
+                    }
+
+                    return (
+                      <div className="text-xs text-slate-500 mt-2 min-h-[36px] transition-all">
+                        <span>
+                          {isExpanded ? descText : `${descText.slice(0, 85)}... `}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleDescription(plan._id)}
+                          className="text-blue-600 hover:text-blue-700 font-bold ml-1 inline-flex items-center text-[11px] cursor-pointer hover:underline transition-colors"
+                        >
+                          {isExpanded ? 'Read less' : 'Read more...'}
+                        </button>
+                      </div>
+                    );
+                  })()}
 
                   {/* Pricing Display */}
                   <div className="my-4 p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-baseline justify-between">
@@ -480,8 +513,25 @@ export default function SubscriptionPlans() {
                     <tr key={plan._id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="p-3.5 pl-4">
                         <div className="font-extrabold text-slate-900">{plan.name}</div>
-                        <div className="text-[11px] text-slate-400 font-normal max-w-xs truncate">
-                          {plan.description || '—'}
+                        <div className="text-[11px] text-slate-400 font-normal max-w-xs">
+                          {(() => {
+                            const descText = plan.description || '—';
+                            const isLong = descText.length > 55;
+                            const isExpanded = !!expandedDescriptions[`table-${plan._id}`];
+                            if (!isLong) return descText;
+                            return (
+                              <span>
+                                {isExpanded ? descText : `${descText.slice(0, 55)}... `}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleDescription(`table-${plan._id}`)}
+                                  className="text-blue-600 hover:text-blue-700 font-bold ml-1 text-[10px] cursor-pointer hover:underline"
+                                >
+                                  {isExpanded ? 'Read less' : 'Read more...'}
+                                </button>
+                              </span>
+                            );
+                          })()}
                         </div>
                       </td>
                       <td className="p-3.5">

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
@@ -61,6 +62,7 @@ const API_OWNERS_URL = getApiUrl('/api/dashboard/owners');
 
 export default function ManageHomestays() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'add' | 'edit' | 'details'
   const [selectedId, setSelectedId] = useState(null);
   
@@ -72,6 +74,31 @@ export default function ManageHomestays() {
   const [ownerFilter, setOwnerFilter] = useState('All');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
+
+  useEffect(() => {
+    const viewId = searchParams.get('view');
+    const editId = searchParams.get('edit');
+    const addFlag = searchParams.get('add');
+    const ownerNameParam = searchParams.get('ownerName');
+    const searchParam = searchParams.get('search');
+
+    if (viewId) {
+      setSelectedId(viewId);
+      setViewMode('details');
+    } else if (editId) {
+      setSelectedId(editId);
+      setViewMode('edit');
+    } else if (addFlag === 'true') {
+      setViewMode('add');
+    }
+
+    if (ownerNameParam) {
+      setOwnerFilter(ownerNameParam);
+    }
+    if (searchParam) {
+      setSearchQuery(searchParam);
+    }
+  }, [searchParams]);
 
   const [wizardStep, setWizardStep] = useState(1);
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
@@ -205,6 +232,8 @@ export default function ManageHomestays() {
     onSuccess: () => {
       queryClient.invalidateQueries(['homestaysList']);
       queryClient.invalidateQueries(['homestaysStats']);
+      queryClient.invalidateQueries(['ownersList']);
+      queryClient.invalidateQueries(['ownersStats']);
       setViewMode('list');
       alert('Homestay property successfully registered.');
     },
@@ -222,6 +251,8 @@ export default function ManageHomestays() {
       queryClient.invalidateQueries(['homestaysList']);
       queryClient.invalidateQueries(['homestaysStats']);
       queryClient.invalidateQueries(['propertyDetails', selectedId]);
+      queryClient.invalidateQueries(['ownersList']);
+      queryClient.invalidateQueries(['ownersStats']);
       setViewMode('list');
       setSelectedId(null);
       alert('Property details updated successfully.');
@@ -239,6 +270,8 @@ export default function ManageHomestays() {
     onSuccess: () => {
       queryClient.invalidateQueries(['homestaysList']);
       queryClient.invalidateQueries(['homestaysStats']);
+      queryClient.invalidateQueries(['ownersList']);
+      queryClient.invalidateQueries(['ownersStats']);
       alert('Property record deleted successfully.');
     },
     onError: (err) => {

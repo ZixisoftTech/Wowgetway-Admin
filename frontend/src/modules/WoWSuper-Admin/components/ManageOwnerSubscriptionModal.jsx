@@ -15,7 +15,8 @@ import {
   ShieldCheck, 
   Clock, 
   ArrowRight,
-  Info
+  Info,
+  Plus
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 
@@ -41,6 +42,11 @@ export default function ManageOwnerSubscriptionModal({
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [durationDays, setDurationDays] = useState(365);
+  const [assignExtraRooms, setAssignExtraRooms] = useState(0);
+
+  // Active plan room addon state
+  const [activeAddonRooms, setActiveAddonRooms] = useState(1);
+  const [addingRooms, setAddingRooms] = useState(false);
 
   useEffect(() => {
     if (isOpen && ownerId) {
@@ -98,10 +104,23 @@ export default function ManageOwnerSubscriptionModal({
 
     const selectedPlan = plans.find(p => p._id === selectedPlanId);
     const actionName = ownerData?.subscription?.status === 'Active' ? 'Change' : 'Assign';
+    const extraRoomCost = assignExtraRooms * Number(selectedPlan?.extraRoomPrice ?? 500);
+    const totalAmount = Number(selectedPlan?.offerPrice ?? selectedPlan?.price ?? 0) + extraRoomCost;
 
     const confirm = await Swal.fire({
       title: `${actionName} Subscription Plan?`,
-      text: `${actionName} plan to "${selectedPlan?.name}" for ${ownerData?.name || ownerName}? All resource limits and pricing will be centrally applied.`,
+      html: `
+        <div style="text-align: left; font-size: 13px; line-height: 1.5;">
+          <p>Assign <strong>"${selectedPlan?.name}"</strong> to <strong>${ownerData?.name || ownerName}</strong>?</p>
+          <ul style="margin: 8px 0; padding-left: 20px;">
+            <li>Homestays Limit: <strong>${selectedPlan?.maxHomestays || 1}</strong></li>
+            <li>Rooms per Homestay: <strong>${(selectedPlan?.maxRoomsPerHomestay || 5) + assignExtraRooms}</strong> (Base: ${selectedPlan?.maxRoomsPerHomestay || 5}${assignExtraRooms > 0 ? `, Extra: +${assignExtraRooms}` : ''})</li>
+            <li>Plan Cost: <strong>₹${Number(selectedPlan?.offerPrice ?? selectedPlan?.price ?? 0).toLocaleString()}</strong></li>
+            ${assignExtraRooms > 0 ? `<li>Extra Rooms (${assignExtraRooms} x ₹${selectedPlan?.extraRoomPrice ?? 500}): <strong>+₹${extraRoomCost.toLocaleString()}</strong></li>` : ''}
+            <li>Total Amount: <strong>₹${totalAmount.toLocaleString()}</strong></li>
+          </ul>
+        </div>
+      `,
       icon: 'question',
       showCancelButton: true,
       confirmButtonText: `Yes, ${actionName} Plan`,
@@ -118,13 +137,15 @@ export default function ManageOwnerSubscriptionModal({
         {
           planId: selectedPlanId,
           startDate,
-          durationDays: Number(durationDays)
+          durationDays: Number(durationDays),
+          extraRooms: Number(assignExtraRooms)
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
       if (res.data?.success) {
         Swal.fire('Success', res.data.message || 'Subscription plan assigned successfully!', 'success');
+        setAssignExtraRooms(0);
         if (onSuccess) onSuccess();
         loadData();
       }
@@ -133,6 +154,45 @@ export default function ManageOwnerSubscriptionModal({
       Swal.fire('Error', err.response?.data?.message || 'Failed to assign plan.', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAddRoomsToActivePlan = async () => {
+    if (activeAddonRooms <= 0) return;
+    const unitPrice = ownerData?.subscription?.extraRoomPrice !== undefined ? Number(ownerData.subscription.extraRoomPrice) : 500;
+    const totalAddonCost = activeAddonRooms * unitPrice;
+
+    const confirm = await Swal.fire({
+      title: `Add ${activeAddonRooms} Extra Room(s)?`,
+      text: `This will increase room capacity by ${activeAddonRooms} room(s) (Cost: ₹${totalAddonCost.toLocaleString()} at ₹${unitPrice}/room) for ${ownerData?.name || ownerName}.`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: `Yes, Add Rooms`,
+      confirmButtonColor: '#2563eb'
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    setAddingRooms(true);
+    const token = getAuthToken();
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/admin/homestay-owners/${ownerId}/subscription/add-rooms`,
+        { additionalRooms: activeAddonRooms },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data?.success) {
+        Swal.fire('Success', res.data.message || `Successfully added ${activeAddonRooms} room(s)!`, 'success');
+        setActiveAddonRooms(1);
+        if (onSuccess) onSuccess();
+        loadData();
+      }
+    } catch (err) {
+      console.error('Error adding extra rooms:', err);
+      Swal.fire('Error', err.response?.data?.message || 'Failed to add extra rooms.', 'error');
+    } finally {
+      setAddingRooms(false);
     }
   };
 
@@ -267,6 +327,11 @@ export default function ManageOwnerSubscriptionModal({
                       <span className="block text-xs font-black text-slate-800 mt-0.5">
                         {currentSub.maxRoomsPerHomestay || 5} Rooms
                       </span>
+                      {Number(currentSub.extraRooms) > 0 && (
+                        <span className="text-[9px] text-amber-700 font-extrabold block">
+                          (+{currentSub.extraRooms} extra)
+                        </span>
+                      )}
                     </div>
 
                     <div className="p-2 bg-white/80 rounded-xl border border-blue-100">
@@ -281,6 +346,60 @@ export default function ManageOwnerSubscriptionModal({
                       <span className="block text-[11px] font-extrabold text-slate-700 mt-0.5 truncate">
                         {currentSub.assignedBy || 'Admin'}
                       </span>
+                    </div>
+                  </div>
+
+                  {/* Add Extra Rooms directly to Active Plan */}
+                  <div className="mt-3.5 pt-3.5 border-t border-blue-100/80 bg-white/70 p-3 rounded-xl border border-blue-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <PlusCircle size={13} className="text-amber-600" />
+                        <span className="text-[11px] font-black text-slate-800 uppercase tracking-wider">
+                          + Add-on Rooms to Active Subscription
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 font-medium block mt-0.5">
+                        Rate: <strong>₹{Number(currentSub.extraRoomPrice ?? 500).toLocaleString()} / room</strong> • Instantly increases allowed room capacity
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                        <button
+                          type="button"
+                          onClick={() => setActiveAddonRooms(prev => Math.max(1, prev - 1))}
+                          disabled={activeAddonRooms <= 1 || addingRooms}
+                          className="px-2.5 py-1 text-slate-600 hover:bg-slate-100 font-black text-xs disabled:opacity-30 cursor-pointer"
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          value={activeAddonRooms}
+                          onChange={(e) => setActiveAddonRooms(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-10 text-center text-xs font-black text-slate-800 focus:outline-none border-x border-slate-200 py-1"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setActiveAddonRooms(prev => prev + 1)}
+                          disabled={addingRooms}
+                          className="px-2.5 py-1 text-slate-600 hover:bg-slate-100 font-black text-xs cursor-pointer"
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAddRoomsToActivePlan}
+                        disabled={addingRooms}
+                        className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-[11px] rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 transition-all"
+                      >
+                        {addingRooms ? <RefreshCw size={11} className="animate-spin" /> : <Plus size={12} />}
+                        <span>Add {activeAddonRooms} Room(s) (₹{(activeAddonRooms * Number(currentSub.extraRoomPrice ?? 500)).toLocaleString()})</span>
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -352,13 +471,94 @@ export default function ManageOwnerSubscriptionModal({
                       </div>
                       <div className="bg-slate-50 p-1.5 rounded-lg">
                         <span className="text-slate-400 block font-semibold">Rooms / Homestay</span>
-                        <span className="font-extrabold text-slate-800">{selectedPlanObj.maxRoomsPerHomestay || 5}</span>
+                        <span className="font-extrabold text-slate-800">
+                          {(selectedPlanObj.maxRoomsPerHomestay || 5) + assignExtraRooms}
+                        </span>
+                        {assignExtraRooms > 0 && (
+                          <span className="text-[9px] text-amber-700 font-extrabold block">
+                            (+{assignExtraRooms} extra)
+                          </span>
+                        )}
                       </div>
                       <div className="bg-amber-50 p-1.5 rounded-lg text-amber-800 font-bold">
                         <span className="text-amber-600 block font-semibold">Extra Room Add-on</span>
                         <span>₹{Number(selectedPlanObj.extraRoomPrice ?? 500).toLocaleString()}/room</span>
                       </div>
                     </div>
+
+                    {/* + Add Extra Room Option */}
+                    <div className="pt-2.5 mt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-50/50 p-2.5 rounded-xl border border-amber-100">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <PlusCircle size={13} className="text-amber-600" />
+                          <span className="text-[11px] font-black text-amber-900 uppercase tracking-wider">
+                            + Add Extra Room
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-amber-700 block mt-0.5">
+                          Charge: <strong>₹{Number(selectedPlanObj.extraRoomPrice ?? 500).toLocaleString()} / room</strong>
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center bg-white border border-amber-200 rounded-xl overflow-hidden shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={() => setAssignExtraRooms(prev => Math.max(0, prev - 1))}
+                            disabled={assignExtraRooms <= 0}
+                            className="px-2.5 py-1 text-slate-600 hover:bg-slate-100 font-black text-xs disabled:opacity-30 cursor-pointer"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={assignExtraRooms}
+                            onChange={(e) => setAssignExtraRooms(Math.max(0, parseInt(e.target.value) || 0))}
+                            className="w-10 text-center text-xs font-black text-slate-800 focus:outline-none border-x border-amber-100 py-1"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setAssignExtraRooms(prev => prev + 1)}
+                            className="px-2.5 py-1 text-slate-600 hover:bg-slate-100 font-black text-xs cursor-pointer"
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        {assignExtraRooms > 0 && (
+                          <div className="text-right pl-1">
+                            <span className="text-[11px] font-black text-amber-900 block leading-none">
+                              +₹{(assignExtraRooms * Number(selectedPlanObj.extraRoomPrice ?? 500)).toLocaleString()}
+                            </span>
+                            <span className="text-[9px] font-bold text-slate-400">
+                              ({(selectedPlanObj.maxRoomsPerHomestay || 5) + assignExtraRooms} total rooms)
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Total Summary Breakdown */}
+                    {assignExtraRooms > 0 && (
+                      <div className="p-2.5 bg-blue-50/70 rounded-xl border border-blue-200 flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-extrabold text-blue-900 block">
+                            Total Allowed: {(selectedPlanObj.maxRoomsPerHomestay || 5) + assignExtraRooms} Rooms / Homestay
+                          </span>
+                          <span className="text-[10px] text-blue-600 block">
+                            (Base: {selectedPlanObj.maxRoomsPerHomestay || 5} + Extra: {assignExtraRooms})
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase block">Total Amount</span>
+                          <span className="font-black text-blue-700 text-sm">
+                            ₹{(Number(selectedPlanObj.offerPrice ?? selectedPlanObj.price ?? 0) + (assignExtraRooms * Number(selectedPlanObj.extraRoomPrice ?? 500))).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

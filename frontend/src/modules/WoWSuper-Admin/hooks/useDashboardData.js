@@ -49,3 +49,14 @@ export function useTopHomestays() {
     }
   });
 }
+
+export function useSuperAdminDashboard(params = {}) {
+  return useQuery({
+    queryKey: ['superAdminDashboard', params],
+    queryFn: async () => {
+      const response = await api.get('/superadmin', { params });
+      return response.data;
+    },
+    refetchInterval: 30000
+  });
+}

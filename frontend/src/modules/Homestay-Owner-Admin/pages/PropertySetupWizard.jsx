@@ -191,6 +191,7 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
 
   // Wizard state data
   const [formData, setFormData] = useState({
+    ownerId: '',
     name: '',
     type: 'Homestay',
     category: '',
@@ -318,6 +319,7 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
 
         setFormData(prev => ({
           ...prev,
+          ownerId: property.ownerId || '',
           name: property.name || '',
           type: property.type || 'Homestay',
           category: property.category || '',
@@ -1870,25 +1872,37 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
                     Link / Assign to Homestay Owner
                   </label>
                   <select
+                    value={formData.ownerId || ''}
                     onChange={(e) => {
-                      const selected = masterOwners.find(o => o._id === e.target.value);
+                      const selected = masterOwners.find(o => String(o._id) === String(e.target.value));
                       if (selected) {
+                        const resolvedName = selected.name || `${selected.firstName || ''} ${selected.lastName || ''}`.trim();
                         setFormData(prev => ({
                           ...prev,
-                          ownerName: selected.name,
+                          ownerId: selected._id,
+                          ownerName: resolvedName || prev.ownerName,
                           phone: selected.phone || selected.mobile || prev.phone,
                           email: selected.email || prev.email
+                        }));
+                      } else {
+                        setFormData(prev => ({
+                          ...prev,
+                          ownerId: ''
                         }));
                       }
                     }}
                     className="w-full px-3 py-2 bg-white border border-slate-250 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
                   >
                     <option value="">-- Choose Existing Owner or Type Below --</option>
-                    {masterOwners.map(o => (
-                      <option key={o._id} value={o._id}>
-                        {o.name} ({o.email || o.phone || 'Owner'})
-                      </option>
-                    ))}
+                    {masterOwners.map(o => {
+                      const displayName = o.name || `${o.firstName || ''} ${o.lastName || ''}`.trim() || o.email || 'Owner';
+                      const displayContact = o.email || o.phone || o.mobile || '';
+                      return (
+                        <option key={o._id} value={o._id}>
+                          {displayName} {displayContact ? `(${displayContact})` : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               )}

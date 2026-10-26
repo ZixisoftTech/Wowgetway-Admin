@@ -18,7 +18,9 @@ import {
   Tag,
   PlusCircle,
   X,
-  QrCode
+  QrCode,
+  Plus,
+  Phone
 } from 'lucide-react';
 import { authSuccess } from '../store/homestayOwnerAuthSlice.js';
 
@@ -44,6 +46,72 @@ export default function ManageSubscription() {
   const [purchaseSubmitting, setPurchaseSubmitting] = useState(false);
   const [transactionId, setTransactionId] = useState('');
   const [paymentSuccessMsg, setPaymentSuccessMsg] = useState('');
+  const [expandedDescriptions, setExpandedDescriptions] = useState({});
+
+  // Room Add-on state
+  const [addonModalOpen, setAddonModalOpen] = useState(false);
+  const [addonRoomsCount, setAddonRoomsCount] = useState(1);
+  const [addonTxId, setAddonTxId] = useState('');
+  const [addonSubmitting, setAddonSubmitting] = useState(false);
+  const [addonSuccessMsg, setAddonSuccessMsg] = useState('');
+
+  const handleOpenAddonModal = () => {
+    setAddonRoomsCount(1);
+    setAddonTxId(`ROOM-UPI-${Date.now().toString().slice(-6)}`);
+    setAddonSuccessMsg('');
+    setAddonModalOpen(true);
+  };
+
+  const handleConfirmAddonPurchase = async (e) => {
+    e.preventDefault();
+    if (!currentSub || addonRoomsCount <= 0) return;
+
+    const token = getAuthToken();
+    try {
+      setAddonSubmitting(true);
+      const res = await axios.post(
+        getApiUrl('/api/homestay-owner/subscription/addon-rooms'),
+        {
+          additionalRooms: addonRoomsCount,
+          paymentMethod: 'UPI',
+          transactionId: addonTxId
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+
+      if (res.data?.success) {
+        setAddonSuccessMsg(`Success! Added ${addonRoomsCount} extra room(s) to your subscription.`);
+        setCurrentSub(res.data.subscription);
+        
+        if (currentUser) {
+          const updatedUser = {
+            ...currentUser,
+            subscription: res.data.subscription
+          };
+          dispatch(authSuccess({ user: updatedUser, token }));
+        }
+
+        setTimeout(() => {
+          setAddonModalOpen(false);
+          setAddonSuccessMsg('');
+        }, 2200);
+      }
+    } catch (err) {
+      console.error('Error purchasing room addon:', err);
+      alert(err.response?.data?.message || 'Failed to complete add-on purchase.');
+    } finally {
+      setAddonSubmitting(false);
+    }
+  };
+
+  const toggleDescription = (id) => {
+    setExpandedDescriptions(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
 
   const fetchData = async () => {
     const token = getAuthToken();
@@ -231,6 +299,11 @@ export default function ManageSubscription() {
               <p className="text-sm font-black text-slate-800 m-0">
                 {currentSub.maxRoomsPerHomestay || 5} Rooms
               </p>
+              {Number(currentSub.extraRooms) > 0 && (
+                <span className="text-[10px] text-amber-700 font-extrabold block mt-0.5">
+                  (+{currentSub.extraRooms} extra)
+                </span>
+              )}
             </div>
 
             <div className="bg-amber-50/70 border border-amber-100 rounded-2xl p-3.5">
@@ -251,6 +324,40 @@ export default function ManageSubscription() {
               <p className="text-sm font-black text-slate-800 m-0">
                 {isExpired ? 'Expired' : `${currentSub.daysRemaining ?? 365} Days Left`}
               </p>
+            </div>
+          </div>
+
+          {/* Active Plan Extra Room Add-on Action Banner */}
+          <div className="mt-4 pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-amber-50/70 to-orange-50/50 p-4 rounded-2xl border border-amber-200">
+            <div>
+              <div className="flex items-center gap-1.5">
+                <PlusCircle size={15} className="text-amber-600" />
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider m-0">
+                  Need More Rooms for Your Homestays?
+                </h4>
+              </div>
+              <p className="text-[11px] text-slate-600 font-medium m-0 mt-0.5">
+                Add extra rooms to your subscription at <strong>₹{Number(currentSub.extraRoomPrice ?? 500).toLocaleString()} / room</strong>. Extra rooms are permanently added to your account limits.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <a
+                href="mailto:devgateways947@gmail.com?subject=Request%20Extra%20Room%20Add-on%20for%20Homestay"
+                className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold rounded-xl transition-all inline-flex items-center gap-1.5 no-underline"
+              >
+                <Phone size={12} className="text-slate-400" />
+                <span>Contact Admin</span>
+              </a>
+
+              <button
+                type="button"
+                onClick={handleOpenAddonModal}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 shadow-md shadow-amber-200 cursor-pointer border-none transition-all"
+              >
+                <Plus size={13} />
+                <span>+ Add Extra Rooms</span>
+              </button>
             </div>
           </div>
         </div>
@@ -296,9 +403,34 @@ export default function ManageSubscription() {
                     )}
                   </div>
 
-                  <p className="text-xs text-slate-500 font-medium mt-1.5 min-h-[36px] line-clamp-2">
-                    {plan.description || 'Standard Homestay Owner subscription tier.'}
-                  </p>
+                  {(() => {
+                    const descText = plan.description || 'Standard Homestay Owner subscription tier.';
+                    const isLong = descText.length > 85;
+                    const isExpanded = !!expandedDescriptions[plan._id];
+
+                    if (!isLong) {
+                      return (
+                        <p className="text-xs text-slate-500 font-medium mt-1.5 min-h-[36px]">
+                          {descText}
+                        </p>
+                      );
+                    }
+
+                    return (
+                      <div className="text-xs text-slate-500 font-medium mt-1.5 min-h-[36px]">
+                        <span>
+                          {isExpanded ? descText : `${descText.slice(0, 85)}... `}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleDescription(plan._id)}
+                          className="text-blue-600 hover:text-blue-700 font-bold ml-1 inline-flex items-center text-[11px] cursor-pointer hover:underline"
+                        >
+                          {isExpanded ? 'Read less' : 'Read more...'}
+                        </button>
+                      </div>
+                    );
+                  })()}
 
                   <div className="my-4 p-3 bg-slate-50 rounded-2xl border border-slate-100 flex items-baseline justify-between">
                     <div>
@@ -478,6 +610,152 @@ export default function ManageSubscription() {
                       <Check size={14} className="stroke-[3]" />
                     )}
                     <span>{purchaseSubmitting ? 'Activating...' : 'Confirm & Activate'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+      {/* 2. Room Add-on Modal for Active Subscription */}
+      {addonModalOpen && currentSub && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-fade-in font-sans">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 my-8">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+                  <PlusCircle size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-800 m-0">Purchase Extra Rooms</h3>
+                  <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">
+                    Plan: {currentSub.planName}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddonModalOpen(false)}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors border-none bg-transparent cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {addonSuccessMsg ? (
+              <div className="py-12 text-center space-y-3">
+                <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
+                  <CheckCircle2 size={28} />
+                </div>
+                <h4 className="text-sm font-black text-slate-800 m-0">Payment Successful!</h4>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto m-0">{addonSuccessMsg}</p>
+              </div>
+            ) : (
+              <form onSubmit={handleConfirmAddonPurchase} className="pt-5 space-y-4">
+                {/* Rooms Selector */}
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider block">
+                        Number of Extra Rooms
+                      </span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">
+                        Rate: ₹{Number(currentSub.extraRoomPrice ?? 500).toLocaleString()} per extra room
+                      </span>
+                    </div>
+
+                    <div className="flex items-center bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                      <button
+                        type="button"
+                        onClick={() => setAddonRoomsCount(prev => Math.max(1, prev - 1))}
+                        disabled={addonRoomsCount <= 1 || addonSubmitting}
+                        className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 font-black text-xs disabled:opacity-30 cursor-pointer"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={addonRoomsCount}
+                        onChange={(e) => setAddonRoomsCount(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="w-12 text-center text-xs font-black text-slate-800 focus:outline-none border-x border-slate-200 py-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAddonRoomsCount(prev => prev + 1)}
+                        disabled={addonSubmitting}
+                        className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 font-black text-xs cursor-pointer"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-amber-50/80 rounded-xl border border-amber-100/80 flex items-center justify-between text-xs font-bold text-amber-900">
+                    <span>New Total Room Limit</span>
+                    <span>{(currentSub.maxRoomsPerHomestay || 5) + addonRoomsCount} Rooms / Homestay</span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">Amount to Pay</span>
+                    <span className="text-xl font-black text-blue-600">
+                      ₹{(addonRoomsCount * Number(currentSub.extraRoomPrice ?? 500)).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Simulated Payment QR / UPI details */}
+                <div className="border border-slate-200 rounded-2xl p-4 bg-white space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                      <QrCode size={15} className="text-amber-600" />
+                      Scan & Pay via any UPI App
+                    </span>
+                    <span className="text-[10px] font-extrabold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                      GPay / PhonePe / Paytm
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-50 rounded-xl text-center">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Official WOW Gateways VPA</span>
+                    <span className="text-xs font-black text-slate-800 tracking-wider">wowgateways.pay@icici</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-black text-slate-700 uppercase tracking-wider mb-1">
+                      UTR / Transaction Reference ID
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={addonTxId}
+                      onChange={(e) => setAddonTxId(e.target.value)}
+                      placeholder="e.g. UPI-928472918"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setAddonModalOpen(false)}
+                    className="w-1/3 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-2xl text-xs cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={addonSubmitting}
+                    className="w-2/3 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black rounded-2xl text-xs flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-sm shadow-amber-200 disabled:opacity-50"
+                  >
+                    {addonSubmitting ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <Check size={14} className="stroke-[3]" />
+                    )}
+                    <span>{addonSubmitting ? 'Processing...' : `Pay ₹${(addonRoomsCount * Number(currentSub.extraRoomPrice ?? 500)).toLocaleString()}`}</span>
                   </button>
                 </div>
               </form>

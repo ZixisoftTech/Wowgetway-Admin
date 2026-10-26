@@ -1845,6 +1845,234 @@ let mockEmployeesDatabase = [
   }
 ];
 
+// GET /api/dashboard/superadmin - Super Admin Overview with 100% Real-time Database Data
+router.get(['/superadmin', '/super-admin-overview'], async (req, res) => {
+  try {
+    const { period, range } = req.query; // e.g. "September 2026", "October 2026", "All Time"
+
+    // 1. Homestays & Hotels real count
+    const propertyCount = await Property.countDocuments({ status: { $ne: 'Deleted' } });
+    const homestayCount = await Homestay.countDocuments({ status: { $ne: 'Deleted' } });
+    // In this platform, properties is the primary collection for assigned homestays
+    const totalHomestays = propertyCount > 0 ? propertyCount : homestayCount;
+
+    // 2. Owners & Real Subscriptions Status
+    const allOwners = await HomestayOwner.find({ deletedAt: null }).lean();
+    const totalOwners = allOwners.length;
+
+    const now = new Date();
+    const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    let activeSubscriptions = 0;
+    let expiringSoon = 0;
+    let expiredCount = 0;
+    let notSubscribed = 0;
+
+    const subscriptionsExpiringSoon = [];
+
+    // Map owner ID to friendly full name
+    const ownerMap = {};
+
+    for (const o of allOwners) {
+      const ownerName = [o.firstName, o.lastName].filter(Boolean).join(' ') || o.fullName || o.name || o.email?.split('@')[0] || 'Host';
+      ownerMap[o._id.toString()] = ownerName;
+
+      const sub = o.subscription;
+      if (!sub || sub.status === 'None' || !sub.planName) {
+        notSubscribed++;
+        continue;
+      }
+
+      const expiryDate = sub.expiresAt ? new Date(sub.expiresAt) : null;
+      const isExpired = sub.status === 'Expired' || (expiryDate && expiryDate < now);
+
+      if (isExpired) {
+        expiredCount++;
+      } else if (sub.status === 'Active') {
+        activeSubscriptions++;
+        if (expiryDate && expiryDate >= now && expiryDate <= thirtyDaysFromNow) {
+          expiringSoon++;
+          const daysLeft = Math.max(1, Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24)));
+          const primaryPropName = o.properties?.[0]?.propertyName || 'Floala Inn';
+          subscriptionsExpiringSoon.push({
+            id: o._id,
+            rank: expiringSoon,
+            homestayName: primaryPropName,
+            ownerName,
+            plan: sub.planName.replace(' Host', '').replace(' Hotelier', ''),
+            expiryDate: expiryDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+            daysLeft
+          });
+        }
+      } else {
+        notSubscribed++;
+      }
+    }
+
+    // 3. Subscription Revenue Breakdown (Real historical purchases & addons)
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    // Determine target month index from query or current date
+    let targetYear = now.getFullYear();
+    let targetMonthIdx = now.getMonth();
+
+    if (period && typeof period === 'string') {
+      const parts = period.split(' ');
+      if (parts.length === 2) {
+        const pMonth = parts[0].slice(0, 3);
+        const pYear = parseInt(parts[1], 10);
+        const mIdx = monthNames.findIndex(m => m.toLowerCase() === pMonth.toLowerCase());
+        if (mIdx !== -1) targetMonthIdx = mIdx;
+        if (!isNaN(pYear)) targetYear = pYear;
+      }
+    }
+
+    // Build rolling 6 months ending in targetMonth
+    const last6Months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(targetYear, targetMonthIdx - i, 1);
+      last6Months.push({
+        year: d.getFullYear(),
+        monthIdx: d.getMonth(),
+        name: monthNames[d.getMonth()],
+        revenue: 0,
+        formatted: '₹0',
+        isCurrent: i === 0
+      });
+    }
+
+    let thisYearRevenue = 0;
+    let thisMonthRevenue = 0;
+    let lastMonthRevenue = 0;
+
+    const prevMonthIdx = (targetMonthIdx - 1 + 12) % 12;
+    const prevMonthYear = targetMonthIdx === 0 ? targetYear - 1 : targetYear;
+
+    for (const o of allOwners) {
+      const sub = o.subscription;
+      if (!sub) continue;
+
+      const history = sub.history || [];
+      if (history.length === 0 && sub.price) {
+        const pDate = new Date(sub.assignedAt || sub.startDate || now);
+        const amt = Number(sub.totalAmountPaid || sub.price) || 0;
+        if (pDate.getFullYear() === targetYear) thisYearRevenue += amt;
+        if (pDate.getFullYear() === targetYear && pDate.getMonth() === targetMonthIdx) thisMonthRevenue += amt;
+        if (pDate.getFullYear() === prevMonthYear && pDate.getMonth() === prevMonthIdx) lastMonthRevenue += amt;
+
+        const mBucket = last6Months.find(m => m.year === pDate.getFullYear() && m.monthIdx === pDate.getMonth());
+        if (mBucket) mBucket.revenue += amt;
+      }
+
+      for (const h of history) {
+        const pDate = new Date(h.purchasedAt || sub.assignedAt || now);
+        const amt = Number(h.totalAmountPaid || h.price || h.offerPrice || h.mrp) || 0;
+        if (pDate.getFullYear() === targetYear) thisYearRevenue += amt;
+        if (pDate.getFullYear() === targetYear && pDate.getMonth() === targetMonthIdx) thisMonthRevenue += amt;
+        if (pDate.getFullYear() === prevMonthYear && pDate.getMonth() === prevMonthIdx) lastMonthRevenue += amt;
+
+        const mBucket = last6Months.find(m => m.year === pDate.getFullYear() && m.monthIdx === pDate.getMonth());
+        if (mBucket) mBucket.revenue += amt;
+      }
+    }
+
+    // Format monthly amounts for chart
+    last6Months.forEach(m => {
+      m.formatted = `₹${m.revenue.toLocaleString()}`;
+    });
+
+    const monthGrowth = lastMonthRevenue > 0
+      ? Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100)
+      : (thisMonthRevenue > 0 ? 100 : 0);
+
+    const subscriptionRevenue = {
+      period: 'Last 6 Months',
+      months: last6Months,
+      lastMonth: {
+        label: `Last Month (${monthNames[prevMonthIdx]} ${prevMonthYear})`,
+        amount: `₹${lastMonthRevenue.toLocaleString()}`,
+        growthText: lastMonthRevenue > 0 ? `↑ ${lastMonthRevenue.toLocaleString()}` : 'No revenue'
+      },
+      thisMonth: {
+        label: `This Month (${monthNames[targetMonthIdx]} ${targetYear})`,
+        amount: `₹${thisMonthRevenue.toLocaleString()}`,
+        growthText: `${monthGrowth >= 0 ? '↑' : '↓'} ${Math.abs(monthGrowth)}% vs last month`
+      },
+      thisYear: {
+        label: `This Year (${targetYear})`,
+        amount: `₹${thisYearRevenue.toLocaleString()}`,
+        growthText: `Total revenue in ${targetYear}`
+      }
+    };
+
+    // 4. Subscription Overview Donut Breakdown (Percentages out of real total owners)
+    const calcPct = (cnt) => totalOwners > 0 ? Math.round((cnt / totalOwners) * 100) : 0;
+    const subscriptionOverview = {
+      totalOwners,
+      slices: [
+        { name: 'Active', count: activeSubscriptions, percentage: calcPct(activeSubscriptions), color: '#059669' },
+        { name: 'Expiring Soon', count: expiringSoon, percentage: calcPct(expiringSoon), color: '#F59E0B' },
+        { name: 'Expired', count: expiredCount, percentage: calcPct(expiredCount), color: '#EF4444' },
+        { name: 'Not Subscribed', count: notSubscribed, percentage: calcPct(notSubscribed), color: '#94A3B8' }
+      ],
+      alertCount: expiringSoon,
+      alertMessage: expiringSoon > 0
+        ? `${expiringSoon} subscription${expiringSoon > 1 ? 's are' : ' is'} expiring within 30 days. Renew on time to avoid service interruption.`
+        : 'All active subscriptions are currently up to date.'
+    };
+
+    // 5. Best Performing Homestays / Hotels from real Properties & Bookings
+    const properties = await Property.find({ status: { $ne: 'Deleted' } }).lean();
+    const bookings = await Booking.find({}).lean();
+
+    const bookingCountByPropName = {};
+    const bookingCountByPropId = {};
+
+    bookings.forEach(b => {
+      const pName = b.propertyDetails?.propertyName || b.propertyName;
+      const pId = b.propertyDetails?.propertyId || b.propertyId;
+      if (pName) bookingCountByPropName[pName.toLowerCase().trim()] = (bookingCountByPropName[pName.toLowerCase().trim()] || 0) + 1;
+      if (pId) bookingCountByPropId[pId.toString()] = (bookingCountByPropId[pId.toString()] || 0) + 1;
+    });
+
+    const bestPerformingHomestays = properties.map((p, idx) => {
+      const pName = p.name || p.propertyName || p.title || `Homestay ${idx + 1}`;
+      const count = (bookingCountByPropId[p._id.toString()] || 0) + 
+                    (bookingCountByPropName[pName.toLowerCase().trim()] || 0) + 
+                    (p.bookings || 0);
+      const ownerName = ownerMap[p.ownerId?.toString()] || p.ownerName || 'Verified Host';
+      return {
+        id: p._id,
+        name: pName,
+        ownerName,
+        totalBookings: count
+      };
+    }).sort((a, b) => b.totalBookings - a.totalBookings).map((item, idx) => ({
+      ...item,
+      rank: idx + 1
+    }));
+
+    res.json({
+      summary: {
+        totalHomestaysAndHotels: totalHomestays,
+        homestaysGrowth: `${totalHomestays} Listed`,
+        totalOwners,
+        ownersGrowth: `${totalOwners} Registered`,
+        expiringSoonCount: expiringSoon,
+        activeSubscriptionsCount: activeSubscriptions,
+        activeSubscriptionsGrowth: `${calcPct(activeSubscriptions)}% active`
+      },
+      subscriptionRevenue,
+      subscriptionOverview,
+      bestPerformingHomestays,
+      subscriptionsExpiringSoon
+    });
+  } catch (err) {
+    console.error('Error fetching superadmin dashboard:', err);
+    res.status(500).json({ error: 'Failed to fetch superadmin dashboard data' });
+  }
+});
+
 // GET /api/dashboard/summary
 router.get('/summary', async (req, res) => {
   if (!isMongoConnected()) {
@@ -2930,7 +3158,8 @@ router.get(['/owners/stats', '/admin/homestay-owners/stats'], authenticateToken,
     const totalOwners = activeList.length;
     const activeOwners = activeList.filter(o => o.status === 'Active').length;
     const pendingVerification = activeList.filter(o => o.status === 'Pending Verification').length;
-    const totalProperties = activeList.reduce((sum, o) => sum + (o.properties ? o.properties.length : 0), 0);
+    const activeOwnerIds = new Set(activeList.map(o => String(o._id)));
+    const totalProperties = mockPropertiesDatabase.filter(p => !p.deleted && p.ownerId && activeOwnerIds.has(String(p.ownerId))).length;
     return res.json({ totalOwners, activeOwners, pendingVerification, totalProperties });
   }
 
@@ -2939,8 +3168,15 @@ router.get(['/owners/stats', '/admin/homestay-owners/stats'], authenticateToken,
     const activeOwners = await HomestayOwner.countDocuments({ status: 'Active' });
     const pendingVerification = await HomestayOwner.countDocuments({ status: 'Pending Verification' });
     
-    const owners = await HomestayOwner.find({ status: { $ne: 'Deleted' } }, 'properties');
-    const totalProperties = owners.reduce((sum, o) => sum + (o.properties ? o.properties.length : 0), 0);
+    // Find all non-deleted owner IDs
+    const nonDeletedOwners = await HomestayOwner.find({ status: { $ne: 'Deleted' } }, '_id');
+    const nonDeletedOwnerIds = nonDeletedOwners.map(o => o._id);
+    
+    // Count real properties assigned to active/non-deleted owners
+    const totalProperties = await Property.countDocuments({ 
+      ownerId: { $in: nonDeletedOwnerIds },
+      deleted: { $ne: true }
+    });
 
     res.json({ totalOwners, activeOwners, pendingVerification, totalProperties });
   } catch (error) {
@@ -2970,16 +3206,33 @@ router.get(['/owners', '/admin/homestay-owners'], authenticateToken, async (req,
       );
     }
 
+    const enrichedList = list.map(o => {
+      const ownerProps = mockPropertiesDatabase
+        .filter(p => !p.deleted && String(p.ownerId) === String(o._id))
+        .map(p => ({
+          _id: p._id,
+          propertyName: p.name || 'Untitled Property',
+          location: [p.city, p.state].filter(Boolean).join(', ') || 'N/A',
+          status: p.status || 'Active',
+          bookings: p.bookings || 0
+        }));
+      return {
+        ...o,
+        properties: ownerProps,
+        propertiesCount: ownerProps.length
+      };
+    });
+
     if (all === 'true' || (!page && !limit)) {
-      return res.json(list);
+      return res.json(enrichedList);
     }
 
     const pageNum = parseInt(page) || 1;
     const limitNum = parseInt(limit) || 10;
     const skip = (pageNum - 1) * limitNum;
     
-    const totalRecords = list.length;
-    const data = list.slice(skip, skip + limitNum);
+    const totalRecords = enrichedList.length;
+    const data = enrichedList.slice(skip, skip + limitNum);
     return res.json({ data, totalRecords });
   }
 
@@ -3000,7 +3253,37 @@ router.get(['/owners', '/admin/homestay-owners'], authenticateToken, async (req,
         ];
       }
       const list = await HomestayOwner.find(query).sort({ createdAt: -1 });
-      return res.json(list);
+      const ownerIds = list.map(o => o._id);
+
+      const properties = await Property.find({
+        ownerId: { $in: ownerIds },
+        deleted: { $ne: true }
+      }).select('_id name propertyId type city state address status bookings ownerId').lean();
+
+      const propMap = new Map();
+      for (const p of properties) {
+        const oId = String(p.ownerId);
+        if (!propMap.has(oId)) propMap.set(oId, []);
+        propMap.get(oId).push({
+          _id: p._id,
+          propertyId: p.propertyId || p._id,
+          propertyName: p.name || 'Untitled Property',
+          type: p.type || 'Homestay',
+          location: [p.city, p.state].filter(Boolean).join(', ') || p.address || 'India',
+          status: p.status || 'Active',
+          bookings: p.bookings || 0
+        });
+      }
+
+      const enrichedList = list.map(ownerDoc => {
+        const ownerObj = ownerDoc.toObject ? ownerDoc.toObject() : { ...ownerDoc };
+        const ownerProps = propMap.get(String(ownerObj._id)) || [];
+        ownerObj.properties = ownerProps;
+        ownerObj.propertiesCount = ownerProps.length;
+        return ownerObj;
+      });
+
+      return res.json(enrichedList);
     } catch (err) {
       return res.status(500).json({ error: 'Failed to fetch owners list', message: err.message });
     }
@@ -3034,7 +3317,36 @@ router.get(['/owners', '/admin/homestay-owners'], authenticateToken, async (req,
       .skip(skip)
       .limit(limitNum);
 
-    res.json({ data, totalRecords });
+    const ownerIds = data.map(o => o._id);
+    const properties = await Property.find({
+      ownerId: { $in: ownerIds },
+      deleted: { $ne: true }
+    }).select('_id name propertyId type city state address status bookings ownerId').lean();
+
+    const propMap = new Map();
+    for (const p of properties) {
+      const oId = String(p.ownerId);
+      if (!propMap.has(oId)) propMap.set(oId, []);
+      propMap.get(oId).push({
+        _id: p._id,
+        propertyId: p.propertyId || p._id,
+        propertyName: p.name || 'Untitled Property',
+        type: p.type || 'Homestay',
+        location: [p.city, p.state].filter(Boolean).join(', ') || p.address || 'India',
+        status: p.status || 'Active',
+        bookings: p.bookings || 0
+      });
+    }
+
+    const enrichedData = data.map(ownerDoc => {
+      const ownerObj = ownerDoc.toObject ? ownerDoc.toObject() : { ...ownerDoc };
+      const ownerProps = propMap.get(String(ownerObj._id)) || [];
+      ownerObj.properties = ownerProps;
+      ownerObj.propertiesCount = ownerProps.length;
+      return ownerObj;
+    });
+
+    res.json({ data: enrichedData, totalRecords });
   } catch (error) {
     console.error('Error fetching homestay owners:', error.message);
     res.status(500).json({ error: 'Failed to fetch homestay owners', message: error.message });
@@ -3052,6 +3364,17 @@ router.get(['/owners/:id', '/admin/homestay-owners/:id'], authenticateToken, asy
     }
     const ownerObj = { ...owner };
     ownerObj.passwordCopy = owner.password || 'Owner@123';
+    const ownerProps = mockPropertiesDatabase
+      .filter(p => !p.deleted && String(p.ownerId) === String(id))
+      .map(p => ({
+        _id: p._id,
+        propertyName: p.name || 'Untitled Property',
+        location: [p.city, p.state].filter(Boolean).join(', ') || 'N/A',
+        status: p.status || 'Active',
+        bookings: p.bookings || 0
+      }));
+    ownerObj.properties = ownerProps;
+    ownerObj.propertiesCount = ownerProps.length;
     return res.json(ownerObj);
   }
 
@@ -3069,6 +3392,23 @@ router.get(['/owners/:id', '/admin/homestay-owners/:id'], authenticateToken, asy
 
     const ownerObj = owner.toObject();
     ownerObj.passwordCopy = passwordCopyDecrypted;
+
+    // Load real properties from Property model
+    const properties = await Property.find({
+      ownerId: owner._id,
+      deleted: { $ne: true }
+    }).select('_id name propertyId type city state address status bookings').lean();
+
+    ownerObj.properties = properties.map(p => ({
+      _id: p._id,
+      propertyId: p.propertyId || p._id,
+      propertyName: p.name || 'Untitled Property',
+      type: p.type || 'Homestay',
+      location: [p.city, p.state].filter(Boolean).join(', ') || p.address || 'India',
+      status: p.status || 'Active',
+      bookings: p.bookings || 0
+    }));
+    ownerObj.propertiesCount = ownerObj.properties.length;
 
     res.json(ownerObj);
   } catch (error) {
@@ -4177,15 +4517,34 @@ router.delete('/homestays-list/:id', async (req, res) => {
   const { id } = req.params;
 
   if (!isMongoConnected()) {
-    const idx = mockHomestaysDatabase.findIndex(h => h._id === id);
-    if (idx === -1) return res.status(404).json({ error: 'Homestay not found' });
-
-    const deleted = mockHomestaysDatabase.splice(idx, 1);
-    return res.json({ message: 'Homestay deleted from memory', deleted: deleted[0] });
+    let deleted = null;
+    const prop = mockPropertiesDatabase.find(p => String(p._id) === String(id));
+    if (prop) {
+      prop.deleted = true;
+      prop.status = 'Deleted';
+      prop.deletedAt = new Date();
+      deleted = prop;
+    }
+    const idx = mockHomestaysDatabase.findIndex(h => String(h._id) === String(id));
+    if (idx !== -1) {
+      const hDeleted = mockHomestaysDatabase.splice(idx, 1);
+      if (!deleted) deleted = hDeleted[0];
+    }
+    if (!deleted) return res.status(404).json({ error: 'Homestay not found' });
+    return res.json({ message: 'Homestay deleted successfully', deleted });
   }
 
   try {
-    const deleted = await Homestay.findByIdAndDelete(id);
+    let deleted = await Property.findByIdAndUpdate(id, {
+      deleted: true,
+      status: 'Deleted',
+      deletedAt: new Date()
+    }, { new: true });
+
+    if (!deleted) {
+      deleted = await Homestay.findByIdAndDelete(id);
+    }
+
     if (!deleted) return res.status(404).json({ error: 'Homestay not found' });
     res.json({ message: 'Homestay deleted successfully', deleted });
   } catch (error) {
@@ -11026,7 +11385,7 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
       }
 
       if (step === 1) {
-        const { name, type, category, ownerName, phone, email, website, gstNumber, state, city, address, googleMap, latitude, longitude, description } = data;
+        const { name, type, category, ownerId, ownerName, phone, email, website, gstNumber, state, city, address, googleMap, latitude, longitude, description } = data;
         if (!name || name.trim().length < 5 || name.trim().length > 150) {
           return res.status(400).json({ error: 'ValidationError', message: 'Property Name must be between 5 and 150 characters.' });
         }
@@ -11037,12 +11396,21 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
           return res.status(400).json({ error: 'ValidationError', message: 'Description must be between 100 and 5000 characters.' });
         }
 
-        const nameExists = mockPropertiesDatabase.some(p => p.ownerId === req.user._id && p.name.toLowerCase() === name.trim().toLowerCase() && p._id !== propertyId && !p.deleted);
+        const effectiveOwnerId = (isSuperAdmin && ownerId) ? ownerId : (prop.ownerId || req.user._id);
+        const nameExists = mockPropertiesDatabase.some(p => String(p.ownerId) === String(effectiveOwnerId) && p.name.toLowerCase() === name.trim().toLowerCase() && p._id !== propertyId && !p.deleted);
         if (nameExists) {
           return res.status(400).json({ error: 'DuplicateProperty', message: 'You have already registered a property with this name.' });
         }
 
         prevValue = JSON.stringify(prop);
+        if (isSuperAdmin && ownerId) {
+          prop.ownerId = ownerId;
+        } else if (isSuperAdmin && email) {
+          const matchedOwner = mockOwnersDatabase.find(o => o.email && o.email.toLowerCase() === email.trim().toLowerCase() && o.status !== 'Deleted');
+          if (matchedOwner) {
+            prop.ownerId = matchedOwner._id;
+          }
+        }
         prop.name = name.trim();
         prop.type = type;
         prop.category = category;
@@ -11315,7 +11683,7 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
     }
 
     if (step === 1) {
-      const { name, type, category, ownerName, phone, email, website, gstNumber, state, city, address, googleMap, latitude, longitude, description } = data;
+      const { name, type, category, ownerId, ownerName, phone, email, website, gstNumber, state, city, address, googleMap, latitude, longitude, description } = data;
       if (!name || name.trim().length < 5 || name.trim().length > 150) {
         return res.status(400).json({ error: 'ValidationError', message: 'Property Name must be between 5 and 150 characters.' });
       }
@@ -11326,12 +11694,23 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
         return res.status(400).json({ error: 'ValidationError', message: 'Description must be between 100 and 5000 characters.' });
       }
 
-      const nameExists = await Property.findOne({ ownerId: req.user._id, name: { $regex: new RegExp(`^${name.trim()}$`, 'i') }, _id: { $ne: propertyId }, deleted: false });
+      let targetOwnerId = prop.ownerId || req.user._id;
+      if (isSuperAdmin && ownerId) {
+        targetOwnerId = ownerId;
+      } else if (isSuperAdmin && email) {
+        const matchedOwner = await HomestayOwner.findOne({ email: new RegExp(`^${email.trim()}$`, 'i'), status: { $ne: 'Deleted' } });
+        if (matchedOwner) {
+          targetOwnerId = matchedOwner._id;
+        }
+      }
+
+      const nameExists = await Property.findOne({ ownerId: targetOwnerId, name: { $regex: new RegExp(`^${name.trim()}$`, 'i') }, _id: { $ne: propertyId }, deleted: false });
       if (nameExists) {
         return res.status(400).json({ error: 'DuplicateProperty', message: 'You have already registered a property with this name.' });
       }
 
       prevValue = JSON.stringify(prop);
+      prop.ownerId = targetOwnerId;
       prop.name = name.trim();
       prop.type = type;
       prop.category = category;
@@ -11803,16 +12182,23 @@ router.get('/homestay-owner/properties', authenticateToken, async (req, res) => 
 router.delete('/homestay-owner/properties/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
+    const isSuperAdmin = req.user.role === 'Super Admin';
     if (!isMongoConnected()) {
-      const prop = mockPropertiesDatabase.find(p => String(p._id) === String(id) && String(p.ownerId) === String(req.user._id));
+      const prop = mockPropertiesDatabase.find(p => String(p._id) === String(id) && (isSuperAdmin || String(p.ownerId) === String(req.user._id)));
       if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
       prop.deleted = true;
+      prop.status = 'Deleted';
+      prop.deletedAt = new Date();
       return res.json({ message: 'Property successfully deleted.' });
     }
 
-    const prop = await Property.findOne({ _id: id, ownerId: req.user._id });
+    const query = { _id: id };
+    if (!isSuperAdmin) query.ownerId = req.user._id;
+    const prop = await Property.findOne(query);
     if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
     prop.deleted = true;
+    prop.status = 'Deleted';
+    prop.deletedAt = new Date();
     await prop.save();
     res.json({ message: 'Property successfully deleted.' });
   } catch (err) {
@@ -17083,18 +17469,28 @@ router.post(['/admin/homestay-owners/:id/subscription/assign', '/api/admin/homes
       });
     }
 
+    const extraRoomsCount = Math.max(0, Number(req.body.extraRooms) || 0);
+    const extraRoomUnitPrice = plan.extraRoomPrice !== undefined ? Number(plan.extraRoomPrice) : 500;
+    const extraRoomTotalCost = extraRoomsCount * extraRoomUnitPrice;
+    const baseRooms = plan.maxRoomsPerHomestay || 5;
+    const totalAllowedRooms = baseRooms + extraRoomsCount;
+    const totalCost = (plan.offerPrice || 0) + extraRoomTotalCost;
+
     // Apply central limits and pricing from the plan
     owner.subscription.planId = plan._id;
     owner.subscription.planName = plan.name;
     owner.subscription.description = plan.description;
     owner.subscription.maxHomestays = plan.maxHomestays || 1;
-    owner.subscription.maxRoomsPerHomestay = plan.maxRoomsPerHomestay || 5;
+    owner.subscription.baseRooms = baseRooms;
+    owner.subscription.extraRooms = extraRoomsCount;
+    owner.subscription.maxRoomsPerHomestay = totalAllowedRooms;
     owner.subscription.mrp = plan.mrp || 0;
     owner.subscription.offerPrice = plan.offerPrice || 0;
+    owner.subscription.totalAmountPaid = totalCost;
     owner.subscription.validity = plan.validity || `${duration} Days`;
     owner.subscription.durationDays = duration;
-    owner.subscription.extraRoomPrice = plan.extraRoomPrice !== undefined ? plan.extraRoomPrice : 500;
-    owner.subscription.price = plan.offerPrice || 0;
+    owner.subscription.extraRoomPrice = extraRoomUnitPrice;
+    owner.subscription.price = totalCost;
     owner.subscription.billingCycle = plan.billingCycle || 'Yearly';
     owner.subscription.startDate = start;
     owner.subscription.expiresAt = expiresAt;
@@ -17105,20 +17501,71 @@ router.post(['/admin/homestay-owners/:id/subscription/assign', '/api/admin/homes
 
     await owner.save();
 
-    logActivity(req, 'ASSIGN_SUBSCRIPTION_PLAN', 'Homestay Management', `Assigned plan "${plan.name}" to owner ${owner.firstName} ${owner.lastName} (Homestays: ${plan.maxHomestays}, Rooms/Homestay: ${plan.maxRoomsPerHomestay}, Extra Room Add-on: ₹${plan.extraRoomPrice})`);
+    logActivity(req, 'ASSIGN_SUBSCRIPTION_PLAN', 'Homestay Management', `Assigned plan "${plan.name}" with ${extraRoomsCount} extra room(s) to owner ${owner.firstName} ${owner.lastName} (Homestays: ${plan.maxHomestays}, Rooms/Homestay: ${totalAllowedRooms}, Total: ₹${totalCost})`);
 
     // Create Notification for Homestay Owner
     await createOwnerNotification({
       ownerId: owner._id,
       title: 'Subscription Plan Updated',
-      message: `Your account subscription plan has been set to "${plan.name}". You can create up to ${plan.maxHomestays} homestay(s) with ${plan.maxRoomsPerHomestay} rooms each.`,
+      message: `Your account subscription plan has been set to "${plan.name}". You can create up to ${plan.maxHomestays} homestay(s) with ${totalAllowedRooms} rooms each (Base: ${baseRooms}, Extra: ${extraRoomsCount}).`,
       type: 'payment',
-      metadata: { planName: plan.name, expiresAt }
+      metadata: { planName: plan.name, extraRooms: extraRoomsCount, maxRoomsPerHomestay: totalAllowedRooms, expiresAt }
     });
 
     res.json({
       success: true,
-      message: `Successfully assigned "${plan.name}" to ${owner.firstName} ${owner.lastName}.`,
+      message: `Successfully assigned "${plan.name}" with ${extraRoomsCount} extra room(s) to ${owner.firstName} ${owner.lastName}.`,
+      subscription: owner.subscription
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// POST /api/admin/homestay-owners/:id/subscription/add-rooms (Add Extra Rooms to Existing Plan by Admin)
+router.post(['/admin/homestay-owners/:id/subscription/add-rooms', '/api/admin/homestay-owners/:id/subscription/add-rooms'], authenticateToken, async (req, res) => {
+  try {
+    const { additionalRooms, paymentMethod } = req.body;
+    const roomsToAdd = Math.max(1, Number(additionalRooms) || 1);
+
+    const owner = await HomestayOwner.findById(req.params.id);
+    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found.' });
+
+    if (!owner.subscription || owner.subscription.status !== 'Active') {
+      return res.status(400).json({ error: 'NoActivePlan', message: 'Owner does not have an active subscription plan.' });
+    }
+
+    const unitPrice = owner.subscription.extraRoomPrice !== undefined ? Number(owner.subscription.extraRoomPrice) : 500;
+    const totalCost = roomsToAdd * unitPrice;
+
+    owner.subscription.extraRooms = (owner.subscription.extraRooms || 0) + roomsToAdd;
+    owner.subscription.maxRoomsPerHomestay = (owner.subscription.maxRoomsPerHomestay || 5) + roomsToAdd;
+    owner.subscription.totalAmountPaid = (owner.subscription.totalAmountPaid || owner.subscription.price || 0) + totalCost;
+
+    if (!Array.isArray(owner.subscription.history)) owner.subscription.history = [];
+    owner.subscription.history.push({
+      planName: `Extra Room Add-on (+${roomsToAdd} Rooms)`,
+      price: totalCost,
+      purchasedAt: new Date(),
+      paymentMethod: paymentMethod || 'Admin Manual Addon',
+      additionalRooms: roomsToAdd
+    });
+
+    await owner.save();
+
+    logActivity(req, 'ADD_EXTRA_ROOMS', 'Homestay Management', `Super Admin added ${roomsToAdd} extra rooms for owner ${owner.firstName} ${owner.lastName} (New Total: ${owner.subscription.maxRoomsPerHomestay} rooms)`);
+
+    await createOwnerNotification({
+      ownerId: owner._id,
+      title: 'Extra Rooms Added by Admin',
+      message: `${roomsToAdd} extra room(s) have been added to your subscription. Your new room limit is ${owner.subscription.maxRoomsPerHomestay} rooms per homestay.`,
+      type: 'payment',
+      metadata: { additionalRooms: roomsToAdd, maxRoomsPerHomestay: owner.subscription.maxRoomsPerHomestay }
+    });
+
+    res.json({
+      success: true,
+      message: `Successfully added ${roomsToAdd} extra room(s). New room limit is ${owner.subscription.maxRoomsPerHomestay}.`,
       subscription: owner.subscription
     });
   } catch (err) {
@@ -17300,6 +17747,61 @@ router.post(['/homestay-owner/subscription/purchase', '/api/homestay-owner/subsc
     });
   } catch (err) {
     console.error('Error purchasing subscription:', err);
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// POST /api/homestay-owner/subscription/addon-rooms (Homestay Owner Purchases Extra Rooms)
+router.post(['/homestay-owner/subscription/addon-rooms', '/api/homestay-owner/subscription/addon-rooms'], authenticateToken, async (req, res) => {
+  try {
+    const ownerId = req.user.ownerId || req.user._id || req.user.id;
+    const { additionalRooms, paymentMethod = 'UPI', transactionId = '' } = req.body;
+    const roomsToAdd = Math.max(1, Number(additionalRooms) || 1);
+
+    const owner = await HomestayOwner.findById(ownerId);
+    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found.' });
+
+    if (!owner.subscription || owner.subscription.status !== 'Active') {
+      return res.status(400).json({ error: 'NoActivePlan', message: 'You do not have an active subscription plan to add extra rooms to.' });
+    }
+
+    const unitPrice = owner.subscription.extraRoomPrice !== undefined ? Number(owner.subscription.extraRoomPrice) : 500;
+    const totalCost = roomsToAdd * unitPrice;
+    const txId = transactionId || `ROOM-ADDON-${Date.now().toString().slice(-6)}`;
+
+    owner.subscription.extraRooms = (owner.subscription.extraRooms || 0) + roomsToAdd;
+    owner.subscription.maxRoomsPerHomestay = (owner.subscription.maxRoomsPerHomestay || 5) + roomsToAdd;
+    owner.subscription.totalAmountPaid = (owner.subscription.totalAmountPaid || owner.subscription.price || 0) + totalCost;
+
+    if (!Array.isArray(owner.subscription.history)) owner.subscription.history = [];
+    owner.subscription.history.push({
+      planName: `Extra Room Add-on (+${roomsToAdd} Rooms)`,
+      price: totalCost,
+      purchasedAt: new Date(),
+      paymentMethod,
+      transactionId: txId,
+      additionalRooms: roomsToAdd
+    });
+
+    await owner.save();
+
+    logActivity(req, 'PURCHASE_EXTRA_ROOMS', 'Subscription', `Owner ${owner.firstName} ${owner.lastName} purchased ${roomsToAdd} extra rooms for ₹${totalCost}`);
+
+    await createOwnerNotification({
+      ownerId: owner._id,
+      title: 'Extra Rooms Purchased Successfully',
+      message: `You have successfully added ${roomsToAdd} extra room(s) to your account. Your new limit is ${owner.subscription.maxRoomsPerHomestay} rooms per homestay.`,
+      type: 'payment',
+      metadata: { additionalRooms: roomsToAdd, maxRoomsPerHomestay: owner.subscription.maxRoomsPerHomestay }
+    });
+
+    res.json({
+      success: true,
+      message: `Payment successful! Added ${roomsToAdd} extra room(s). Your new limit is ${owner.subscription.maxRoomsPerHomestay} rooms per homestay.`,
+      subscription: owner.subscription
+    });
+  } catch (err) {
+    console.error('Error adding extra rooms:', err);
     res.status(500).json({ error: 'ServerError', message: err.message });
   }
 });

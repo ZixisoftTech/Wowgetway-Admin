@@ -1,5 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import axios from 'axios';
+import Swal from 'sweetalert2';
+import HomestayBusinessDetailsModal from '../components/HomestayBusinessDetailsModal.jsx';
 import { 
   ArrowLeft, 
   Edit2, 
@@ -20,7 +25,10 @@ import {
   X,
   Copy,
   Check,
-  LogIn
+  LogIn,
+  Trash2,
+  Stamp,
+  Home
 } from 'lucide-react';
 
 const getImageUrl = (url) => {
@@ -34,10 +42,70 @@ const getImageUrl = (url) => {
 };
 
 export default function HomestayOwnerDetails({ ownerId, onBack, onEdit, ownerDetails, loading, onImpersonate }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const queryClient = useQueryClient();
   const [showPassword, setShowPassword] = useState(false);
   const [showEncryptedCopy, setShowEncryptedCopy] = useState(false);
   const [copiedField, setCopiedField] = useState('');
   const [previewDoc, setPreviewDoc] = useState(null);
+  const [businessDetailsModalHomestay, setBusinessDetailsModalHomestay] = useState(null);
+
+  useEffect(() => {
+    if (location.hash === '#linked-properties') {
+      const el = document.getElementById('linked-properties');
+      if (el) {
+        setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 100);
+      }
+    }
+  }, [location.hash, ownerDetails]);
+
+  const handleDeleteProperty = async (prop) => {
+    const result = await Swal.fire({
+      title: 'Delete Homestay Property?',
+      text: `Are you sure you want to delete "${prop.propertyName}"? This will remove the property and update the owner's linked homestay count.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#dc2626',
+      cancelButtonColor: '#94a3b8',
+      confirmButtonText: 'Yes, delete',
+      cancelButtonText: 'Cancel'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        const token = localStorage.getItem('superAdminToken') || localStorage.getItem('token');
+        const base = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+          ? (import.meta.env.VITE_API_URL || 'http://localhost:5005') 
+          : 'https://backend-sand-nine-13.vercel.app';
+        
+        await axios.delete(`${base}/api/dashboard/homestays-list/${prop._id}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+
+        queryClient.invalidateQueries(['ownerDetails', ownerId]);
+        queryClient.invalidateQueries(['ownersList']);
+        queryClient.invalidateQueries(['ownersStats']);
+        queryClient.invalidateQueries(['homestaysList']);
+        queryClient.invalidateQueries(['homestaysStats']);
+
+        Swal.fire({
+          title: 'Deleted!',
+          text: `Property "${prop.propertyName}" was deleted successfully.`,
+          icon: 'success',
+          confirmButtonColor: '#2563eb'
+        });
+      } catch (err) {
+        console.error('Failed to delete property:', err);
+        Swal.fire({
+          title: 'Deletion Failed',
+          text: err.response?.data?.message || err.message || 'Could not delete property.',
+          icon: 'error',
+          confirmButtonColor: '#dc2626'
+        });
+      }
+    }
+  };
 
   const handleCopy = (text, fieldName) => {
     if (!text) return;
@@ -538,47 +606,135 @@ export default function HomestayOwnerDetails({ ownerId, onBack, onEdit, ownerDet
         </div>
 
         {/* Box 5: Linked Homestay Properties Table */}
-        <div className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4 lg:col-span-2">
-          <div className="flex justify-between items-center border-b border-slate-50 pb-3">
-            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest text-indigo-650 flex items-center gap-2">
-              <Building size={13} className="text-indigo-500" />
-              <span>Linked homestay properties ({ownerDetails.properties?.length || 0})</span>
-            </h3>
+        <div id="linked-properties" className="bg-white border border-slate-100 p-6 rounded-2xl shadow-sm space-y-4 lg:col-span-2 scroll-mt-20">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-3">
+            <div>
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest text-indigo-650 flex items-center gap-2">
+                <Building size={14} className="text-indigo-600" />
+                <span>Linked Homestay Properties ({ownerDetails.properties?.length || 0})</span>
+              </h3>
+              <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                Manage, edit, or configure properties linked to this homestay owner
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigate(`/homestays?ownerName=${encodeURIComponent(`${ownerDetails.firstName} ${ownerDetails.lastName}`.trim())}`)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold rounded-xl transition-all cursor-pointer border border-slate-200/80"
+                title="View in Manage Homestays"
+              >
+                <Home size={12} className="text-slate-500" />
+                <span>Manage in Homestays</span>
+                <ExternalLink size={11} className="text-slate-400" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate(`/homestays?add=true&ownerId=${ownerDetails._id}&ownerName=${encodeURIComponent(`${ownerDetails.firstName} ${ownerDetails.lastName}`.trim())}`)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold rounded-xl transition-all cursor-pointer shadow-sm shadow-blue-100"
+                title="Create a new homestay property for this owner"
+              >
+                <Plus size={12} />
+                <span>Add Homestay</span>
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-slate-100">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                  <th className="py-3 px-5">Property Name</th>
+                  <th className="py-3 px-5">Property Name & ID</th>
                   <th className="py-3 px-5">Location</th>
                   <th className="py-3 px-5 text-center">Status</th>
-                  <th className="py-3 px-5 text-right">Bookings Logged</th>
+                  <th className="py-3 px-5 text-center">Bookings Logged</th>
+                  <th className="py-3 px-5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50 text-xs font-semibold text-slate-700">
                 {!ownerDetails.properties || ownerDetails.properties.length === 0 ? (
                   <tr>
-                    <td colSpan="4" className="py-8 text-center text-slate-400 font-medium">
+                    <td colSpan="5" className="py-8 text-center text-slate-400 font-medium">
                       No linked homestay properties for this owner.
                     </td>
                   </tr>
                 ) : (
                   ownerDetails.properties.map((prop, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/30 transition-colors">
-                      <td className="py-3.5 px-5 font-bold text-slate-850 flex items-center gap-2">
-                        <Building size={13} className="text-slate-400" />
-                        <span>{prop.propertyName}</span>
+                    <tr key={prop._id || idx} className="hover:bg-slate-50/40 transition-colors">
+                      <td className="py-3.5 px-5">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-bold text-slate-400 font-mono">
+                            {prop.propertyId || prop._id}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/homestays?view=${prop._id}`)}
+                            className="font-bold text-slate-850 hover:text-blue-600 text-left flex items-center gap-1.5 transition-colors cursor-pointer group"
+                            title="View property details in Manage Homestays"
+                          >
+                            <Building size={13} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
+                            <span className="underline-offset-2 group-hover:underline">{prop.propertyName}</span>
+                          </button>
+                        </div>
                       </td>
-                      <td className="py-3.5 px-5 text-slate-500 font-medium">{prop.location}</td>
+                      <td className="py-3.5 px-5 text-slate-500 font-medium">
+                        <div className="flex items-center gap-1">
+                          <MapPin size={11} className="text-slate-400 flex-shrink-0" />
+                          <span>{prop.location || 'N/A'}</span>
+                        </div>
+                      </td>
                       <td className="py-3.5 px-5 text-center">
                         <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold tracking-wide ${
-                          prop.status === 'Active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                          prop.status === 'Active' || prop.status === 'Approved'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                            : prop.status === 'Submitted For Review' || prop.status === 'Pending Approval'
+                            ? 'bg-blue-50 text-blue-700 border border-blue-100'
+                            : 'bg-slate-100 text-slate-500 border border-slate-200'
                         }`}>
                           {prop.status}
                         </span>
                       </td>
-                      <td className="py-3.5 px-5 text-right font-mono text-slate-800">{prop.bookings || 0}</td>
+                      <td className="py-3.5 px-5 text-center font-mono text-slate-800">
+                        {prop.bookings || 0}
+                      </td>
+                      <td className="py-3.5 px-5 text-right">
+                        <div className="flex justify-end items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/homestays?view=${prop._id}`)}
+                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            title="View property details"
+                          >
+                            <Eye size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/homestays?edit=${prop._id}`)}
+                            className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                            title="Edit property"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBusinessDetailsModalHomestay({ id: prop._id, name: prop.propertyName })}
+                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="Configure Stamp & Signature"
+                          >
+                            <Stamp size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteProperty(prop)}
+                            className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="Delete property"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -632,6 +788,18 @@ export default function HomestayOwnerDetails({ ownerId, onBack, onEdit, ownerDet
             </div>
           </div>
         </div>
+      )}
+      {/* Business Details / Stamp Modal */}
+      {businessDetailsModalHomestay && (
+        <HomestayBusinessDetailsModal
+          isOpen={!!businessDetailsModalHomestay}
+          homestayId={businessDetailsModalHomestay.id}
+          homestayName={businessDetailsModalHomestay.name}
+          onClose={() => setBusinessDetailsModalHomestay(null)}
+          onSuccess={() => {
+            queryClient.invalidateQueries(['ownerDetails', ownerId]);
+          }}
+        />
       )}
     </div>
   );

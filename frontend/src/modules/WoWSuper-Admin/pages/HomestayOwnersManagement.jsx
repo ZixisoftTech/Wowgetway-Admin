@@ -462,9 +462,20 @@ export default function HomestayOwnersManagement() {
                           <td className="py-4 px-6 text-slate-600">{owner.mobile}</td>
                           <td className="py-4 px-6 text-slate-500 font-medium">{owner.email}</td>
                           <td className="py-4 px-6 text-center">
-                            <span className="bg-slate-100 text-slate-650 px-2.5 py-1 rounded-md text-[10px] font-bold">
-                              {owner.properties?.length || 0} Homestays
-                            </span>
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/homestay-owners/${owner._id}#linked-properties`)}
+                              className={`group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition-all hover:scale-105 active:scale-95 shadow-sm ${
+                                (owner.propertiesCount ?? owner.properties?.length ?? 0) > 0
+                                  ? 'bg-blue-50 hover:bg-blue-100 text-blue-750 border border-blue-200/80 font-black'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-500 border border-slate-200'
+                              }`}
+                              title="Click to view linked homestays on detail page"
+                            >
+                              <Building size={11} className={(owner.propertiesCount ?? owner.properties?.length ?? 0) > 0 ? 'text-blue-600' : 'text-slate-400'} />
+                              <span>{owner.propertiesCount ?? owner.properties?.length ?? 0} Homestays</span>
+                              <ChevronRight size={10} className="text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                            </button>
                           </td>
                           <td className="py-4 px-6 text-center">
                             {owner.subscription?.status === 'Active' ? (

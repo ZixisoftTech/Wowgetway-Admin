@@ -60,31 +60,44 @@ app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Ensure database connection is active (needed for Serverless restarts/standbys)
+// Ensure database connection is active with cached promise (prevents Serverless cold-start race conditions)
+let cachedDbPromise = null;
+
+const connectToDatabase = async () => {
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
+  if (!cachedDbPromise) {
+    console.log('[Database Middleware] Establishing connection to MongoDB...');
+    cachedDbPromise = mongoose.connect(MONGO_URI, {
+      serverSelectionTimeoutMS: 15000,
+      bufferCommands: false,
+      maxPoolSize: 10,
+    }).then((m) => {
+      console.log('[Database Middleware] Connection established successfully!');
+      return m;
+    }).catch((err) => {
+      console.error('[Database Middleware] Connection error:', err.message);
+      cachedDbPromise = null;
+      throw err;
+    });
+  }
+  return cachedDbPromise;
+};
+
 app.use(async (req, res, next) => {
   if (req.path === '/health') return next();
 
-  if (mongoose.connection.readyState !== 1) {
-    try {
-      console.log('[Database Middleware] Connecting/Reconnecting to MongoDB Atlas...');
-      await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 });
-      console.log('[Database Middleware] Connection established successfully!');
-    } catch (err) {
-      console.error('[Database Middleware] Connection failed:', err.message);
-      return res.status(503).json({
-        error: 'DatabaseConnectionError',
-        message: 'Could not establish connection to live MongoDB Atlas. Please try again.'
-      });
-    }
-  }
-
-  if (mongoose.connection.readyState !== 1) {
+  try {
+    await connectToDatabase();
+    next();
+  } catch (err) {
+    console.error('[Database Middleware] Connection failed:', err.message);
     return res.status(503).json({
       error: 'DatabaseConnectionError',
-      message: 'Database connection is currently unavailable.'
+      message: 'Could not establish connection to live MongoDB. Please try again.'
     });
   }
-  next();
 });
 
 // Log incoming requests

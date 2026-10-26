@@ -82,13 +82,21 @@ axios.interceptors.response.use(
         const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         const base = isLocal ? (import.meta.env.VITE_API_URL || 'http://localhost:5005') : 'https://backend-sand-nine-13.vercel.app';
         console.log('[Auth Interceptor] Access token expired. Attempting token refresh...');
-        const res = await axios.post(`${base}/api/auth/refresh`);
-        const { token } = res.data;
+        const storedRefreshToken = localStorage.getItem('superAdminRefreshToken') || localStorage.getItem('refreshToken');
+        const res = await axios.post(`${base}/api/auth/refresh`, { refreshToken: storedRefreshToken }, {
+          headers: storedRefreshToken ? { 'x-refresh-token': storedRefreshToken } : {}
+        });
+        const { token, refreshToken: newRefreshToken } = res.data;
 
         // Retrieve user and dispatch update to Redux
         const userStr = localStorage.getItem('superAdminUser');
         const user = userStr ? JSON.parse(userStr) : null;
         store.dispatch(authSuccess({ token, user }));
+        localStorage.setItem('superAdminToken', token);
+        localStorage.setItem('token', token);
+        if (newRefreshToken) {
+          localStorage.setItem('superAdminRefreshToken', newRefreshToken);
+        }
 
         // Update default header and original request header
         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -102,9 +110,16 @@ axios.interceptors.response.use(
         processQueue(refreshError, null);
         isRefreshing = false;
         
-        // Log out user on refresh token failure
-        console.warn('[Auth Interceptor] Refresh token expired or invalid. Logging out...');
+        // Log out user on refresh token failure and redirect to login
+        console.warn('[Auth Interceptor] Refresh token expired or invalid. Logging out and redirecting to login...');
         store.dispatch(logout());
+        localStorage.removeItem('superAdminToken');
+        localStorage.removeItem('token');
+        localStorage.removeItem('superAdminRefreshToken');
+        localStorage.removeItem('superAdminUser');
+        if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
         return Promise.reject(refreshError);
       }
     }

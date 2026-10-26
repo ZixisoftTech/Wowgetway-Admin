@@ -133,12 +133,17 @@ export default function Login() {
 
     try {
       const res = await axios.post(`${API_AUTH_URL}/login`, { email, password });
-      const { token, user } = res.data;
+      const { token, refreshToken, user } = res.data;
       
       // Store token in axios default headers for all subsequent requests
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      localStorage.setItem('superAdminToken', token);
+      localStorage.setItem('token', token);
+      if (refreshToken) {
+        localStorage.setItem('superAdminRefreshToken', refreshToken);
+      }
       
-      dispatch(authSuccess({ token, user }));
+      dispatch(authSuccess({ token, refreshToken, user }));
     } catch (err) {
       console.error('[Login] Auth Error:', err);
       const errMsg = err.response?.data?.error || err.message || 'Authentication failed. Please verify credentials.';

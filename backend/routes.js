@@ -8100,20 +8100,21 @@ const handleAdminLogin = async (req, res) => {
       admin.lastLogin = new Date();
 
       const payload = { _id: admin._id, email: admin.email, fullName: admin.fullName, role: admin.role };
-      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
-      const refreshToken = jwt.sign({ _id: admin._id, email: admin.email }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
+      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+      const refreshToken = jwt.sign({ _id: admin._id, email: admin.email }, JWT_REFRESH_SECRET, { expiresIn: '30d' });
 
       res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000
+        secure: true,
+        sameSite: 'none',
+        maxAge: 30 * 24 * 60 * 60 * 1000
       });
 
       logActivity(req, 'LOGIN_SUCCESS', 'Super Admin Auth', `Admin logged in (Memory): \${emailLower}`);
 
       return res.json({
         token: accessToken,
+        refreshToken,
         user: { email: admin.email, fullName: admin.fullName, name: admin.name, role: admin.role, lastLogin: admin.lastLogin }
       });
     } else {
@@ -8206,20 +8207,21 @@ const handleAdminLogin = async (req, res) => {
       await admin.save();
 
       const payload = { _id: admin._id, email: admin.email, fullName: admin.fullName, role: admin.role };
-      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
-      const refreshToken = jwt.sign({ _id: admin._id, email: admin.email }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
+      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+      const refreshToken = jwt.sign({ _id: admin._id, email: admin.email }, JWT_REFRESH_SECRET, { expiresIn: '30d' });
 
       res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000
+        secure: true,
+        sameSite: 'none',
+        maxAge: 30 * 24 * 60 * 60 * 1000
       });
 
       logActivity(req, 'LOGIN_SUCCESS', 'Super Admin Auth', `Admin logged in: \${emailLower}`);
 
       return res.json({
         token: accessToken,
+        refreshToken,
         user: { email: admin.email, fullName: admin.fullName, name: admin.name, role: admin.role, lastLogin: admin.lastLogin }
       });
     } else {
@@ -8470,7 +8472,7 @@ router.post('/auth/reset-password', handleAdminResetPassword);
 
 // POST /api/admin/auth/refresh-token
 const handleAdminRefreshToken = async (req, res) => {
-  const refreshToken = req.cookies.refreshToken;
+  const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken || req.headers['x-refresh-token'];
   if (!refreshToken) {
     return res.status(401).json({ error: 'Refresh token is required.' });
   }
@@ -8509,9 +8511,17 @@ const handleAdminRefreshToken = async (req, res) => {
     }
 
     const payload = { _id: user._id, email: user.email, fullName, role };
-    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
+    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+    const newRefreshToken = jwt.sign({ _id: user._id, email: user.email }, JWT_REFRESH_SECRET, { expiresIn: '30d' });
 
-    return res.json({ token: accessToken });
+    res.cookie('refreshToken', newRefreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      maxAge: 30 * 24 * 60 * 60 * 1000
+    });
+
+    return res.json({ token: accessToken, refreshToken: newRefreshToken });
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired refresh token.' });
   }

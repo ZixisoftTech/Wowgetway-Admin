@@ -33,6 +33,10 @@ const superAdminAuthSlice = createSlice({
       const tok = action.payload.token || 'mock-token';
       const usr = action.payload.user || action.payload;
       localStorage.setItem('superAdminToken', tok);
+      localStorage.setItem('token', tok);
+      if (action.payload.refreshToken) {
+        localStorage.setItem('superAdminRefreshToken', action.payload.refreshToken);
+      }
       localStorage.setItem('superAdminUser', JSON.stringify(usr));
     },
     authFailure(state, action) {
@@ -43,6 +47,8 @@ const superAdminAuthSlice = createSlice({
       state.isAuthenticated = false;
       state.user = null;
       localStorage.removeItem('superAdminToken');
+      localStorage.removeItem('token');
+      localStorage.removeItem('superAdminRefreshToken');
       localStorage.removeItem('superAdminUser');
     },
     clearError(state) {

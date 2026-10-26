@@ -1850,14 +1850,16 @@ router.get(['/superadmin', '/super-admin-overview'], async (req, res) => {
   try {
     const { period, range } = req.query; // e.g. "September 2026", "October 2026", "All Time"
 
-    // 1. Homestays & Hotels real count
-    const propertyCount = await Property.countDocuments({ status: { $ne: 'Deleted' } });
-    const homestayCount = await Homestay.countDocuments({ status: { $ne: 'Deleted' } });
-    // In this platform, properties is the primary collection for assigned homestays
-    const totalHomestays = propertyCount > 0 ? propertyCount : homestayCount;
+    // Execute queries in parallel for high speed
+    const [propertyCount, homestayCount, allOwners, properties, bookings] = await Promise.all([
+      Property.countDocuments({ status: { $ne: 'Deleted' } }),
+      Homestay.countDocuments({ status: { $ne: 'Deleted' } }),
+      HomestayOwner.find({ deletedAt: null }).lean(),
+      Property.find({ status: { $ne: 'Deleted' } }).select('name propertyName title bookings ownerId ownerName').lean(),
+      Booking.find({}).select('propertyDetails.propertyName propertyDetails.propertyId propertyName propertyId bookings').lean()
+    ]);
 
-    // 2. Owners & Real Subscriptions Status
-    const allOwners = await HomestayOwner.find({ deletedAt: null }).lean();
+    const totalHomestays = propertyCount > 0 ? propertyCount : homestayCount;
     const totalOwners = allOwners.length;
 
     const now = new Date();
@@ -2022,9 +2024,6 @@ router.get(['/superadmin', '/super-admin-overview'], async (req, res) => {
     };
 
     // 5. Best Performing Homestays / Hotels from real Properties & Bookings
-    const properties = await Property.find({ status: { $ne: 'Deleted' } }).lean();
-    const bookings = await Booking.find({}).lean();
-
     const bookingCountByPropName = {};
     const bookingCountByPropId = {};
 
@@ -3185,6 +3184,137 @@ router.get(['/owners/stats', '/admin/homestay-owners/stats'], authenticateToken,
   }
 });
 
+// Helper function to resolve and link homestays/properties across Property model, Homestay model, and embedded arrays
+async function enrichOwnersWithProperties(owners) {
+  if (!owners || !owners.length) return [];
+
+  const ownerObjectIds = [];
+  const ownerIdStrings = [];
+  const mobiles = [];
+  const names = [];
+
+  for (const o of owners) {
+    if (o._id) {
+      ownerObjectIds.push(o._id);
+      ownerIdStrings.push(String(o._id));
+    }
+    if (o.mobile) mobiles.push(o.mobile);
+    if (o.whatsApp && o.whatsApp !== o.mobile) mobiles.push(o.whatsApp);
+    const fullName = `${o.firstName || ''} ${o.lastName || ''}`.trim();
+    if (fullName) names.push(fullName);
+  }
+
+  const propertyQuery = {
+    deleted: { $ne: true },
+    $or: [
+      { ownerId: { $in: [...ownerObjectIds, ...ownerIdStrings] } },
+      ...(mobiles.length ? [{ ownerMobile: { $in: mobiles } }] : []),
+      ...(names.length ? [{ ownerName: { $in: names } }] : [])
+    ]
+  };
+
+  const homestayQuery = {
+    $or: [
+      ...(mobiles.length ? [{ ownerMobile: { $in: mobiles } }] : []),
+      ...(names.length ? [{ ownerName: { $in: names } }] : [])
+    ]
+  };
+
+  const [propList, homestayList] = await Promise.all([
+    Property.find(propertyQuery).select('_id name propertyId type city state address status bookings ownerId ownerMobile ownerName').lean(),
+    Homestay.find(homestayQuery).select('_id name type city region address status bookings ownerName ownerMobile').lean()
+  ]);
+
+  const ownerPropsMap = new Map();
+  for (const o of owners) {
+    ownerPropsMap.set(String(o._id), []);
+  }
+
+  const addPropToOwner = (oIdStr, item) => {
+    if (!oIdStr || !ownerPropsMap.has(oIdStr)) return;
+    const arr = ownerPropsMap.get(oIdStr);
+    const itemIdStr = String(item._id);
+    const itemName = (item.propertyName || item.name || '').trim().toLowerCase();
+    const exists = arr.some(existing => 
+      String(existing._id) === itemIdStr || 
+      (existing.propertyName && existing.propertyName.trim().toLowerCase() === itemName)
+    );
+    if (!exists) {
+      arr.push(item);
+    }
+  };
+
+  const findOwnerIdForProperty = (p) => {
+    if (p.ownerId && ownerPropsMap.has(String(p.ownerId))) {
+      return String(p.ownerId);
+    }
+    for (const o of owners) {
+      const oIdStr = String(o._id);
+      if (p.ownerMobile && (p.ownerMobile === o.mobile || p.ownerMobile === o.whatsApp)) {
+        return oIdStr;
+      }
+      const fullName = `${o.firstName || ''} ${o.lastName || ''}`.trim().toLowerCase();
+      if (p.ownerName && p.ownerName.trim().toLowerCase() === fullName) {
+        return oIdStr;
+      }
+    }
+    return null;
+  };
+
+  for (const p of propList) {
+    const oIdStr = findOwnerIdForProperty(p);
+    if (oIdStr) {
+      addPropToOwner(oIdStr, {
+        _id: p._id,
+        propertyId: p.propertyId || p._id,
+        propertyName: p.name || 'Untitled Property',
+        type: p.type || 'Homestay',
+        location: [p.city, p.state].filter(Boolean).join(', ') || p.address || 'India',
+        status: p.status || 'Active',
+        bookings: p.bookings || 0
+      });
+    }
+  }
+
+  for (const h of homestayList) {
+    const oIdStr = findOwnerIdForProperty(h);
+    if (oIdStr) {
+      addPropToOwner(oIdStr, {
+        _id: h._id,
+        propertyId: h._id,
+        propertyName: h.name || 'Untitled Homestay',
+        type: h.type || 'Homestay',
+        location: [h.city, h.region].filter(Boolean).join(', ') || h.address || 'India',
+        status: h.status || 'Active',
+        bookings: h.bookings || 0
+      });
+    }
+  }
+
+  return owners.map(ownerDoc => {
+    const ownerObj = ownerDoc.toObject ? ownerDoc.toObject() : { ...ownerDoc };
+    const oIdStr = String(ownerObj._id);
+    const resolvedProps = ownerPropsMap.get(oIdStr) || [];
+    
+    // If external collections had no matching items, fallback to embedded properties
+    if (resolvedProps.length === 0 && Array.isArray(ownerObj.properties) && ownerObj.properties.length > 0) {
+      ownerObj.properties = ownerObj.properties.map(emb => ({
+        _id: emb._id || emb.propertyId || oIdStr,
+        propertyId: emb.propertyId || emb._id || oIdStr,
+        propertyName: emb.propertyName || emb.name || 'Homestay',
+        type: emb.type || 'Homestay',
+        location: emb.location || [emb.city, emb.state].filter(Boolean).join(', ') || 'India',
+        status: emb.status || 'Active',
+        bookings: emb.bookings || 0
+      }));
+    } else {
+      ownerObj.properties = resolvedProps;
+    }
+    ownerObj.propertiesCount = ownerObj.properties.length;
+    return ownerObj;
+  });
+}
+
 // GET /api/dashboard/owners (Server-Side table + pagination, filtering, search)
 router.get(['/owners', '/admin/homestay-owners'], authenticateToken, async (req, res) => {
   const { search, status, page, limit, all } = req.query;
@@ -3252,37 +3382,12 @@ router.get(['/owners', '/admin/homestay-owners'], authenticateToken, async (req,
           { mobile: searchRegex }
         ];
       }
-      const list = await HomestayOwner.find(query).sort({ createdAt: -1 });
-      const ownerIds = list.map(o => o._id);
+      const list = await HomestayOwner.find(query)
+        .select('-aadharFront -aadharBack -panFront -tradeLicenseDoc -password -encryptedPasswordCopy')
+        .sort({ createdAt: -1 })
+        .lean();
 
-      const properties = await Property.find({
-        ownerId: { $in: ownerIds },
-        deleted: { $ne: true }
-      }).select('_id name propertyId type city state address status bookings ownerId').lean();
-
-      const propMap = new Map();
-      for (const p of properties) {
-        const oId = String(p.ownerId);
-        if (!propMap.has(oId)) propMap.set(oId, []);
-        propMap.get(oId).push({
-          _id: p._id,
-          propertyId: p.propertyId || p._id,
-          propertyName: p.name || 'Untitled Property',
-          type: p.type || 'Homestay',
-          location: [p.city, p.state].filter(Boolean).join(', ') || p.address || 'India',
-          status: p.status || 'Active',
-          bookings: p.bookings || 0
-        });
-      }
-
-      const enrichedList = list.map(ownerDoc => {
-        const ownerObj = ownerDoc.toObject ? ownerDoc.toObject() : { ...ownerDoc };
-        const ownerProps = propMap.get(String(ownerObj._id)) || [];
-        ownerObj.properties = ownerProps;
-        ownerObj.propertiesCount = ownerProps.length;
-        return ownerObj;
-      });
-
+      const enrichedList = await enrichOwnersWithProperties(list);
       return res.json(enrichedList);
     } catch (err) {
       return res.status(500).json({ error: 'Failed to fetch owners list', message: err.message });
@@ -3311,41 +3416,17 @@ router.get(['/owners', '/admin/homestay-owners'], authenticateToken, async (req,
       ];
     }
 
-    const totalRecords = await HomestayOwner.countDocuments(query);
-    const data = await HomestayOwner.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limitNum);
+    const [totalRecords, data] = await Promise.all([
+      HomestayOwner.countDocuments(query),
+      HomestayOwner.find(query)
+        .select('-aadharFront -aadharBack -panFront -tradeLicenseDoc -password -encryptedPasswordCopy')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean()
+    ]);
 
-    const ownerIds = data.map(o => o._id);
-    const properties = await Property.find({
-      ownerId: { $in: ownerIds },
-      deleted: { $ne: true }
-    }).select('_id name propertyId type city state address status bookings ownerId').lean();
-
-    const propMap = new Map();
-    for (const p of properties) {
-      const oId = String(p.ownerId);
-      if (!propMap.has(oId)) propMap.set(oId, []);
-      propMap.get(oId).push({
-        _id: p._id,
-        propertyId: p.propertyId || p._id,
-        propertyName: p.name || 'Untitled Property',
-        type: p.type || 'Homestay',
-        location: [p.city, p.state].filter(Boolean).join(', ') || p.address || 'India',
-        status: p.status || 'Active',
-        bookings: p.bookings || 0
-      });
-    }
-
-    const enrichedData = data.map(ownerDoc => {
-      const ownerObj = ownerDoc.toObject ? ownerDoc.toObject() : { ...ownerDoc };
-      const ownerProps = propMap.get(String(ownerObj._id)) || [];
-      ownerObj.properties = ownerProps;
-      ownerObj.propertiesCount = ownerProps.length;
-      return ownerObj;
-    });
-
+    const enrichedData = await enrichOwnersWithProperties(data);
     res.json({ data: enrichedData, totalRecords });
   } catch (error) {
     console.error('Error fetching homestay owners:', error.message);
@@ -3390,27 +3471,10 @@ router.get(['/owners/:id', '/admin/homestay-owners/:id'], authenticateToken, asy
       passwordCopyDecrypted = decrypt(owner.encryptedPasswordCopy);
     }
 
-    const ownerObj = owner.toObject();
-    ownerObj.passwordCopy = passwordCopyDecrypted;
+    const [enrichedOwner] = await enrichOwnersWithProperties([owner]);
+    enrichedOwner.passwordCopy = passwordCopyDecrypted;
 
-    // Load real properties from Property model
-    const properties = await Property.find({
-      ownerId: owner._id,
-      deleted: { $ne: true }
-    }).select('_id name propertyId type city state address status bookings').lean();
-
-    ownerObj.properties = properties.map(p => ({
-      _id: p._id,
-      propertyId: p.propertyId || p._id,
-      propertyName: p.name || 'Untitled Property',
-      type: p.type || 'Homestay',
-      location: [p.city, p.state].filter(Boolean).join(', ') || p.address || 'India',
-      status: p.status || 'Active',
-      bookings: p.bookings || 0
-    }));
-    ownerObj.propertiesCount = ownerObj.properties.length;
-
-    res.json(ownerObj);
+    res.json(enrichedOwner);
   } catch (error) {
     console.error('Error fetching homestay owner details:', error.message);
     res.status(500).json({ error: 'Failed to fetch homestay owner details', message: error.message });

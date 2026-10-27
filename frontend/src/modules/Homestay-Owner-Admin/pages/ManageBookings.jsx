@@ -817,9 +817,9 @@ export default function ManageBookings() {
                       {/* 1. Booking ID */}
                       <td className="py-4 px-3 align-middle">
                         <button
-                          onClick={() => setSelectedBooking(b)}
+                          onClick={() => navigate(`/homestay-owner/bookings/${b._id || b.bookingId}`)}
                           className="font-mono text-xs font-black text-rose-600 hover:text-rose-800 hover:underline block bg-transparent border-none cursor-pointer p-0 text-left"
-                          title="Open Full Booking Details"
+                          title="Open Dedicated Booking Details Page"
                         >
                           {b.bookingId || b._id?.slice(-8).toUpperCase()}
                         </button>
@@ -914,9 +914,9 @@ export default function ManageBookings() {
                         <div className="flex items-center gap-1.5">
                           {/* View Detail button */}
                           <button
-                            onClick={() => setSelectedBooking(b)}
+                            onClick={() => navigate(`/homestay-owner/bookings/${b._id || b.bookingId}`)}
                             className="w-7 h-7 rounded-full bg-white border border-slate-200/80 hover:bg-slate-50 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
-                            title="View Full Booking Drawer"
+                            title="View Dedicated Booking Details Page"
                           >
                             <Eye size={12} />
                           </button>

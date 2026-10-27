@@ -326,29 +326,34 @@ Thank you for choosing ${propertyName}!`;
           </div>
         </div>
 
-        {/* Bill To & Stay Details Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50/70 p-4.5 rounded-2xl border border-slate-150 text-xs">
-          <div className="space-y-1">
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Billed To:</span>
-            <div className="font-black text-slate-900 text-sm">{guestName}</div>
-            <div className="text-slate-600 font-medium flex items-center gap-1.5">
-              <Phone size={11} className="text-slate-400" />
+        {/* Bill To & Stay Details Grid (Crisp high-contrast styling) */}
+        <div 
+          style={{ backgroundColor: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: '16px' }}
+          className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-5 shadow-xs text-xs"
+        >
+          <div className="space-y-1.5">
+            <span style={{ color: '#64748b' }} className="text-[9px] font-black uppercase tracking-wider block">Billed To:</span>
+            <div style={{ color: '#0f172a' }} className="font-black text-base tracking-tight">{guestName}</div>
+            <div style={{ color: '#334155' }} className="font-semibold flex items-center gap-1.5">
+              <Phone size={12} className="text-rose-600" />
               <span>{guestPhone}</span>
             </div>
             {guestEmail && (
-              <div className="text-slate-600 font-medium flex items-center gap-1.5">
-                <Mail size={11} className="text-slate-400" />
+              <div style={{ color: '#334155' }} className="font-semibold flex items-center gap-1.5">
+                <Mail size={12} className="text-slate-500" />
                 <span>{guestEmail}</span>
               </div>
             )}
           </div>
 
-          <div className="space-y-1 sm:text-right">
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Stay Details:</span>
-            <div className="font-bold text-slate-800">{checkInDate} → {checkOutDate}</div>
-            <div className="text-slate-600 font-medium">Room Allocation: <strong className="text-rose-700">Room {roomNumbers}</strong></div>
-            <div className="text-slate-500 text-[11px] font-medium">
-              Guests: {adults} Adult(s){child5To9 > 0 ? `, ${child5To9} Child(ren)` : ''}
+          <div className="space-y-1.5 sm:text-right">
+            <span style={{ color: '#64748b' }} className="text-[9px] font-black uppercase tracking-wider block">Stay Details:</span>
+            <div style={{ color: '#0f172a' }} className="font-black text-sm font-mono">{checkInDate} → {checkOutDate}</div>
+            <div style={{ color: '#334155' }} className="font-semibold">
+              Room Allocation: <span style={{ backgroundColor: '#fff1f2', color: '#be123c', padding: '2px 8px', borderRadius: '6px', border: '1px solid #fecdd3' }} className="font-black">Room {roomNumbers}</span>
+            </div>
+            <div style={{ color: '#64748b' }} className="text-[11px] font-semibold">
+              Guests: <strong style={{ color: '#0f172a' }}>{adults} Adult(s)</strong>{child5To9 > 0 ? `, ${child5To9} Child(ren)` : ''}
             </div>
           </div>
         </div>

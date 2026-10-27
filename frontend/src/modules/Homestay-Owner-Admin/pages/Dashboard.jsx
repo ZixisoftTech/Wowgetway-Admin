@@ -1010,9 +1010,9 @@ export default function Dashboard() {
                             {guest.name}
                           </button>
                           <button
-                            onClick={() => setSelectedBookingModal(guest)}
+                            onClick={() => navigate(`/homestay-owner/bookings/${guest.dbId || guest.id || guest._id}`)}
                             className="font-mono text-[9px] text-rose-600 hover:underline bg-transparent border-none cursor-pointer p-0 text-left block mt-0.5"
-                            title="View Full Booking Details"
+                            title="View Dedicated Booking Details Page"
                           >
                             #{guest.id ? String(guest.id).replace(/^#/, '') : 'BK'}
                           </button>
@@ -1060,7 +1060,7 @@ export default function Dashboard() {
                     </td>
                     <td className="py-3 px-4 text-center">
                       <button
-                        onClick={() => setSelectedBookingModal(guest)}
+                        onClick={() => navigate(`/homestay-owner/bookings/${guest.dbId || guest.id || guest._id}`)}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-lg text-[10px] uppercase tracking-wider transition-colors cursor-pointer bg-white shadow-xs"
                       >
                         <Eye size={11} className="stroke-[2.5]" />

@@ -54,11 +54,12 @@ export function oklchToRgb(str) {
  */
 export function sanitizeColorString(str) {
   if (!str || typeof str !== 'string') return str;
-  if (!str.includes('oklch') && !str.includes('oklab') && !str.includes('color(')) {
+  if (!str.includes('oklch') && !str.includes('oklab') && !str.includes('color(') && !str.includes('color-mix(')) {
     return str;
   }
   return str.replace(/oklch\([^)]+\)/gi, (m) => oklchToRgb(m))
-            .replace(/(?:oklab|color)\([^)]+\)/gi, 'rgb(71, 85, 105)');
+            .replace(/color-mix\([^)]+\)/gi, 'rgba(255, 255, 255, 0.95)')
+            .replace(/(?:oklab|color)\([^)]+\)/gi, 'rgba(15, 23, 42, 0.85)');
 }
 
 /**

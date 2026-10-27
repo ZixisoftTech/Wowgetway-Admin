@@ -21,6 +21,8 @@ import {
   DocumentActionBar, 
   formatDocDate, 
   formatDocStayDate, 
+  formatPhoneWithCountryCode,
+  formatHomestayName,
   calculateGstBreakdown 
 } from '../components/BookingDocumentShared';
 
@@ -100,7 +102,8 @@ export default function BookingConfirmationSlip() {
   const bookingIdDisplay = booking?.bookingId || (requestId?.startsWith('WG') ? requestId : `WG-BK-${requestId?.slice(-5) || '01034'}`);
   const shareableSlipUrl = `${window.location.origin}/confirmation-slip/${requestId || booking?._id || booking?.bookingId}`;
 
-  const propertyName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'pandim';
+  const rawPropName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'Pandim Homestay';
+  const propertyName = formatHomestayName(rawPropName);
   const propertyAddress = business?.fullAddress || [
     property?.address,
     property?.city,
@@ -111,7 +114,8 @@ export default function BookingConfirmationSlip() {
   const propertyGstin = business?.gstNumber || property?.gstNumber || '02AABCT1332F1Z8';
 
   const guestName = booking?.customer?.name || booking?.guestDetails?.fullName || 'Aditya Joshi';
-  const guestPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '+91 9855667788';
+  const rawPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '9855667788';
+  const guestPhone = formatPhoneWithCountryCode(rawPhone);
   const guestEmail = booking?.customer?.email || booking?.guestDetails?.email || 'adityajoshi@example.com';
 
   const rawIn = booking?.checkInDate || booking?.dates?.checkIn;
@@ -192,8 +196,8 @@ export default function BookingConfirmationSlip() {
   };
 
   const handleSendWhatsApp = () => {
-    const rawPhone = guestPhone.replace(/\D/g, '');
-    const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+    const rawDigits = guestPhone.replace(/\D/g, '');
+    const cleanPhone = rawDigits.length === 10 ? `91${rawDigits}` : rawDigits;
     const msg = `Namaste ${guestName}! 🙏\n\nYour stay at *${propertyName}* is confirmed!\n\n📋 *Booking Reference:* #${bookingIdDisplay}\n📅 *Stay:* ${checkInFormatted} to ${checkOutFormatted}\n🛏️ *Room:* ${roomTypeDisplay}\n💰 *Total Amount:* ₹${totalAmount.toLocaleString()}\n💳 *Amount Paid:* ₹${advancePaid.toLocaleString()}\n\n🔗 View your complete Confirmation Slip online:\n${shareableSlipUrl}\n\nWe look forward to hosting you!`;
     window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`, '_blank');
   };
@@ -232,7 +236,7 @@ export default function BookingConfirmationSlip() {
           letterSpacing: 'normal',
           wordSpacing: 'normal'
         }}
-        className="mx-auto bg-white border border-slate-200 p-5 sm:p-6 rounded-2xl shadow-sm space-y-2.5 print:border-none print:shadow-none print:p-0 print:max-w-none print:w-full"
+        className="printable-document mx-auto bg-white border border-slate-200 p-5 sm:p-6 rounded-2xl shadow-sm space-y-2.5 print:border-none print:shadow-none print:p-0 print:max-w-none print:w-full"
       >
         {/* Document Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-1">
@@ -622,12 +626,12 @@ export default function BookingConfirmationSlip() {
             <span className="text-[10px] font-bold text-slate-800 block">
               For {propertyName}
             </span>
-            <div className="h-7 flex items-end justify-end my-0.5">
+            <div className="h-6 flex items-end justify-end my-0.5">
               {signatureImage ? (
                 <img 
                   src={getImageUrl(signatureImage)} 
                   alt="Authorized Signature" 
-                  className="h-7 object-contain"
+                  className="h-6 object-contain"
                 />
               ) : (
                 <span className="font-serif italic text-base text-slate-800 pr-2">

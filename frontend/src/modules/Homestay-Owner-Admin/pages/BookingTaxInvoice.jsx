@@ -19,6 +19,8 @@ import {
   useUpiQrCode, 
   formatDocDate, 
   formatDocStayDate, 
+  formatPhoneWithCountryCode,
+  formatHomestayName,
   calculateGstBreakdown 
 } from '../components/BookingDocumentShared';
 
@@ -99,7 +101,8 @@ export default function BookingTaxInvoice() {
   const invoiceNo = `INV-${booking?.bookingId?.replace(/[^0-9]/g, '') || requestId?.slice(-5) || '01034'}`;
   const shareableInvoiceUrl = `${window.location.origin}/invoice/${requestId || booking?._id || booking?.bookingId}`;
 
-  const propertyName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'pandim';
+  const rawPropName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'Pandim Homestay';
+  const propertyName = formatHomestayName(rawPropName);
   const propertyAddress = business?.fullAddress || [
     property?.address,
     property?.city,
@@ -111,7 +114,8 @@ export default function BookingTaxInvoice() {
   const placeOfSupply = `${property?.state || 'Himachal Pradesh'} (02)`;
 
   const guestName = booking?.customer?.name || booking?.guestDetails?.fullName || 'Aditya Joshi';
-  const guestPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '+91 9855667788';
+  const rawPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '9855667788';
+  const guestPhone = formatPhoneWithCountryCode(rawPhone);
   const guestEmail = booking?.customer?.email || booking?.guestDetails?.email || 'adityajoshi@example.com';
   const guestGstin = booking?.customer?.gstNumber || booking?.guestDetails?.gstNumber || '-';
 
@@ -194,8 +198,8 @@ export default function BookingTaxInvoice() {
   };
 
   const handleSendWhatsApp = () => {
-    const rawPhone = guestPhone.replace(/\D/g, '');
-    const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+    const rawDigits = guestPhone.replace(/\D/g, '');
+    const cleanPhone = rawDigits.length === 10 ? `91${rawDigits}` : rawDigits;
     const msg = `Namaste ${guestName}! 🙏\n\nHere is your Tax Invoice from *${propertyName}*.\n\n📄 *Invoice No:* ${invoiceNo}\n📋 *Booking Ref:* #${bookingIdDisplay}\n📅 *Stay:* ${checkInFormatted} to ${checkOutFormatted}\n💰 *Total Amount:* ₹${totalAmount.toLocaleString()}\n💳 *Amount Paid:* ₹${advancePaid.toLocaleString()}\n⚖️ *Balance Due:* ₹${balanceDue.toLocaleString()}\n\n🔗 View or download your invoice here:\n${shareableInvoiceUrl}`;
     window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`, '_blank');
   };
@@ -234,7 +238,7 @@ export default function BookingTaxInvoice() {
           letterSpacing: 'normal',
           wordSpacing: 'normal'
         }}
-        className="mx-auto bg-white border border-slate-200 p-5 sm:p-6 rounded-2xl shadow-sm space-y-2.5 print:border-none print:shadow-none print:p-0 print:max-w-none print:w-full"
+        className="printable-document mx-auto bg-white border border-slate-200 p-5 sm:p-6 rounded-2xl shadow-sm space-y-2.5 print:border-none print:shadow-none print:p-0 print:max-w-none print:w-full"
       >
         {/* Document Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-1">
@@ -264,30 +268,30 @@ export default function BookingTaxInvoice() {
           {/* Header Right: TAX INVOICE Meta Box */}
           <div 
             style={{ backgroundColor: '#f4f7fb', border: '1px solid #dbe4ee', borderRadius: '10px' }}
-            className="p-3 w-full sm:w-[240px] text-xs shrink-0 shadow-2xs"
+            className="p-2.5 px-3.5 w-full sm:w-[240px] text-xs shrink-0 shadow-2xs"
           >
-            <h1 className="text-xl font-black text-[#0f233a] tracking-tight mb-1.5 leading-tight">
+            <h1 className="text-xl font-black text-[#0f233a] tracking-tight mb-1 leading-tight">
               TAX INVOICE
             </h1>
-            <div className="space-y-1 text-[10.5px] text-slate-600">
+            <div className="space-y-0.5 text-[10px] text-slate-600">
               <div className="flex justify-between">
                 <span>Invoice No.</span>
-                <span className="text-slate-400 mr-2">:</span>
+                <span className="text-slate-400 mr-1">:</span>
                 <strong className="text-slate-900 font-mono flex-1 text-right">{invoiceNo}</strong>
               </div>
               <div className="flex justify-between">
                 <span>Booking Ref.</span>
-                <span className="text-slate-400 mr-2">:</span>
+                <span className="text-slate-400 mr-1">:</span>
                 <strong className="text-slate-900 font-mono flex-1 text-right">{bookingIdDisplay}</strong>
               </div>
               <div className="flex justify-between">
                 <span>Invoice Date</span>
-                <span className="text-slate-400 mr-2">:</span>
+                <span className="text-slate-400 mr-1">:</span>
                 <strong className="text-slate-900 flex-1 text-right">{invoiceDate}</strong>
               </div>
               <div className="flex justify-between">
                 <span>Place of Supply</span>
-                <span className="text-slate-400 mr-2">:</span>
+                <span className="text-slate-400 mr-1">:</span>
                 <strong className="text-slate-900 flex-1 text-right">{placeOfSupply}</strong>
               </div>
             </div>
@@ -581,47 +585,47 @@ export default function BookingTaxInvoice() {
                 PAYMENT DETAILS (BANK & UPI)
               </span>
             </div>
-            <div className="p-2.5 flex flex-col sm:flex-row justify-between items-center gap-2.5 text-[10.5px]">
-              <div className="space-y-1 text-slate-600 flex-1 w-full">
-                <div className="grid grid-cols-[95px_10px_1fr]">
+            <div className="p-2.5 flex flex-col sm:flex-row justify-between items-center gap-2 text-[10px]">
+              <div className="space-y-1 text-slate-600 flex-1 w-full min-w-[190px]">
+                <div className="grid grid-cols-[90px_10px_1fr]">
                   <span>Bank Name</span>
                   <span className="text-slate-400">:</span>
-                  <strong className="text-slate-900">{bankName}</strong>
+                  <strong className="text-slate-900 whitespace-nowrap">{bankName}</strong>
                 </div>
-                <div className="grid grid-cols-[95px_10px_1fr]">
+                <div className="grid grid-cols-[90px_10px_1fr]">
                   <span>Account Name</span>
                   <span className="text-slate-400">:</span>
-                  <strong className="text-slate-900">{accountHolder}</strong>
+                  <strong className="text-slate-900 whitespace-nowrap">{accountHolder}</strong>
                 </div>
-                <div className="grid grid-cols-[95px_10px_1fr]">
+                <div className="grid grid-cols-[90px_10px_1fr]">
                   <span>Account Number</span>
                   <span className="text-slate-400">:</span>
-                  <strong className="text-slate-900 font-mono">{accountNumber}</strong>
+                  <strong className="text-slate-900 font-mono whitespace-nowrap">{accountNumber}</strong>
                 </div>
-                <div className="grid grid-cols-[95px_10px_1fr]">
+                <div className="grid grid-cols-[90px_10px_1fr]">
                   <span>IFSC Code</span>
                   <span className="text-slate-400">:</span>
-                  <strong className="text-slate-900 font-mono">{ifscCode}</strong>
+                  <strong className="text-slate-900 font-mono whitespace-nowrap">{ifscCode}</strong>
                 </div>
-                <div className="grid grid-cols-[95px_10px_1fr]">
+                <div className="grid grid-cols-[90px_10px_1fr]">
                   <span>UPI ID</span>
                   <span className="text-slate-400">:</span>
-                  <strong className="text-slate-900 font-mono text-[10px] break-all">{upiId}</strong>
+                  <strong className="text-slate-900 font-mono whitespace-nowrap">{upiId}</strong>
                 </div>
               </div>
 
               {/* Scannable UPI QR */}
               {upiQrDataUrl && (
-                <div className="text-center shrink-0 flex flex-col items-center border border-slate-200 rounded-lg p-1.5 bg-slate-50/50">
-                  <span className="text-[9px] text-slate-600 font-bold block mb-0.5">
+                <div className="text-center shrink-0 flex flex-col items-center border border-slate-200 rounded-lg p-1.5 bg-white">
+                  <span className="text-[8.5px] text-slate-600 font-bold block mb-0.5 whitespace-nowrap">
                     Scan & Pay via UPI
                   </span>
                   <img 
                     src={upiQrDataUrl} 
                     alt="UPI Payment QR Code" 
-                    className="w-20 h-20 object-contain bg-white rounded border border-slate-100 p-0.5"
+                    className="w-16 h-16 object-contain bg-white rounded"
                   />
-                  <span className="font-mono text-[8.5px] text-slate-500 font-semibold mt-0.5 max-w-[95px] truncate block">
+                  <span className="font-mono text-[8px] text-slate-500 font-semibold mt-0.5 max-w-[85px] truncate block">
                     {upiId}
                   </span>
                 </div>
@@ -641,7 +645,7 @@ export default function BookingTaxInvoice() {
                   TERMS & CONDITIONS
                 </span>
               </div>
-              <div className="p-2.5 pb-1">
+              <div className="p-2.5 pb-0.5">
                 <ol className="list-decimal pl-3 space-y-0.5 text-[8.5px] text-slate-600 leading-tight">
                   <li>This is a tax invoice for the services provided.</li>
                   <li>Rates are valid for the mentioned dates and are subject to availability.</li>
@@ -659,12 +663,12 @@ export default function BookingTaxInvoice() {
               <span className="text-[9.5px] font-bold text-slate-800 block">
                 For WOW Gateways
               </span>
-              <div className="h-7 flex items-end justify-end my-0.5">
+              <div className="h-6 flex items-end justify-end my-0.5">
                 {signatureImage ? (
                   <img 
                     src={getImageUrl(signatureImage)} 
                     alt="Authorized Signature" 
-                    className="h-7 object-contain"
+                    className="h-6 object-contain"
                   />
                 ) : (
                   <span className="font-serif italic text-base text-slate-800 pr-2">

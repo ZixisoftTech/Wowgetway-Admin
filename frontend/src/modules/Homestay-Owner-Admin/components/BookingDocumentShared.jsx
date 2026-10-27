@@ -24,25 +24,25 @@ export function WowGatewaysLogo({ size = 'default' }) {
     <div className="flex flex-col select-none">
       <div className="flex items-center leading-none">
         <span 
-          style={{ color: '#0f233a', letterSpacing: '-0.5px' }}
-          className={`font-black ${isSmall ? 'text-base' : 'text-xl sm:text-[24px]'} flex items-center`}
+          style={{ color: '#0f233a', letterSpacing: '-0.3px' }}
+          className={`font-black ${isSmall ? 'text-lg sm:text-xl' : 'text-xl sm:text-[24px]'} flex items-center`}
         >
           W
-          <span className="relative inline-flex items-center justify-center mx-[1px]">
-            <Heart className={`${isSmall ? 'w-3 h-3' : 'w-4 h-4 sm:w-[18px] sm:h-[18px]'} text-[#e11d48] fill-[#e11d48] inline`} />
+          <span className="relative inline-flex items-center justify-center mx-[1.5px]">
+            <Heart className={`${isSmall ? 'w-3.5 h-3.5' : 'w-4 h-4 sm:w-[18px] sm:h-[18px]'} text-[#e11d48] fill-[#e11d48] inline`} />
           </span>
           W
         </span>
         <span 
-          style={{ color: '#e11d48', letterSpacing: '-0.5px' }}
-          className={`font-black ml-1.5 ${isSmall ? 'text-base' : 'text-xl sm:text-[24px]'}`}
+          style={{ color: '#e11d48', letterSpacing: '-0.3px' }}
+          className={`font-black ml-1.5 ${isSmall ? 'text-lg sm:text-xl' : 'text-xl sm:text-[24px]'}`}
         >
           GATEWAYS
         </span>
       </div>
       <div 
-        style={{ color: '#64748b', letterSpacing: '0.22em' }}
-        className={`font-bold ${isSmall ? 'text-[6.5px]' : 'text-[7.5px]'} uppercase mt-0.5`}
+        style={{ color: '#64748b', letterSpacing: '0.24em' }}
+        className={`font-bold ${isSmall ? 'text-[7px]' : 'text-[7.5px]'} uppercase mt-0.5`}
       >
         HOMESTAYS &nbsp;|&nbsp; STAYS &nbsp;|&nbsp; EXPERIENCES
       </div>
@@ -60,14 +60,14 @@ export function DocumentCorporateFooter() {
       style={{ borderTop: '1px solid #e2e8f0', color: '#475569' }}
       className="pt-2 mt-2 flex flex-col sm:flex-row items-center justify-between gap-2 text-[9.5px]"
     >
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 whitespace-nowrap">
         <span className="font-black text-[#0f233a]">
           WOW <span className="text-[#e11d48]">GATEWAYS</span>
         </span>
         <span className="text-slate-300">•</span>
         <span className="text-slate-500 font-medium">Stay Local • Explore More • Live Better</span>
       </div>
-      <div className="flex items-center gap-3.5 text-slate-600 flex-wrap justify-center font-medium">
+      <div className="flex items-center gap-3.5 text-slate-600 flex-wrap justify-center font-medium whitespace-nowrap">
         <a href="tel:+919770097010" className="flex items-center gap-1 hover:text-slate-900 transition-colors">
           <Phone size={11} className="text-slate-400" />
           <span>+91 9770097010</span>
@@ -108,7 +108,7 @@ export function DocumentActionBar({
   };
 
   return (
-    <div className="flex flex-wrap justify-between items-center gap-3 print:hidden max-w-[780px] mx-auto w-full mb-3">
+    <div className="flex flex-wrap justify-between items-center gap-2.5 print:hidden max-w-[780px] mx-auto w-full mb-3">
       <button 
         type="button"
         onClick={onBack}
@@ -187,7 +187,7 @@ export function useUpiQrCode(upiId, payeeName, amount) {
       : `upi://pay?pa=${cleanUpi}&pn=${cleanPayee}&cu=INR`;
 
     QRCode.toDataURL(upiString, {
-      width: 120,
+      width: 140,
       margin: 1,
       color: {
         dark: '#0f172a',
@@ -220,6 +220,27 @@ export function formatDocStayDate(rawDate, defaultTime = '') {
   if (isNaN(d.getTime())) return String(rawDate);
   const formatted = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   return defaultTime ? `${formatted} (${defaultTime})` : formatted;
+}
+
+/**
+ * Format telephone with +91 if needed
+ */
+export function formatPhoneWithCountryCode(rawPhone) {
+  if (!rawPhone) return '+91 9855667788';
+  const clean = String(rawPhone).trim();
+  if (clean.startsWith('+')) return clean;
+  if (clean.length === 10) return `+91 ${clean}`;
+  return clean;
+}
+
+/**
+ * Format homestay name with Title Case
+ */
+export function formatHomestayName(name) {
+  if (!name) return 'Pandim Homestay';
+  const trimmed = name.trim();
+  if (trimmed.toLowerCase() === 'pandim') return 'Pandim Homestay';
+  return trimmed.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
 /**

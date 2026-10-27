@@ -22,6 +22,8 @@ import {
   useUpiQrCode, 
   formatDocDate, 
   formatDocStayDate, 
+  formatPhoneWithCountryCode,
+  formatHomestayName,
   calculateGstBreakdown 
 } from '../components/BookingDocumentShared';
 
@@ -101,7 +103,8 @@ export default function BookingQuotation() {
   const bookingIdDisplay = booking?.bookingId || (requestId?.startsWith('WG') ? requestId : `WG-BK-${requestId?.slice(-5) || '01034'}`);
   const shareableQuotationUrl = `${window.location.origin}/quotation/${requestId || booking?._id || booking?.bookingId}`;
 
-  const propertyName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'Floala Inn';
+  const rawPropName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'Pandim Homestay';
+  const propertyName = formatHomestayName(rawPropName);
   const propertyAddress = business?.fullAddress || [
     property?.address,
     property?.city,
@@ -112,9 +115,10 @@ export default function BookingQuotation() {
   const propertyGstin = business?.gstNumber || property?.gstNumber || '02AABCT1332F1Z8';
 
   const guestName = booking?.customer?.name || booking?.guestDetails?.fullName || 'Aditya Joshi';
-  const guestPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '+91 9855667788';
+  const rawPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '9855667788';
+  const guestPhone = formatPhoneWithCountryCode(rawPhone);
   const guestEmail = booking?.customer?.email || booking?.guestDetails?.email || 'adityajoshi@example.com';
-  const specialRequests = booking?.specialRequests || booking?.remarks || '-';
+  const specialRequests = booking?.specialRequests || booking?.remarks || 'Bonfire & Guided Orchard Trek';
 
   const rawIn = booking?.checkInDate || booking?.dates?.checkIn;
   const rawOut = booking?.checkOutDate || booking?.dates?.checkOut;
@@ -145,8 +149,8 @@ export default function BookingQuotation() {
   const advancePaid = Number(booking?.pricing?.paidAmount !== undefined ? booking.pricing.paidAmount : (booking?.pricing?.advancePaid || 12960));
   const balanceDue = booking?.pricing?.pendingAmount !== undefined ? Number(booking.pricing.pendingAmount) : Math.max(0, totalAmount - advancePaid);
   const tax = Number(booking?.pricing?.tax !== undefined ? booking.pricing.tax : 960);
-  const addOns = Number(booking?.pricing?.addOns || 0);
-  const addOnsRemark = booking?.pricing?.addOnsRemark || '';
+  const addOns = Number(booking?.pricing?.addOns || (booking?.pricing?.tax !== undefined ? 1200 : 0));
+  const addOnsRemark = booking?.pricing?.addOnsRemark || (addOns > 0 ? 'Bonfire & Guided Orchard Trek' : '');
   const extraBed = Number(booking?.pricing?.extraBed || 0);
 
   const subtotal = Number(booking?.pricing?.bookingAmount || Math.max(0, totalAmount - tax));
@@ -200,8 +204,8 @@ export default function BookingQuotation() {
   };
 
   const handleSendWhatsApp = () => {
-    const rawPhone = guestPhone.replace(/\D/g, '');
-    const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+    const rawDigits = guestPhone.replace(/\D/g, '');
+    const cleanPhone = rawDigits.length === 10 ? `91${rawDigits}` : rawDigits;
     const msg = `Namaste ${guestName}! 🙏\n\nHere is your Booking Quotation for *${propertyName}*.\n\n📋 *Quotation Ref:* #${bookingIdDisplay}\n📅 *Valid Till:* ${validTillDate}\n📅 *Stay Period:* ${checkInFormatted} to ${checkOutFormatted}\n🛏️ *Room:* ${roomTypeDisplay}\n💰 *Total Stay Amount:* ₹${totalAmount.toLocaleString()}\n\n🔗 View or download your official quotation:\n${shareableQuotationUrl}`;
     window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`, '_blank');
   };
@@ -240,7 +244,7 @@ export default function BookingQuotation() {
           letterSpacing: 'normal',
           wordSpacing: 'normal'
         }}
-        className="mx-auto bg-white border border-slate-200 p-5 sm:p-6 rounded-2xl shadow-sm space-y-2.5 print:border-none print:shadow-none print:p-0 print:max-w-none print:w-full"
+        className="printable-document mx-auto bg-white border border-slate-200 p-5 sm:p-6 rounded-2xl shadow-sm space-y-2.5 print:border-none print:shadow-none print:p-0 print:max-w-none print:w-full"
       >
         {/* Document Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-1">
@@ -460,12 +464,12 @@ export default function BookingQuotation() {
         {/* 3 Stat / KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           {/* Card 1: Total Stay Amount */}
-          <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px' }} className="p-2.5 px-3 flex items-center gap-2.5 shadow-2xs bg-white">
+          <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px' }} className="p-2 px-3 flex items-center gap-2.5 shadow-2xs bg-white">
             <div className="w-8 h-8 rounded-lg bg-rose-50 text-[#e11d48] flex items-center justify-center shrink-0">
               <CreditCard size={16} />
             </div>
             <div>
-              <span className="block text-[9.5px] text-slate-500 font-medium">Total Stay Amount</span>
+              <span className="block text-[9px] text-slate-500 font-medium">Total Stay Amount</span>
               <strong className="block text-base font-black text-slate-900">
                 ₹ {totalAmount.toLocaleString()}
               </strong>
@@ -473,12 +477,12 @@ export default function BookingQuotation() {
           </div>
 
           {/* Card 2: Advance Paid */}
-          <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px' }} className="p-2.5 px-3 flex items-center gap-2.5 shadow-2xs bg-white">
+          <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px' }} className="p-2 px-3 flex items-center gap-2.5 shadow-2xs bg-white">
             <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
               <IndianRupee size={16} />
             </div>
             <div>
-              <span className="block text-[9.5px] text-slate-500 font-medium">Advance Paid</span>
+              <span className="block text-[9px] text-slate-500 font-medium">Advance Paid</span>
               <strong className="block text-base font-black text-emerald-600">
                 ₹ {advancePaid.toLocaleString()}
               </strong>
@@ -486,12 +490,12 @@ export default function BookingQuotation() {
           </div>
 
           {/* Card 3: Balance Due */}
-          <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px' }} className="p-2.5 px-3 flex items-center gap-2.5 shadow-2xs bg-white">
+          <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px' }} className="p-2 px-3 flex items-center gap-2.5 shadow-2xs bg-white">
             <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center shrink-0">
               <FileText size={16} />
             </div>
             <div>
-              <span className="block text-[9.5px] text-slate-500 font-medium">Balance Due at Check-in</span>
+              <span className="block text-[9px] text-slate-500 font-medium">Balance Due at Check-in</span>
               <strong className={`block text-base font-black ${balanceDue > 0 ? 'text-[#e11d48]' : 'text-slate-900'}`}>
                 ₹ {balanceDue.toLocaleString()}
               </strong>
@@ -503,7 +507,7 @@ export default function BookingQuotation() {
         {hasAdvancePaid ? (
           <div 
             style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px' }}
-            className="p-2 px-3.5 flex flex-col sm:flex-row justify-between items-center gap-1.5 shadow-2xs"
+            className="p-2 px-3 flex flex-col sm:flex-row justify-between items-center gap-1.5 shadow-2xs"
           >
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <div 
@@ -513,10 +517,10 @@ export default function BookingQuotation() {
                 <Check size={14} className="stroke-[3]" />
               </div>
               <div>
-                <strong className="block text-[11px] font-bold text-slate-900">
+                <strong className="block text-[10.5px] font-bold text-slate-900">
                   Advance Payment Received
                 </strong>
-                <span className="block text-[9.5px] text-slate-500 font-mono">
+                <span className="block text-[9px] text-slate-500 font-mono">
                   UPI Transaction: {transactionId}
                 </span>
               </div>
@@ -527,13 +531,13 @@ export default function BookingQuotation() {
                 <strong className="block text-xs font-bold text-emerald-700">
                   ₹ {advancePaid.toLocaleString()}
                 </strong>
-                <span className="block text-[9.5px] text-slate-500">
+                <span className="block text-[9px] text-slate-500">
                   {issueDate}
                 </span>
               </div>
               <span 
                 style={{ backgroundColor: '#16a34a' }}
-                className="text-white text-[8.5px] font-black uppercase px-2 py-0.5 rounded tracking-wider shadow-xs"
+                className="text-white text-[8px] font-black uppercase px-2 py-0.5 rounded tracking-wider shadow-xs"
               >
                 VERIFIED
               </span>
@@ -542,7 +546,7 @@ export default function BookingQuotation() {
         ) : (
           <div 
             style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px' }}
-            className="p-2 px-3.5 flex justify-between items-center gap-1.5 shadow-2xs"
+            className="p-2 px-3 flex justify-between items-center gap-1.5 shadow-2xs"
           >
             <div className="flex items-center gap-2">
               <div 
@@ -552,17 +556,17 @@ export default function BookingQuotation() {
                 <AlertCircle size={14} className="stroke-[2.5]" />
               </div>
               <div>
-                <strong className="block text-[11px] font-bold text-[#b45309]">
+                <strong className="block text-[10.5px] font-bold text-[#b45309]">
                   Advance Payment Required
                 </strong>
-                <span className="block text-[9.5px] text-slate-600">
+                <span className="block text-[9px] text-slate-600">
                   Please deposit minimum 50% advance to confirm your booking dates.
                 </span>
               </div>
             </div>
             <span 
               style={{ backgroundColor: '#d97706' }}
-              className="text-white text-[8.5px] font-black uppercase px-2 py-0.5 rounded tracking-wider shadow-xs"
+              className="text-white text-[8px] font-black uppercase px-2 py-0.5 rounded tracking-wider shadow-xs"
             >
               PENDING
             </span>
@@ -580,47 +584,47 @@ export default function BookingQuotation() {
               BANK & UPI DETAILS FOR BALANCE SETTLEMENT
             </span>
           </div>
-          <div className="p-2.5 flex flex-col sm:flex-row justify-between items-center gap-3 text-[10.5px]">
-            <div className="space-y-1 text-slate-600 flex-1 w-full">
-              <div className="grid grid-cols-[105px_10px_1fr]">
+          <div className="p-2.5 flex flex-col sm:flex-row justify-between items-center gap-2 text-[10px]">
+            <div className="space-y-1 text-slate-600 flex-1 w-full min-w-[190px]">
+              <div className="grid grid-cols-[100px_10px_1fr]">
                 <span>Bank Name</span>
                 <span className="text-slate-400">:</span>
-                <strong className="text-slate-900">{bankName}</strong>
+                <strong className="text-slate-900 whitespace-nowrap">{bankName}</strong>
               </div>
-              <div className="grid grid-cols-[105px_10px_1fr]">
+              <div className="grid grid-cols-[100px_10px_1fr]">
                 <span>Account Name</span>
                 <span className="text-slate-400">:</span>
-                <strong className="text-slate-900">{accountHolder}</strong>
+                <strong className="text-slate-900 whitespace-nowrap">{accountHolder}</strong>
               </div>
-              <div className="grid grid-cols-[105px_10px_1fr]">
+              <div className="grid grid-cols-[100px_10px_1fr]">
                 <span>Account Number</span>
                 <span className="text-slate-400">:</span>
-                <strong className="text-slate-900 font-mono">{maskedAccountNumber}</strong>
+                <strong className="text-slate-900 font-mono whitespace-nowrap">{maskedAccountNumber}</strong>
               </div>
-              <div className="grid grid-cols-[105px_10px_1fr]">
+              <div className="grid grid-cols-[100px_10px_1fr]">
                 <span>IFSC Code</span>
                 <span className="text-slate-400">:</span>
-                <strong className="text-slate-900 font-mono">{ifscCode}</strong>
+                <strong className="text-slate-900 font-mono whitespace-nowrap">{ifscCode}</strong>
               </div>
-              <div className="grid grid-cols-[105px_10px_1fr]">
+              <div className="grid grid-cols-[100px_10px_1fr]">
                 <span>UPI ID</span>
                 <span className="text-slate-400">:</span>
-                <strong className="text-slate-900 font-mono text-[10px] break-all">{upiId}</strong>
+                <strong className="text-slate-900 font-mono whitespace-nowrap">{upiId}</strong>
               </div>
             </div>
 
             {/* Scannable UPI QR */}
             {upiQrDataUrl && (
-              <div className="text-center shrink-0 flex flex-col items-center border border-slate-200 rounded-lg p-1.5 bg-slate-50/50">
-                <span className="text-[9px] text-slate-600 font-bold block mb-0.5">
+              <div className="text-center shrink-0 flex flex-col items-center border border-slate-200 rounded-lg p-1.5 bg-white">
+                <span className="text-[8.5px] text-slate-600 font-bold block mb-0.5 whitespace-nowrap">
                   Scan & Pay via UPI
                 </span>
                 <img 
                   src={upiQrDataUrl} 
                   alt="UPI QR Code" 
-                  className="w-20 h-20 object-contain bg-white rounded border border-slate-100 p-0.5"
+                  className="w-16 h-16 object-contain bg-white rounded"
                 />
-                <span className="font-mono text-[8.5px] text-slate-500 font-semibold mt-0.5 max-w-[95px] truncate block">
+                <span className="font-mono text-[8px] text-slate-500 font-semibold mt-0.5 max-w-[85px] truncate block">
                   {upiId}
                 </span>
               </div>
@@ -639,7 +643,7 @@ export default function BookingQuotation() {
               TERMS & CONDITIONS
             </span>
           </div>
-          <div className="p-3 grid grid-cols-1 sm:grid-cols-[1fr_180px] gap-4 items-end">
+          <div className="p-2.5 grid grid-cols-1 sm:grid-cols-[1fr_180px] gap-3 items-end">
             <ol className="list-decimal pl-3 space-y-0.5 text-[8.5px] text-slate-600 leading-tight">
               <li>This is a quotation and not a confirmed booking.</li>
               <li>Rates are valid for the mentioned dates and are subject to availability.</li>
@@ -655,12 +659,12 @@ export default function BookingQuotation() {
               <span className="text-[9.5px] font-bold text-slate-800 block">
                 For WOW Gateways
               </span>
-              <div className="h-7 flex items-end justify-end my-0.5">
+              <div className="h-6 flex items-end justify-end my-0.5">
                 {signatureImage ? (
                   <img 
                     src={getImageUrl(signatureImage)} 
                     alt="Authorized Signature" 
-                    className="h-7 object-contain"
+                    className="h-6 object-contain"
                   />
                 ) : (
                   <span className="font-serif italic text-base text-slate-800 pr-2">

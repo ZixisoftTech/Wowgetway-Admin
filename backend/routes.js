@@ -40,6 +40,22 @@ function decrypt(text) {
 const JWT_SECRET = process.env.JWT_SECRET || 'wow_gateway_default_secure_secret_2026_key_xyz';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'wow_gateway_default_secure_refresh_2026_key_abc';
 
+// Atomic concurrency mutex lock to prevent double-booking race conditions
+const bookingLockMap = new Map();
+
+async function acquireBookingLock(key) {
+  while (bookingLockMap.has(key)) {
+    await bookingLockMap.get(key);
+  }
+  let release;
+  const promise = new Promise(resolve => { release = resolve; });
+  bookingLockMap.set(key, promise);
+  return () => {
+    bookingLockMap.delete(key);
+    release();
+  };
+}
+
 const isMongoConnected = () => true;
 
 // Centralized activity logging helper
@@ -8099,8 +8115,8 @@ const handleAdminLogin = async (req, res) => {
   await ensureMongoAdminSeeded();
   const { email, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+  if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Email and password are required and must be strings.' });
   }
 
   const emailLower = email.trim().toLowerCase();
@@ -8282,8 +8298,8 @@ const handleAdminForgotPassword = async (req, res) => {
   await ensureMongoSmtpSeeded();
   const { email } = req.body;
 
-  if (!email) {
-    return res.status(400).json({ error: 'Email address is required.' });
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ error: 'Email address is required and must be a valid string.' });
   }
 
   const emailLower = email.trim().toLowerCase();
@@ -9116,8 +9132,8 @@ const getClientIp = (req) => {
 router.post('/homestay-owner/auth/login', async (req, res) => {
   const { email, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'MissingFields', message: 'Email address and password are required.' });
+  if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ error: 'MissingFields', message: 'Email address and password are required and must be strings.' });
   }
 
   const emailLower = email.trim().toLowerCase();
@@ -9272,7 +9288,7 @@ router.post('/homestay-owner/auth/login', async (req, res) => {
 router.post('/homestay-owner/auth/forgot-password', async (req, res) => {
   const { email } = req.body;
 
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+  if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
     return res.status(400).json({ error: 'InvalidEmail', message: 'Please provide a valid registered email address.' });
   }
 
@@ -12593,6 +12609,10 @@ router.get('/admin/homestays-list', authenticateToken, async (req, res) => {
 });
 
 router.post('/admin/homestays-list/:id/review', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'Super Admin') {
+    return res.status(403).json({ error: 'AccessDenied', message: 'Only Super Admins can review and approve homestay listings.' });
+  }
+
   const { id } = req.params;
   const { status, comment } = req.body;
 
@@ -13522,7 +13542,9 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'DuplicateRoom', message: 'Cannot select the same room number multiple times in a single booking.' });
     }
 
-    // 4. ATOMIC CONCURRENCY & DOUBLE-BOOKING CHECK
+    const unlock = await acquireBookingLock(String(propertyId));
+    try {
+      // 4. ATOMIC CONCURRENCY & DOUBLE-BOOKING CHECK
     for (const r of rooms) {
       // Overlapping booking query
       const conflictBooking = await Booking.findOne({
@@ -13752,6 +13774,9 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
       message: `Booking ${bookingIdStr} successfully created!`,
       booking: newBooking
     });
+    } finally {
+      unlock();
+    }
 
   } catch (err) {
     console.error('Error creating homestay booking:', err);

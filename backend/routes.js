@@ -8871,6 +8871,237 @@ router.post('/admin/settings/smtp/test-email', authenticateToken, async (req, re
   }
 });
 
+// POST /api/admin/seed-dummy-bookings
+router.post('/admin/seed-dummy-bookings', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'Super Admin') {
+    return res.status(403).json({ error: 'AccessDenied', message: 'Only Super Admins can seed dummy bookings.' });
+  }
+
+  try {
+    const db = mongoose.connection.db;
+    const properties = await db.collection('properties').find({ deleted: { $ne: true } }).toArray();
+    const propertyRooms = await db.collection('propertyRooms').find({}).toArray();
+
+    const guestsPool = [
+      { name: 'Aarav Sharma', mobile: '9876501234', email: 'aarav.sharma@example.com' },
+      { name: 'Priya Patel', mobile: '9823456781', email: 'priya.patel@example.com' },
+      { name: 'Vikram Malhotra', mobile: '9811223344', email: 'vikram.m@example.com' },
+      { name: 'Ananya Deshmukh', mobile: '9877665544', email: 'ananya.d@example.com' },
+      { name: 'Rohan Mehra', mobile: '9845098765', email: 'rohan.mehra@example.com' },
+      { name: 'Sneha Verma', mobile: '9765432109', email: 'sneha.verma@example.com' },
+      { name: 'Kabir Kapoor', mobile: '9833445566', email: 'kabir.kapoor@example.com' },
+      { name: 'Ishita Sen', mobile: '9922114433', email: 'ishita.sen@example.com' },
+      { name: 'Aditya Joshi', mobile: '9855667788', email: 'aditya.joshi@example.com' },
+      { name: 'Kavya Nair', mobile: '9788990011', email: 'kavya.nair@example.com' },
+      { name: 'Tanmay Bhatt', mobile: '9899001122', email: 'tanmay.bhatt@example.com' },
+      { name: 'Diya Singhania', mobile: '9866778899', email: 'diya.s@example.com' }
+    ];
+
+    let guestIdx = 0;
+    let createdCount = 0;
+    const createdBookings = [];
+
+    for (const prop of properties) {
+      const propId = prop._id;
+      const propRooms = propertyRooms.filter(r => String(r.propertyId) === String(propId));
+      
+      const units = [];
+      for (const pr of propRooms) {
+        const roomNos = pr.roomNumbers || pr.rooms || ['101'];
+        for (const rNo of roomNos) {
+          units.push({
+            roomCategoryId: pr._id,
+            roomCategoryName: pr.roomCategoryName || pr.name || 'Standard Room',
+            roomNumber: String(rNo),
+            price: pr.basePrice || pr.price || 3500
+          });
+        }
+      }
+
+      if (units.length === 0) {
+        units.push({
+          roomCategoryId: new mongoose.Types.ObjectId(),
+          roomCategoryName: 'Standard Room',
+          roomNumber: '101',
+          price: 3000
+        });
+      }
+
+      const scenarios = [
+        {
+          type: 'Check-in Today (Partial Paid)',
+          status: 'Confirmed',
+          checkIn: new Date(Date.now() - 3600000),
+          checkOut: new Date(Date.now() + 2 * 86400000),
+          nights: 2,
+          paymentStatus: 'Partial',
+          payRatio: 0.5,
+          addOns: 500,
+          addOnsRemark: 'Airport Transfer & Breakfast',
+          unit: units[0]
+        },
+        {
+          type: 'Hold Booking (Pending)',
+          status: 'Hold',
+          checkIn: new Date(Date.now() + 86400000),
+          checkOut: new Date(Date.now() + 3 * 86400000),
+          nights: 2,
+          paymentStatus: 'Pending',
+          payRatio: 0,
+          addOns: 0,
+          addOnsRemark: '',
+          unit: units[1 % units.length]
+        },
+        {
+          type: 'Upcoming Confirmed (Fully Paid)',
+          status: 'Confirmed',
+          checkIn: new Date(Date.now() + 7 * 86400000),
+          checkOut: new Date(Date.now() + 10 * 86400000),
+          nights: 3,
+          paymentStatus: 'Paid',
+          payRatio: 1.0,
+          addOns: 1200,
+          addOnsRemark: 'Bonfire & Guided Orchard Trek',
+          unit: units[2 % units.length]
+        }
+      ];
+
+      for (const sc of scenarios) {
+        const guest = guestsPool[guestIdx % guestsPool.length];
+        guestIdx++;
+
+        // Collision-safe booking ID
+        const count = await Booking.countDocuments();
+        let nextNum = count + 1001;
+        let bCode = `WG-BK-${String(nextNum).padStart(5, '0')}`;
+        while (await Booking.exists({ bookingId: bCode })) {
+          nextNum++;
+          bCode = `WG-BK-${String(nextNum).padStart(5, '0')}`;
+        }
+
+        const ratePerNight = sc.unit.price || 3500;
+        const basePrice = ratePerNight * sc.nights;
+        const tax = Math.round(basePrice * 0.12);
+        const addOns = sc.addOns;
+        const finalAmount = basePrice + tax + addOns;
+        const paidAmount = Math.round(finalAmount * sc.payRatio);
+        const pendingAmount = finalAmount - paidAmount;
+
+        const newBooking = new Booking({
+          bookingId: bCode,
+          bookingType: 'Homestay Booking',
+          bookingStatus: sc.status,
+          paymentStatus: sc.paymentStatus,
+          amount: finalAmount,
+          checkInDate: sc.checkIn,
+          checkOutDate: sc.checkOut,
+          propertyId: propId,
+          ownerId: prop.ownerId,
+          bookedRooms: [{
+            roomCategoryId: sc.unit.roomCategoryId,
+            roomCategoryName: sc.unit.roomCategoryName,
+            roomNumber: sc.unit.roomNumber,
+            adults: 2,
+            child5_9: 0,
+            child0_4: 0,
+            mealPlan: 'CP',
+            roomPrice: ratePerNight
+          }],
+          bookingMode: 'Guest',
+          bookingSource: 'Direct Website',
+          specialRequests: sc.addOnsRemark || 'Quiet room with scenic valley view.',
+          notes: `Created for testing across homestay "${prop.name}".`,
+          customer: {
+            name: guest.name,
+            mobile: guest.mobile,
+            email: guest.email,
+            whatsApp: guest.mobile,
+            address: 'Bengaluru, Karnataka'
+          },
+          guests: {
+            total: 2,
+            adults: 2,
+            children: 0
+          },
+          propertyDetails: {
+            propertyId: String(propId),
+            propertyName: prop.name,
+            ownerName: prop.ownerName || 'Host',
+            location: prop.address || prop.city || 'Manali',
+            roomCategory: sc.unit.roomCategoryName,
+            roomNumber: sc.unit.roomNumber,
+            mealPlan: 'CP'
+          },
+          pricing: {
+            basePrice,
+            bookingAmount: basePrice,
+            tax,
+            addOns,
+            addOnsRemark: sc.addOnsRemark,
+            discount: 0,
+            paidAmount,
+            pendingAmount,
+            finalAmount
+          },
+          paymentDetails: {
+            method: 'UPI',
+            transactionId: paidAmount > 0 ? `UPI-${Date.now().toString().slice(-6)}-${createdCount}` : '',
+            paymentDate: paidAmount > 0 ? sc.checkIn : null,
+            paymentStatus: sc.paymentStatus
+          },
+          paymentHistory: paidAmount > 0 ? [{
+            amount: paidAmount,
+            method: 'UPI',
+            transactionId: `TXN-${Date.now().toString().slice(-6)}-${createdCount}`,
+            remark: sc.paymentStatus === 'Paid' ? 'Full settlement payment' : 'Advance booking payment',
+            date: sc.checkIn,
+            recordedBy: 'Host'
+          }] : [],
+          timeline: [
+            {
+              activity: `Booking created via Direct Website by ${guest.name}`,
+              timestamp: sc.checkIn,
+              createdBy: guest.name
+            },
+            ...(paidAmount > 0 ? [{
+              activity: `Advance payment of ₹${paidAmount.toLocaleString()} recorded via UPI`,
+              timestamp: sc.checkIn,
+              createdBy: 'Host'
+            }] : []),
+            ...(sc.status === 'Hold' ? [{
+              activity: 'Room placed on Hold pending guest confirmation',
+              timestamp: sc.checkIn,
+              createdBy: 'Host'
+            }] : [])
+          ]
+        });
+
+        await newBooking.save();
+        createdCount++;
+        createdBookings.push({
+          bookingId: bCode,
+          propertyName: prop.name,
+          room: sc.unit.roomNumber,
+          guest: guest.name,
+          status: sc.status,
+          amount: finalAmount,
+          paid: paidAmount
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Successfully seeded ${createdCount} test bookings across all properties!`,
+      count: createdCount,
+      bookings: createdBookings
+    });
+  } catch (err) {
+    console.error('Seed dummy bookings error:', err);
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
 // ==========================================
 // HOMESTAY OWNER PORTAL API ENDPOINTS
 // ==========================================

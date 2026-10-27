@@ -17,7 +17,8 @@ import {
   RefreshCw,
   Building2,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 
 const getApiUrl = (path) => {
@@ -58,12 +59,10 @@ export default function FullBookingDetailsModal({
   // Fetch complete authoritative booking record if needed
   useEffect(() => {
     if (!isOpen || !initialBooking) return;
+    setBooking(initialBooking);
 
     const bId = initialBooking._id || initialBooking.dbId || initialBooking.id || initialBooking.bookingId;
-    if (!bId) {
-      setBooking(initialBooking);
-      return;
-    }
+    if (!bId) return;
 
     const fetchFullBooking = async () => {
       try {
@@ -77,12 +76,9 @@ export default function FullBookingDetailsModal({
           setBooking(res.data.booking);
         } else if (res.data) {
           setBooking(res.data);
-        } else {
-          setBooking(initialBooking);
         }
       } catch (err) {
         console.warn('Could not fetch detailed booking, using initial:', err);
-        setBooking(initialBooking);
       } finally {
         setLoading(false);
       }

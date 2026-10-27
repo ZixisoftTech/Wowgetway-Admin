@@ -22,19 +22,28 @@ export function WowGatewaysLogo({ size = 'default' }) {
   const isSmall = size === 'small';
   return (
     <div className="flex flex-col select-none">
-      <div className="flex items-center tracking-tight leading-none">
-        <span className={`font-black text-[#0f233a] ${isSmall ? 'text-lg' : 'text-2xl sm:text-[28px]'} tracking-tight flex items-center`}>
+      <div className="flex items-center leading-none">
+        <span 
+          style={{ color: '#0f233a', letterSpacing: '-0.5px' }}
+          className={`font-black ${isSmall ? 'text-base' : 'text-xl sm:text-[24px]'} flex items-center`}
+        >
           W
-          <span className="relative inline-flex items-center justify-center mx-[1.5px]">
-            <Heart className={`${isSmall ? 'w-3.5 h-3.5' : 'w-5 h-5 sm:w-[22px] sm:h-[22px]'} text-[#e11d48] fill-[#e11d48] inline`} />
+          <span className="relative inline-flex items-center justify-center mx-[1px]">
+            <Heart className={`${isSmall ? 'w-3 h-3' : 'w-4 h-4 sm:w-[18px] sm:h-[18px]'} text-[#e11d48] fill-[#e11d48] inline`} />
           </span>
           W
         </span>
-        <span className={`font-black text-[#e11d48] ml-2 ${isSmall ? 'text-lg' : 'text-2xl sm:text-[28px]'} tracking-tight`}>
+        <span 
+          style={{ color: '#e11d48', letterSpacing: '-0.5px' }}
+          className={`font-black ml-1.5 ${isSmall ? 'text-base' : 'text-xl sm:text-[24px]'}`}
+        >
           GATEWAYS
         </span>
       </div>
-      <div className={`text-[#64748b] font-bold ${isSmall ? 'text-[7px]' : 'text-[8.5px]'} tracking-[0.26em] uppercase mt-1`}>
+      <div 
+        style={{ color: '#64748b', letterSpacing: '0.22em' }}
+        className={`font-bold ${isSmall ? 'text-[6.5px]' : 'text-[7.5px]'} uppercase mt-0.5`}
+      >
         HOMESTAYS &nbsp;|&nbsp; STAYS &nbsp;|&nbsp; EXPERIENCES
       </div>
     </div>
@@ -47,25 +56,28 @@ export function WowGatewaysLogo({ size = 'default' }) {
  */
 export function DocumentCorporateFooter() {
   return (
-    <div className="pt-4 border-t border-slate-200 mt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-600">
-      <div className="flex items-center gap-2">
-        <span className="font-black text-[#0f233a] tracking-tight">
+    <div 
+      style={{ borderTop: '1px solid #e2e8f0', color: '#475569' }}
+      className="pt-2 mt-2 flex flex-col sm:flex-row items-center justify-between gap-2 text-[9.5px]"
+    >
+      <div className="flex items-center gap-1.5">
+        <span className="font-black text-[#0f233a]">
           WOW <span className="text-[#e11d48]">GATEWAYS</span>
         </span>
         <span className="text-slate-300">•</span>
         <span className="text-slate-500 font-medium">Stay Local • Explore More • Live Better</span>
       </div>
-      <div className="flex items-center gap-4 text-slate-600 flex-wrap justify-center font-medium">
-        <a href="tel:+919770097010" className="flex items-center gap-1.5 hover:text-slate-900 transition-colors">
-          <Phone size={12} className="text-slate-400" />
+      <div className="flex items-center gap-3.5 text-slate-600 flex-wrap justify-center font-medium">
+        <a href="tel:+919770097010" className="flex items-center gap-1 hover:text-slate-900 transition-colors">
+          <Phone size={11} className="text-slate-400" />
           <span>+91 9770097010</span>
         </a>
-        <a href="mailto:support@wowgateways.com" className="flex items-center gap-1.5 hover:text-slate-900 transition-colors">
-          <Mail size={12} className="text-slate-400" />
+        <a href="mailto:support@wowgateways.com" className="flex items-center gap-1 hover:text-slate-900 transition-colors">
+          <Mail size={11} className="text-slate-400" />
           <span>support@wowgateways.com</span>
         </a>
-        <a href="https://www.wowgateways.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-slate-900 transition-colors">
-          <Globe size={12} className="text-slate-400" />
+        <a href="https://www.wowgateways.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-slate-900 transition-colors">
+          <Globe size={11} className="text-slate-400" />
           <span>www.wowgateways.com</span>
         </a>
       </div>
@@ -96,7 +108,7 @@ export function DocumentActionBar({
   };
 
   return (
-    <div className="flex flex-wrap justify-between items-center gap-3 print:hidden max-w-[850px] mx-auto w-full mb-4">
+    <div className="flex flex-wrap justify-between items-center gap-3 print:hidden max-w-[780px] mx-auto w-full mb-3">
       <button 
         type="button"
         onClick={onBack}
@@ -110,18 +122,18 @@ export function DocumentActionBar({
         <button 
           type="button"
           onClick={handleCopy}
-          className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs uppercase tracking-wider cursor-pointer border border-slate-200 flex items-center gap-1.5 transition-all shadow-xs"
+          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs uppercase tracking-wider cursor-pointer border border-slate-200 flex items-center gap-1.5 transition-all shadow-xs"
           title="Copy shareable link"
         >
           {copied ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
-          <span>{copied ? 'Copied Link' : 'Copy Link'}</span>
+          <span>{copied ? 'Copied' : 'Copy Link'}</span>
         </button>
 
         {onShareWhatsApp && (
           <button 
             type="button"
             onClick={onShareWhatsApp}
-            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs uppercase tracking-wider cursor-pointer border-none flex items-center gap-1.5 shadow-xs transition-all"
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs uppercase tracking-wider cursor-pointer border-none flex items-center gap-1.5 shadow-xs transition-all"
             title="Share via WhatsApp"
           >
             <Share2 size={13} />
@@ -133,7 +145,7 @@ export function DocumentActionBar({
           type="button"
           onClick={onDownloadPdf}
           disabled={downloadingPdf}
-          className="px-4 py-2 bg-[#e11d48] hover:bg-rose-700 disabled:bg-rose-300 text-white font-bold rounded-lg text-xs uppercase tracking-wider cursor-pointer border-none flex items-center gap-1.5 shadow-xs transition-all"
+          className="px-3.5 py-1.5 bg-[#e11d48] hover:bg-rose-700 disabled:bg-rose-300 text-white font-bold rounded-lg text-xs uppercase tracking-wider cursor-pointer border-none flex items-center gap-1.5 shadow-xs transition-all"
           title={`Download ${documentTitle} as PDF`}
         >
           {downloadingPdf ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
@@ -143,7 +155,7 @@ export function DocumentActionBar({
         <button 
           type="button"
           onClick={onPrint}
-          className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs uppercase tracking-wider cursor-pointer border border-slate-200 flex items-center gap-1.5 transition-all shadow-xs"
+          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs uppercase tracking-wider cursor-pointer border border-slate-200 flex items-center gap-1.5 transition-all shadow-xs"
           title={`Print ${documentTitle}`}
         >
           <Printer size={13} />
@@ -175,7 +187,7 @@ export function useUpiQrCode(upiId, payeeName, amount) {
       : `upi://pay?pa=${cleanUpi}&pn=${cleanPayee}&cu=INR`;
 
     QRCode.toDataURL(upiString, {
-      width: 140,
+      width: 120,
       margin: 1,
       color: {
         dark: '#0f172a',

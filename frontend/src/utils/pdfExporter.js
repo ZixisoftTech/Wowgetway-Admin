@@ -3,7 +3,7 @@ import { sanitizeHtml2CanvasClone, wrapStyleDeclaration } from './pdfColorSaniti
 
 /**
  * Universal, fail-safe PDF exporter that generates direct .pdf downloads
- * without crashing on modern CSS oklch functions or triggering browser print dialogs.
+ * with crisp fonts, proper word spacing, and exact single-page A4 scaling.
  * 
  * @param {HTMLElement} element - The DOM element to export to PDF
  * @param {string} filename - Desired PDF file name (e.g. 'Quotation_123.pdf')
@@ -19,14 +19,14 @@ export async function generatePdfFromElement(element, filename = 'document.pdf',
   const cleanFilename = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
 
   const defaultOpt = {
-    margin: [6, 6, 6, 6],
+    margin: [4, 4, 4, 4], // Compact 4mm margin to maximize printable space
     filename: cleanFilename,
     image: { type: 'jpeg', quality: 0.98 },
     html2canvas: {
       scale: 2,
       useCORS: true,
       logging: false,
-      letterRendering: true,
+      letterRendering: false, // Must be FALSE: true breaks word spacing in html2canvas
       backgroundColor: '#ffffff',
       onclone: sanitizeHtml2CanvasClone
     },
@@ -35,7 +35,7 @@ export async function generatePdfFromElement(element, filename = 'document.pdf',
       format: 'a4',
       orientation: 'portrait'
     },
-    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+    pagebreak: { mode: ['avoid-all'] }
   };
 
   const mergedOpt = {
@@ -44,6 +44,7 @@ export async function generatePdfFromElement(element, filename = 'document.pdf',
     html2canvas: {
       ...defaultOpt.html2canvas,
       ...(options.html2canvas || {}),
+      letterRendering: false,
       onclone: sanitizeHtml2CanvasClone
     }
   };

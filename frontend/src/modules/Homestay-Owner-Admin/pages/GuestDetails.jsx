@@ -577,7 +577,13 @@ export default function GuestDetails() {
               {bookingHistory.map((hb) => (
                 <tr key={hb.dbId || hb.id} className={`hover:bg-slate-50/30 transition-colors ${hb.isCurrent ? 'bg-rose-50/15' : ''}`}>
                   <td className="py-4 px-4.5">
-                    <span className="font-mono font-black text-slate-800 block">#{hb.id}</span>
+                    <button
+                      onClick={() => navigate(`/homestay-owner/bookings/${hb.dbId || hb.id}`)}
+                      className="font-mono font-black text-rose-600 hover:text-rose-800 hover:underline block bg-transparent border-none cursor-pointer p-0 text-left"
+                      title="Open Booking Details"
+                    >
+                      #{hb.id}
+                    </button>
                     {hb.isCurrent && (
                       <span className="text-[8px] bg-rose-100 text-rose-700 font-extrabold px-1.5 py-0.2 rounded uppercase inline-block mt-0.5">
                         Viewing Now
@@ -613,17 +619,24 @@ export default function GuestDetails() {
                     </span>
                   </td>
                   <td className="py-4 px-4.5 text-center">
-                    {!hb.isCurrent ? (
+                    <div className="flex items-center justify-center gap-1.5">
                       <button
-                        onClick={() => navigate(`/homestay-owner/guests/${hb.dbId || hb.id}`)}
-                        className="px-2.5 py-1 bg-white border border-slate-205 hover:bg-slate-50 text-slate-707 rounded-lg text-[9px] font-black uppercase cursor-pointer transition-all"
-                        title="View this stay details"
+                        onClick={() => navigate(`/homestay-owner/bookings/${hb.dbId || hb.id}`)}
+                        className="px-2.5 py-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-[9px] font-black uppercase cursor-pointer"
+                        title="View Full Booking Details"
                       >
-                        Switch Stay
+                        Details
                       </button>
-                    ) : (
-                      <span className="text-[9px] text-slate-400 font-extrabold uppercase">Active</span>
-                    )}
+                      {!hb.isCurrent && (
+                        <button
+                          onClick={() => navigate(`/homestay-owner/guests/${hb.dbId || hb.id}`)}
+                          className="px-2.5 py-1 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 rounded-lg text-[9px] font-black uppercase cursor-pointer transition-all"
+                          title="View this stay details"
+                        >
+                          Switch Stay
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

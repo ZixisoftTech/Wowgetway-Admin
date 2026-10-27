@@ -31,6 +31,7 @@ import {
   Ban,
   Filter
 } from 'lucide-react';
+import FullBookingDetailsModal from '../components/FullBookingDetailsModal.jsx';
 
 const getApiUrl = (path) => {
   const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
@@ -284,8 +285,8 @@ export default function ManageBookings() {
   // 3. Open Reschedule Modal
   const handleOpenReschedule = (b) => {
     setRescheduleBooking(b);
-    setRescheduleCheckIn(toInputDateString(b.checkInDate));
-    setRescheduleCheckOut(toInputDateString(b.checkOutDate));
+    setRescheduleCheckIn(toInputDateString(b.checkInDate || b.rawCheckIn || b.checkIn));
+    setRescheduleCheckOut(toInputDateString(b.checkOutDate || b.rawCheckOut || b.checkOut));
     setIsRescheduleModalOpen(true);
   };
 
@@ -308,8 +309,12 @@ export default function ManageBookings() {
       setRescheduleSubmitting(true);
       const token = getAuthToken();
       const res = await axios.patch(getApiUrl(`/api/homestay-owner/bookings/${bookingId}/reschedule`), {
+        checkInDate: rescheduleCheckIn,
         checkIn: rescheduleCheckIn,
-        checkOut: rescheduleCheckOut
+        newCheckIn: rescheduleCheckIn,
+        checkOutDate: rescheduleCheckOut,
+        checkOut: rescheduleCheckOut,
+        newCheckOut: rescheduleCheckOut
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -346,7 +351,11 @@ export default function ManageBookings() {
   // 4. Open Record Payment Modal
   const handleOpenPayment = (b) => {
     setPaymentBooking(b);
-    const pend = Number(b.pricing?.pendingAmount !== undefined ? b.pricing.pendingAmount : Math.max(0, (b.pricing?.finalAmount || 0) - (b.pricing?.paidAmount || 0)));
+    const pend = Number(b.pricing?.pendingAmount !== undefined ? b.pricing.pendingAmount : Math.max(0, (b.pricing?.finalAmount || b.amount || 0) - (b.pricing?.paidAmount || 0)));
+    if (pend <= 0) {
+      Swal.fire('Fully Settled', 'This booking has zero outstanding balance.', 'info');
+      return;
+    }
     setPaymentAmount(pend > 0 ? pend : '');
     setPaymentMethod(b.paymentMethod || 'UPI');
     setPaymentTransactionId('');
@@ -358,9 +367,23 @@ export default function ManageBookings() {
     e.preventDefault();
     if (!paymentBooking) return;
     const bookingId = paymentBooking._id || paymentBooking.id;
+    const numAmt = Number(paymentAmount);
 
-    if (!paymentAmount || Number(paymentAmount) <= 0) {
-      Swal.fire({ icon: 'warning', title: 'Invalid Amount', text: 'Please enter a valid payment amount.' });
+    if (!numAmt || numAmt <= 0) {
+      Swal.fire({ icon: 'warning', title: 'Invalid Amount', text: 'Please enter a valid payment amount greater than zero.' });
+      return;
+    }
+
+    const finalAmt = Number(paymentBooking.pricing?.finalAmount || paymentBooking.amount || 0);
+    const curPaid = Number(paymentBooking.pricing?.paidAmount || 0);
+    const pend = Number(paymentBooking.pricing?.pendingAmount !== undefined ? paymentBooking.pricing.pendingAmount : Math.max(0, finalAmt - curPaid));
+
+    if (numAmt > pend) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Overpayment Not Allowed',
+        text: `Cannot collect ₹${numAmt.toLocaleString()}. Maximum collectible remaining balance is ₹${pend.toLocaleString()}.`
+      });
       return;
     }
 
@@ -368,7 +391,7 @@ export default function ManageBookings() {
       setPaymentSubmitting(true);
       const token = getAuthToken();
       const res = await axios.patch(getApiUrl(`/api/homestay-owner/bookings/${bookingId}/payment`), {
-        amount: Number(paymentAmount),
+        amount: numAmt,
         paymentMethod,
         transactionId: paymentTransactionId,
         remark: paymentRemark
@@ -413,8 +436,13 @@ export default function ManageBookings() {
     }
   };
 
-  // 5. Open Edit Booking Modal
+  // 5. Open Edit Booking Wizard
   const handleOpenEdit = (b) => {
+    const id = b?._id || b?.id || b?.dbId;
+    if (id) {
+      navigate(`/homestay-owner/bookings/create?editId=${id}`);
+      return;
+    }
     setEditBooking(b);
     setEditGuestName(b.customer?.name || '');
     setEditGuestPhone(b.customer?.mobile || '');
@@ -788,9 +816,13 @@ export default function ManageBookings() {
                     <tr key={b._id} className="hover:bg-slate-50/40 transition-colors">
                       {/* 1. Booking ID */}
                       <td className="py-4 px-3 align-middle">
-                        <span className="font-mono text-xs font-black text-slate-800 block">
+                        <button
+                          onClick={() => setSelectedBooking(b)}
+                          className="font-mono text-xs font-black text-rose-600 hover:text-rose-800 hover:underline block bg-transparent border-none cursor-pointer p-0 text-left"
+                          title="Open Full Booking Details"
+                        >
                           {b.bookingId || b._id?.slice(-8).toUpperCase()}
-                        </span>
+                        </button>
                         <span className="text-[10px] text-slate-400 block font-mono mt-0.5">
                           {formatDateDisplay(b.createdAt)}
                         </span>
@@ -798,7 +830,14 @@ export default function ManageBookings() {
 
                       {/* 2. Guest Information */}
                       <td className="py-4 px-3 align-middle">
-                        <div className="font-bold text-xs text-slate-800 capitalize">{b.customer?.name || 'Guest'}</div>
+                        <button
+                          onClick={() => navigate(`/homestay-owner/guests/${b._id || b.bookingId || b.customer?.mobile}`)}
+                          className="font-bold text-xs text-slate-800 hover:text-rose-600 hover:underline capitalize bg-transparent border-none cursor-pointer p-0 text-left flex items-center gap-1 group"
+                          title="View Guest Details & Stay History"
+                        >
+                          <span>{b.customer?.name || 'Guest'}</span>
+                          <ExternalLink size={10} className="text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </button>
                         <div className="flex items-center gap-1.5 mt-0.5">
                           <span className="text-[10px] text-slate-400 font-mono">{b.customer?.mobile || 'No phone'}</span>
                           {b.customer?.mobile && (
@@ -934,239 +973,13 @@ export default function ManageBookings() {
         </div>
       </div>
 
-      {/* FULL BOOKING DETAILS DRAWER / MODAL */}
-      {selectedBooking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-5 border border-slate-100 max-h-[90vh] overflow-y-auto">
-            {/* Header */}
-            <div className="flex justify-between items-start border-b border-slate-100 pb-4">
-              <div>
-                <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest block">
-                  Booking Operations & Ledger
-                </span>
-                <h2 className="text-base font-black text-slate-800 tracking-tight mt-0.5">
-                  {selectedBooking.bookingId || selectedBooking._id}
-                </h2>
-              </div>
-              <button 
-                onClick={() => setSelectedBooking(null)}
-                className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-600 cursor-pointer bg-transparent border-none transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Guest Summary Card */}
-            <div className="flex items-center gap-3.5 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center font-black text-lg border border-white shadow-xs">
-                {selectedBooking.customer?.name ? selectedBooking.customer.name.charAt(0).toUpperCase() : 'G'}
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-black text-slate-800 truncate">{selectedBooking.customer?.name || 'Guest'}</h3>
-                <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 font-semibold">
-                  <span>{selectedBooking.customer?.mobile || 'No phone'}</span>
-                  {selectedBooking.customer?.email && <span>• {selectedBooking.customer.email}</span>}
-                </div>
-              </div>
-
-              {selectedBooking.customer?.mobile && (
-                <div className="flex items-center gap-1.5">
-                  <a 
-                    href={`tel:${selectedBooking.customer.mobile}`}
-                    className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-rose-600 flex items-center justify-center hover:bg-rose-50"
-                    title="Call"
-                  >
-                    <Phone size={13} className="stroke-[2.5]" />
-                  </a>
-                  <a 
-                    href={`https://wa.me/${selectedBooking.customer.mobile.replace(/[^0-9]/g, '')}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-emerald-600 flex items-center justify-center hover:bg-emerald-50"
-                    title="WhatsApp"
-                  >
-                    <MessageSquare size={13} className="stroke-[2.5]" />
-                  </a>
-                </div>
-              )}
-            </div>
-
-            {/* Room & Stay Grid */}
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Property & Room</span>
-                <span className="font-bold text-slate-800 block mt-1">{selectedBooking.propertyId?.name || 'Homestay'}</span>
-                <span className="text-[11px] font-extrabold text-rose-600 block mt-0.5">
-                  {selectedBooking.roomDetails?.roomNumber || 'Room'} ({selectedBooking.roomDetails?.categoryName || 'Standard'})
-                </span>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Stay Schedule</span>
-                <span className="font-bold text-slate-800 block mt-1 font-mono text-[11px]">
-                  Check-in: {formatDateDisplay(selectedBooking.checkInDate)}
-                </span>
-                <span className="font-bold text-slate-800 block mt-0.5 font-mono text-[11px]">
-                  Check-out: {formatDateDisplay(selectedBooking.checkOutDate)}
-                </span>
-              </div>
-            </div>
-
-            {/* Financial Breakdown */}
-            <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-100 space-y-2 text-xs">
-              <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Financial Breakdown</span>
-              <div className="flex justify-between text-slate-600">
-                <span>Base Room Tariff:</span>
-                <span className="font-mono font-bold">₹{Number(selectedBooking.pricing?.basePrice || 0).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>Taxes & Fees:</span>
-                <span className="font-mono font-bold">₹{Number(selectedBooking.pricing?.tax || 0).toLocaleString()}</span>
-              </div>
-              {selectedBooking.pricing?.addOns > 0 && (
-                <div className="flex justify-between text-slate-600">
-                  <span>Add-ons ({selectedBooking.pricing.addOnsRemark || 'Extras'}):</span>
-                  <span className="font-mono font-bold">₹{Number(selectedBooking.pricing.addOns).toLocaleString()}</span>
-                </div>
-              )}
-              <div className="flex justify-between items-center pt-2 border-t border-slate-200 text-slate-800 font-black">
-                <span>Total Bill:</span>
-                <span className="text-sm font-mono">₹{Number(selectedBooking.pricing?.finalAmount || selectedBooking.amount || 0).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-emerald-700 font-bold">
-                <span>Paid / Collected:</span>
-                <span className="font-mono">₹{Number(selectedBooking.pricing?.paidAmount || 0).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-rose-700 font-bold">
-                <span>Balance Pending:</span>
-                <span className="font-mono">
-                  ₹{Number(selectedBooking.pricing?.pendingAmount !== undefined ? selectedBooking.pricing.pendingAmount : Math.max(0, (selectedBooking.pricing?.finalAmount || 0) - (selectedBooking.pricing?.paidAmount || 0))).toLocaleString()}
-                </span>
-              </div>
-            </div>
-
-            {/* Payment History */}
-            {selectedBooking.paymentHistory && selectedBooking.paymentHistory.length > 0 && (
-              <div className="border border-slate-100 p-4 rounded-2xl bg-white space-y-2">
-                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Payment Transactions</span>
-                <div className="space-y-1.5 max-h-28 overflow-y-auto pr-1">
-                  {selectedBooking.paymentHistory.map((ph, idx) => (
-                    <div key={idx} className="flex justify-between items-center text-xs p-2 bg-slate-50 rounded-xl border border-slate-100">
-                      <div>
-                        <span className="font-bold text-slate-800 block">₹{Number(ph.amount).toLocaleString()}</span>
-                        <span className="text-[9px] text-slate-400">
-                          {ph.method} • {formatDateDisplay(ph.date)} {ph.remark ? `(${ph.remark})` : ''}
-                        </span>
-                      </div>
-                      <span className="text-[9px] font-black px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded uppercase">
-                        Settled
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Special Requests */}
-            {selectedBooking.specialRequests && (
-              <div className="p-3 bg-amber-50/60 rounded-2xl border border-amber-200 text-xs">
-                <span className="text-[9px] font-black text-amber-700 uppercase tracking-wider block">Special Requests</span>
-                <p className="text-slate-700 mt-1">{selectedBooking.specialRequests}</p>
-              </div>
-            )}
-
-            {/* Operations Action Buttons */}
-            <div className="space-y-2 pt-2 border-t border-slate-100">
-              <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Operations & Actions</span>
-              
-              {/* If Hold Booking: Confirm and Remove Hold */}
-              {selectedBooking.bookingStatus === 'Hold' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => handleConfirmHold(selectedBooking)}
-                    className="py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-sm flex items-center justify-center gap-1.5"
-                  >
-                    <CheckCircle size={14} />
-                    <span>Confirm Booking</span>
-                  </button>
-                  <button
-                    onClick={() => handleRemoveHold(selectedBooking)}
-                    className="py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border border-rose-200 flex items-center justify-center gap-1.5"
-                  >
-                    <Trash2 size={13} />
-                    <span>Remove Hold</span>
-                  </button>
-                </div>
-              )}
-
-              {/* Action Buttons Row */}
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => handleOpenReschedule(selectedBooking)}
-                  className="py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer border-none"
-                >
-                  <CalendarDays size={13} />
-                  <span>Reschedule</span>
-                </button>
-
-                <button
-                  onClick={() => handleOpenPayment(selectedBooking)}
-                  className="py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer border-none"
-                >
-                  <CreditCard size={13} />
-                  <span>Record Pay</span>
-                </button>
-
-                <button
-                  onClick={() => handleOpenEdit(selectedBooking)}
-                  className="py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer border-none"
-                >
-                  <Edit3 size={13} />
-                  <span>Edit Info</span>
-                </button>
-              </div>
-
-              {/* Printable Documents Row */}
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                <button
-                  onClick={() => navigate(`/homestay-owner/bookings/confirmation-slip/${selectedBooking._id}`)}
-                  className="py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer bg-white"
-                >
-                  <Receipt size={12} />
-                  <span>Slip</span>
-                </button>
-
-                <button
-                  onClick={() => navigate(`/homestay-owner/bookings/quotation/${selectedBooking._id}`)}
-                  className="py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer bg-white"
-                >
-                  <FileText size={12} />
-                  <span>Quotation</span>
-                </button>
-
-                <button
-                  onClick={() => navigate(`/homestay-owner/bookings/invoice/${selectedBooking._id}`)}
-                  className="py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer bg-white"
-                >
-                  <FileText size={12} />
-                  <span>Tax Invoice</span>
-                </button>
-              </div>
-
-              {/* Cancel Booking button */}
-              {selectedBooking.bookingStatus !== 'Cancelled' && (
-                <button
-                  onClick={() => handleOpenCancel(selectedBooking)}
-                  className="w-full py-2.5 mt-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border border-rose-200 flex items-center justify-center gap-1.5 transition-colors"
-                >
-                  <Ban size={13} />
-                  <span>Cancel This Booking</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* FULL BOOKING DETAILS MODAL (Change 1 & Bug 2) */}
+      <FullBookingDetailsModal
+        isOpen={!!selectedBooking}
+        booking={selectedBooking}
+        onClose={() => setSelectedBooking(null)}
+        onRefresh={fetchBookings}
+      />
 
       {/* 1. RESCHEDULE MODAL */}
       {isRescheduleModalOpen && (

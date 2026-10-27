@@ -62,7 +62,26 @@ axios.interceptors.response.use(
       (error.response.status === 403 && (error.response.data?.code === 'TOKEN_EXPIRED' || error.response.data?.error?.includes('expired')))
     );
 
-    if (isTokenExpired && !originalRequest._retry) {
+    const requestUrl = originalRequest?.url || '';
+    const isAuthEndpoint = requestUrl.includes('/auth/refresh') || requestUrl.includes('/auth/login');
+
+    if (isTokenExpired && !originalRequest._retry && !isAuthEndpoint) {
+      const storedRefreshToken = localStorage.getItem('superAdminRefreshToken') || localStorage.getItem('refreshToken');
+      
+      // If neither stored refresh token nor cookie exists, avoid calling refresh and redirect immediately
+      if (!storedRefreshToken && typeof document !== 'undefined' && !document.cookie.includes('refreshToken')) {
+        console.warn('[Auth Interceptor] No refresh token available. Logging out and redirecting to login...');
+        store.dispatch(logout());
+        localStorage.removeItem('superAdminToken');
+        localStorage.removeItem('token');
+        localStorage.removeItem('superAdminRefreshToken');
+        localStorage.removeItem('superAdminUser');
+        if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
+        return Promise.reject(error);
+      }
+
       // If we are already renewing the token, queue the request
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
@@ -82,7 +101,6 @@ axios.interceptors.response.use(
         const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         const base = isLocal ? (import.meta.env.VITE_API_URL || 'http://localhost:5005') : 'https://backend-sand-nine-13.vercel.app';
         console.log('[Auth Interceptor] Access token expired. Attempting token refresh...');
-        const storedRefreshToken = localStorage.getItem('superAdminRefreshToken') || localStorage.getItem('refreshToken');
         const res = await axios.post(`${base}/api/auth/refresh`, { refreshToken: storedRefreshToken }, {
           headers: storedRefreshToken ? { 'x-refresh-token': storedRefreshToken } : {}
         });

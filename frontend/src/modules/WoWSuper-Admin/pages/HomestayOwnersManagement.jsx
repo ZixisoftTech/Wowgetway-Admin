@@ -66,7 +66,13 @@ export default function HomestayOwnersManagement() {
   }, [location.pathname, routeId]);
 
   // 1. Fetch Paginated Owners List
-  const { data: ownersData = { data: [], totalRecords: 0 }, isLoading: listLoading } = useQuery({
+  const { 
+    data: ownersData = { data: [], totalRecords: 0 }, 
+    isLoading: listLoading,
+    isError: listError,
+    error: listErrorObj,
+    refetch: refetchList
+  } = useQuery({
     queryKey: ['ownersList', searchQuery, statusFilter, currentPage],
     queryFn: async () => {
       const response = await axios.get(API_BASE_URL, {
@@ -82,7 +88,8 @@ export default function HomestayOwnersManagement() {
         return { data: response.data, totalRecords: response.data.length };
       }
       return response.data;
-    }
+    },
+    retry: (failureCount, error) => error?.response?.status !== 401 && error?.response?.status !== 403 && failureCount < 2
   });
 
   const ownersList = ownersData.data || [];
@@ -95,12 +102,17 @@ export default function HomestayOwnersManagement() {
   }, [searchQuery, statusFilter]);
 
   // 2. Fetch KPI Stats
-  const { data: stats = { totalOwners: 0, activeOwners: 0, pendingVerification: 0, totalProperties: 0 }, isLoading: statsLoading } = useQuery({
+  const { 
+    data: stats = { totalOwners: 0, activeOwners: 0, pendingVerification: 0, totalProperties: 0 }, 
+    isLoading: statsLoading,
+    isError: statsError
+  } = useQuery({
     queryKey: ['ownersStats'],
     queryFn: async () => {
       const response = await axios.get(`${API_BASE_URL}/stats`);
       return response.data;
-    }
+    },
+    retry: (failureCount, error) => error?.response?.status !== 401 && error?.response?.status !== 403 && failureCount < 2
   });
 
   // 3. Fetch Single Owner Details
@@ -335,7 +347,7 @@ export default function HomestayOwnersManagement() {
               iconBgColor="bg-blue-500/10"
               iconColor="text-blue-600"
               bgColor="bg-[#edf4ff]"
-              loading={statsLoading}
+              loading={statsLoading && !statsError}
             />
             <MetricCard
               title="Active Owners"
@@ -344,7 +356,7 @@ export default function HomestayOwnersManagement() {
               iconBgColor="bg-emerald-500/10"
               iconColor="text-emerald-650"
               bgColor="bg-[#ecfbf3]"
-              loading={statsLoading}
+              loading={statsLoading && !statsError}
             />
             <MetricCard
               title="Pending Verification"
@@ -353,7 +365,7 @@ export default function HomestayOwnersManagement() {
               iconBgColor="bg-amber-500/10"
               iconColor="text-amber-650"
               bgColor="bg-[#fff8f0]"
-              loading={statsLoading}
+              loading={statsLoading && !statsError}
             />
             <MetricCard
               title="Linked Homestays"
@@ -362,7 +374,7 @@ export default function HomestayOwnersManagement() {
               iconBgColor="bg-indigo-500/10"
               iconColor="text-indigo-650"
               bgColor="bg-[#f8f0ff]"
-              loading={statsLoading}
+              loading={statsLoading && !statsError}
             />
           </div>
 
@@ -424,6 +436,24 @@ export default function HomestayOwnersManagement() {
                           <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce" />
                           <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce delay-75" />
                           <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce delay-150" />
+                        </div>
+                      </td>
+                    </tr>
+                  ) : listError ? (
+                    <tr>
+                      <td colSpan="9" className="py-12 text-center">
+                        <div className="flex flex-col items-center justify-center gap-2 max-w-md mx-auto text-slate-600">
+                          <ShieldAlert size={28} className="text-amber-500" />
+                          <span className="text-xs font-semibold text-slate-700">
+                            {listErrorObj?.response?.data?.message || listErrorObj?.response?.data?.error || 'Unable to load homestay owners at this moment.'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => refetchList()}
+                            className="mt-2 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm"
+                          >
+                            Retry Request
+                          </button>
                         </div>
                       </td>
                     </tr>

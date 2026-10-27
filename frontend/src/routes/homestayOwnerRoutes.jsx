@@ -19,6 +19,7 @@ import BookingRequestDetails from '../modules/Homestay-Owner-Admin/pages/Booking
 import BookingConfirmationSlip from '../modules/Homestay-Owner-Admin/pages/BookingConfirmationSlip.jsx';
 import BookingQuotation from '../modules/Homestay-Owner-Admin/pages/BookingQuotation.jsx';
 import BookingTaxInvoice from '../modules/Homestay-Owner-Admin/pages/BookingTaxInvoice.jsx';
+import BookingDetailsPage from '../modules/Homestay-Owner-Admin/pages/BookingDetailsPage.jsx';
 import ManageBookings from '../modules/Homestay-Owner-Admin/pages/ManageBookings.jsx';
 import ManagePayments from '../modules/Homestay-Owner-Admin/pages/ManagePayments.jsx';
 import ComingSoon from '../modules/Homestay-Owner-Admin/pages/ComingSoon.jsx';
@@ -42,6 +43,11 @@ export const getHomestayOwnerRoutes = () => (
 
     {/* Booking Wizard Route */}
     <Route path="bookings/create" element={<CreateBookingFlow />} />
+    <Route path="bookings/edit/:bookingId" element={<CreateBookingFlow />} />
+    
+    {/* Booking Canonical Details Routes */}
+    <Route path="bookings/details/:bookingId" element={<BookingDetailsPage />} />
+    <Route path="bookings/:bookingId" element={<BookingDetailsPage />} />
     
     {/* Booking Requests Routes */}
     <Route path="bookings/requests" element={<BookingRequests />} />

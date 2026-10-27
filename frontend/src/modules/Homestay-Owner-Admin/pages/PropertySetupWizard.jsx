@@ -37,7 +37,9 @@ import {
   Search,
   Crown,
   CreditCard,
-  PlusCircle
+  PlusCircle,
+  Loader2,
+  CheckCircle2
 } from 'lucide-react';
 
 const getApiUrl = (path) => {
@@ -170,13 +172,22 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
   const [addonRoomsCount, setAddonRoomsCount] = useState(1);
   const [addonPurchasing, setAddonPurchasing] = useState(false);
 
+  // Real-time Image Upload & Progress States
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0); // 0 to 100
+  const [uploadStatusText, setUploadStatusText] = useState('');
+  const [uploadingCategory, setUploadingCategory] = useState(null); // 'cover', catKey, or replace key
+  const [uploadingFilesCount, setUploadingFilesCount] = useState({ current: 0, total: 0 });
+
   const isReadOnly = !isAdmin && (propertyStatus === 'Submitted For Review' || propertyStatus === 'Pending Approval');
 
   const getAuthToken = () => {
+    const superToken = localStorage.getItem('superAdminToken') || localStorage.getItem('token');
+    const ownerToken = localStorage.getItem('homestayOwnerToken');
     if (isAdmin) {
-      return localStorage.getItem('superAdminToken') || localStorage.getItem('homestayOwnerToken');
+      return superToken || ownerToken;
     }
-    return localStorage.getItem('homestayOwnerToken') || localStorage.getItem('superAdminToken');
+    return ownerToken || superToken;
   };
 
   const handleExit = () => {
@@ -495,55 +506,135 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
     }
   };
 
-  // Image Upload handler
+  // Image Upload handler with real-time progress tracking
   const handleImageUpload = async (e, categoryKey) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
 
-    const token = localStorage.getItem('homestayOwnerToken');
-    if (!token) return;
+    const files = Array.from(fileList);
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    const token = getAuthToken();
+    if (!token) {
+      Swal.fire({
+        title: 'Authentication Required',
+        text: 'Please log in to upload property images.',
+        icon: 'warning',
+        confirmButtonColor: '#e11d48'
+      });
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    // Size validation
+    for (const file of files) {
       if (file.size > 10 * 1024 * 1024) {
-        Swal.fire('File Too Large', `Image ${file.name} exceeds the 10MB limit.`, 'error');
-        continue;
+        Swal.fire({
+          title: 'File Too Large',
+          text: `Image "${file.name}" exceeds the 10MB limit.`,
+          icon: 'error',
+          confirmButtonColor: '#e11d48'
+        });
+        if (e.target) e.target.value = '';
+        return;
+      }
+    }
+
+    setIsUploading(true);
+    setUploadingCategory(categoryKey);
+    setUploadProgress(5);
+    setUploadingFilesCount({ current: 1, total: files.length });
+    setUploadStatusText(`Preparing to upload ${files.length} image${files.length > 1 ? 's' : ''}...`);
+
+    try {
+      const uploadedUrls = [];
+      const totalFiles = files.length;
+
+      for (let i = 0; i < totalFiles; i++) {
+        const file = files[i];
+        setUploadingFilesCount({ current: i + 1, total: totalFiles });
+
+        const uploadForm = new FormData();
+        uploadForm.append('file', file);
+
+        const res = await axios.post(
+          getApiUrl('/api/homestay-owner/properties/upload-image'),
+          uploadForm,
+          {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+              Authorization: `Bearer ${token}`
+            },
+            onUploadProgress: (progressEvent) => {
+              if (progressEvent.total) {
+                const filePercent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                const overallPercent = Math.min(
+                  98,
+                  Math.round(((i + filePercent / 100) / totalFiles) * 100)
+                );
+                setUploadProgress(overallPercent);
+                setUploadStatusText(
+                  totalFiles > 1
+                    ? `Uploading ${i + 1} of ${totalFiles}: "${file.name.slice(0, 15)}..." (${filePercent}%)`
+                    : `Uploading "${file.name.slice(0, 20)}..." (${filePercent}%)`
+                );
+              }
+            }
+          }
+        );
+
+        const uploadedUrl = res.data.optimizedUrl || res.data.originalUrl;
+        if (uploadedUrl) {
+          uploadedUrls.push(uploadedUrl);
+        }
       }
 
-      const uploadForm = new FormData();
-      uploadForm.append('file', file);
+      // Update state with newly uploaded image(s)
+      setFormData(prev => {
+        let updated = {};
+        if (categoryKey === 'cover') {
+          updated = {
+            ...prev,
+            gallery: { ...prev.gallery, cover: uploadedUrls[0] || prev.gallery.cover }
+          };
+        } else {
+          const currentList = prev.gallery[categoryKey] || [];
+          const updatedList = [...currentList, ...uploadedUrls];
+          updated = {
+            ...prev,
+            gallery: { ...prev.gallery, [categoryKey]: updatedList }
+          };
+        }
+        autoSave(updated);
+        return updated;
+      });
 
-      try {
-        const res = await axios.post(getApiUrl('/api/homestay-owner/properties/upload-image'), uploadForm, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-            Authorization: `Bearer ${token}`
-          }
-        });
+      setUploadProgress(100);
+      setUploadStatusText(`Upload complete! Successfully uploaded ${uploadedUrls.length} image${uploadedUrls.length > 1 ? 's' : ''}.`);
 
-        const uploadedUrl = res.data.optimizedUrl;
+      setTimeout(() => {
+        setIsUploading(false);
+        setUploadingCategory(null);
+        setUploadProgress(0);
+        setUploadStatusText('');
+        setUploadingFilesCount({ current: 0, total: 0 });
+      }, 1000);
 
-        setFormData(prev => {
-          let updated = {};
-          if (categoryKey === 'cover') {
-            updated = {
-              ...prev,
-              gallery: { ...prev.gallery, cover: uploadedUrl }
-            };
-          } else {
-            const list = [...(prev.gallery[categoryKey] || []), uploadedUrl];
-            updated = {
-              ...prev,
-              gallery: { ...prev.gallery, [categoryKey]: list }
-            };
-          }
-          autoSave(updated);
-          return updated;
-        });
-      } catch (err) {
-        console.error(err);
-        Swal.fire('Upload Failed', err.response?.data?.message || 'Could not upload image.', 'error');
-      }
+    } catch (err) {
+      console.error('Image upload error:', err);
+      const errMsg = err.response?.data?.message || err.message || 'Could not upload image. Please try again.';
+      Swal.fire({
+        title: 'Upload Failed',
+        text: errMsg,
+        icon: 'error',
+        confirmButtonColor: '#e11d48'
+      });
+      setIsUploading(false);
+      setUploadingCategory(null);
+      setUploadProgress(0);
+      setUploadStatusText('');
+      setUploadingFilesCount({ current: 0, total: 0 });
+    } finally {
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -551,27 +642,58 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const token = localStorage.getItem('homestayOwnerToken');
-    if (!token) return;
-
-    if (file.size > 10 * 1024 * 1024) {
-      Swal.fire('File Too Large', 'Image exceeds the 10MB limit.', 'error');
+    const token = getAuthToken();
+    if (!token) {
+      Swal.fire({
+        title: 'Authentication Required',
+        text: 'Please log in again.',
+        icon: 'warning',
+        confirmButtonColor: '#e11d48'
+      });
+      if (e.target) e.target.value = '';
       return;
     }
+
+    if (file.size > 10 * 1024 * 1024) {
+      Swal.fire({
+        title: 'File Too Large',
+        text: 'Image exceeds the 10MB limit.',
+        icon: 'error',
+        confirmButtonColor: '#e11d48'
+      });
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    const replaceKey = `${categoryKey}-replace-${indexToReplace}`;
+    setIsUploading(true);
+    setUploadingCategory(replaceKey);
+    setUploadProgress(10);
+    setUploadStatusText('Replacing image... (0%)');
 
     const uploadForm = new FormData();
     uploadForm.append('file', file);
 
     try {
-      Swal.showLoading();
-      const res = await axios.post(getApiUrl('/api/homestay-owner/properties/upload-image'), uploadForm, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          Authorization: `Bearer ${token}`
+      const res = await axios.post(
+        getApiUrl('/api/homestay-owner/properties/upload-image'),
+        uploadForm,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            Authorization: `Bearer ${token}`
+          },
+          onUploadProgress: (progressEvent) => {
+            if (progressEvent.total) {
+              const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+              setUploadProgress(Math.min(98, percent));
+              setUploadStatusText(`Replacing image... (${percent}%)`);
+            }
+          }
         }
-      });
+      );
 
-      const uploadedUrl = res.data.optimizedUrl;
+      const uploadedUrl = res.data.optimizedUrl || res.data.originalUrl;
 
       setFormData(prev => {
         const list = [...(prev.gallery[categoryKey] || [])];
@@ -583,10 +705,31 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
         autoSave(updated);
         return updated;
       });
-      Swal.close();
+
+      setUploadProgress(100);
+      setUploadStatusText('Image replaced successfully!');
+
+      setTimeout(() => {
+        setIsUploading(false);
+        setUploadingCategory(null);
+        setUploadProgress(0);
+        setUploadStatusText('');
+      }, 800);
+
     } catch (err) {
-      console.error(err);
-      Swal.fire('Replacement Failed', 'Could not replace image.', 'error');
+      console.error('Replace image error:', err);
+      Swal.fire({
+        title: 'Replacement Failed',
+        text: err.response?.data?.message || 'Could not replace image.',
+        icon: 'error',
+        confirmButtonColor: '#e11d48'
+      });
+      setIsUploading(false);
+      setUploadingCategory(null);
+      setUploadProgress(0);
+      setUploadStatusText('');
+    } finally {
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -1350,20 +1493,28 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (!file) return;
-                          const token = localStorage.getItem('homestayOwnerToken');
-                          if (!token) return;
+                          const token = getAuthToken();
+                          if (!token) {
+                            Swal.fire('Auth Required', 'Please log in again.', 'warning');
+                            if (e.target) e.target.value = '';
+                            return;
+                          }
                           const uploadForm = new FormData();
                           uploadForm.append('file', file);
                           try {
+                            Swal.showLoading();
                             const res = await axios.post(getApiUrl('/api/homestay-owner/properties/upload-image'), uploadForm, {
                               headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` }
                             });
                             const list = [...currentEditRoom.images];
-                            list[idx] = res.data.optimizedUrl;
+                            list[idx] = res.data.optimizedUrl || res.data.originalUrl;
                             setCurrentEditRoom({ ...currentEditRoom, images: list });
+                            Swal.close();
                           } catch (err) {
                             console.error(err);
-                            Swal.fire('Replace Failed', 'Image replacement failed', 'error');
+                            Swal.fire('Replace Failed', err.response?.data?.message || 'Image replacement failed', 'error');
+                          } finally {
+                            if (e.target) e.target.value = '';
                           }
                         }}
                       />
@@ -1385,25 +1536,38 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
                       onChange={async (e) => {
                         const files = e.target.files;
                         if (!files || files.length === 0) return;
-                        const token = localStorage.getItem('homestayOwnerToken');
-                        if (!token) return;
+                        const token = getAuthToken();
+                        if (!token) {
+                          Swal.fire('Auth Required', 'Please log in again.', 'warning');
+                          if (e.target) e.target.value = '';
+                          return;
+                        }
                         
                         const list = [...(currentEditRoom.images || [])];
-                        for (let i = 0; i < files.length; i++) {
-                          const file = files[i];
-                          if (list.length >= 20) break;
-                          const uploadForm = new FormData();
-                          uploadForm.append('file', file);
-                          try {
-                            const res = await axios.post(getApiUrl('/api/homestay-owner/properties/upload-image'), uploadForm, {
-                              headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` }
-                            });
-                            list.push(res.data.optimizedUrl);
-                          } catch (err) {
-                            console.error(err);
+                        try {
+                          Swal.showLoading();
+                          for (let i = 0; i < files.length; i++) {
+                            const file = files[i];
+                            if (list.length >= 20) break;
+                            const uploadForm = new FormData();
+                            uploadForm.append('file', file);
+                            try {
+                              const res = await axios.post(getApiUrl('/api/homestay-owner/properties/upload-image'), uploadForm, {
+                                headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` }
+                              });
+                              list.push(res.data.optimizedUrl || res.data.originalUrl);
+                            } catch (err) {
+                              console.error(err);
+                            }
                           }
+                          setCurrentEditRoom({ ...currentEditRoom, images: list });
+                          Swal.close();
+                        } catch (err) {
+                          console.error(err);
+                          Swal.fire('Upload Failed', 'Could not upload room image(s).', 'error');
+                        } finally {
+                          if (e.target) e.target.value = '';
                         }
-                        setCurrentEditRoom({ ...currentEditRoom, images: list });
                       }}
                     />
                   </div>
@@ -2129,7 +2293,8 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
                     <img src={getImageUrl(formData.gallery.cover)} alt="Cover" className="w-full h-full object-cover" />
                     <button
                       onClick={() => setFormData({ ...formData, gallery: { ...formData.gallery, cover: '' } })}
-                      className="absolute top-3 right-3 p-2 bg-rose-700 hover:bg-rose-800 text-white rounded-full border-none shadow-md cursor-pointer"
+                      className="absolute top-3 right-3 p-2 bg-rose-700 hover:bg-rose-800 text-white rounded-full border-none shadow-md cursor-pointer transition-colors"
+                      title="Remove Cover Image"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -2143,16 +2308,54 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
                       accept="image/*"
                       id="cover-upload-input"
                       className="hidden"
+                      disabled={isUploading}
                       onChange={(e) => handleImageUpload(e, 'cover')}
                     />
                     <label
-                      htmlFor="cover-upload-input"
-                      className="inline-block mt-3 px-4.5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-[10px] font-bold rounded-xl cursor-pointer"
+                      htmlFor={isUploading ? undefined : "cover-upload-input"}
+                      className={`inline-flex items-center gap-2 mt-3 px-4.5 py-2 text-white text-[10px] font-bold rounded-xl transition-all ${
+                        isUploading && uploadingCategory === 'cover'
+                          ? 'bg-amber-600 cursor-not-allowed opacity-90'
+                          : 'bg-slate-800 hover:bg-slate-900 cursor-pointer shadow-sm'
+                      }`}
                     >
-                      Choose File
+                      {isUploading && uploadingCategory === 'cover' ? (
+                        <>
+                          <Loader2 size={13} className="animate-spin text-white" />
+                          <span>Uploading... {uploadProgress}%</span>
+                        </>
+                      ) : (
+                        <span>Choose File</span>
+                      )}
                     </label>
                   </div>
                 )}
+
+                {/* Cover Image Upload Progress Bar */}
+                {isUploading && uploadingCategory === 'cover' && (
+                  <div className="w-full max-w-xl p-3.5 bg-gradient-to-r from-amber-50 to-rose-50 border border-amber-200 rounded-2xl space-y-2 shadow-xs">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-amber-900 flex items-center gap-2">
+                        <Loader2 size={14} className="animate-spin text-amber-600" />
+                        <span>{uploadStatusText || 'Uploading cover image...'}</span>
+                      </span>
+                      <span className="font-black text-amber-700 bg-white/90 px-2 py-0.5 rounded-md border border-amber-200 text-xs">
+                        {uploadProgress}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-amber-200/50 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-amber-500 to-rose-500 h-2.5 rounded-full transition-all duration-300 ease-out"
+                        style={{ width: `${Math.max(5, uploadProgress)}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-amber-800/80 flex items-center justify-between font-medium">
+                      <span>Optimizing image resolution...</span>
+                      <span>Please wait</span>
+                    </p>
+                  </div>
+                )}
+
                 {errors.cover && <span className="text-[9px] font-bold text-rose-500 block">{errors.cover}</span>}
               </div>
 
@@ -2166,6 +2369,7 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
                     const key = cat.toLowerCase().replace(' ', '');
                     const count = formData.gallery[key]?.length || 0;
                     const isActive = activeFolderCategory === cat;
+                    const isTabUploading = isUploading && uploadingCategory === key;
                     return (
                       <button
                         key={cat}
@@ -2179,9 +2383,15 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
                       >
                         <div className="min-w-0">
                           <span className="text-[10px] uppercase tracking-wider block truncate">{cat}</span>
-                          <span className="text-[9px] text-slate-400 block mt-0.5">{count} Images</span>
+                          <span className="text-[9px] text-slate-400 block mt-0.5">
+                            {isTabUploading ? `${uploadProgress}% uploading...` : `${count} Images`}
+                          </span>
                         </div>
-                        {count > 0 ? (
+                        {isTabUploading ? (
+                          <div className="w-4 h-4 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                            <Loader2 size={11} className="animate-spin" />
+                          </div>
+                        ) : count > 0 ? (
                           <div className="w-4 h-4 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
                             <Check size={10} className="stroke-[3]" />
                           </div>
@@ -2195,8 +2405,14 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
 
                 <div className="p-5 border border-slate-150 rounded-2xl bg-slate-50/10 space-y-4 mt-4">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
-                      📁 Category Folder: {activeFolderCategory}
+                    <span className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                      <span>📁 Category Folder: {activeFolderCategory}</span>
+                      {isUploading && uploadingCategory === activeFolderCategory.toLowerCase().replace(' ', '') && (
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1.5 animate-pulse">
+                          <Loader2 size={11} className="animate-spin text-amber-700" />
+                          Uploading {uploadProgress}%
+                        </span>
+                      )}
                     </span>
                     <div>
                       <input
@@ -2205,25 +2421,69 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
                         accept="image/*"
                         id="folder-upload-input"
                         className="hidden"
+                        disabled={isUploading}
                         onChange={(e) => {
                           const catKey = activeFolderCategory.toLowerCase().replace(' ', '');
                           handleImageUpload(e, catKey);
                         }}
                       />
                       <label
-                        htmlFor="folder-upload-input"
-                        className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-[10px] font-bold rounded-xl cursor-pointer"
+                        htmlFor={isUploading ? undefined : "folder-upload-input"}
+                        className={`px-4 py-2 text-white text-[10px] font-bold rounded-xl transition-all flex items-center gap-2 select-none ${
+                          isUploading && uploadingCategory === activeFolderCategory.toLowerCase().replace(' ', '')
+                            ? 'bg-amber-600 cursor-not-allowed opacity-90'
+                            : isUploading
+                            ? 'bg-slate-500 cursor-not-allowed opacity-70'
+                            : 'bg-slate-800 hover:bg-slate-900 cursor-pointer shadow-sm hover:shadow'
+                        }`}
                       >
-                        Upload Images
+                        {isUploading && uploadingCategory === activeFolderCategory.toLowerCase().replace(' ', '') ? (
+                          <>
+                            <Loader2 size={12} className="animate-spin text-white" />
+                            <span>Uploading... {uploadProgress}%</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload size={12} />
+                            <span>Upload Images</span>
+                          </>
+                        )}
                       </label>
                     </div>
                   </div>
+
+                  {/* Real-time Upload Progress Bar Card for active category */}
+                  {isUploading && uploadingCategory === activeFolderCategory.toLowerCase().replace(' ', '') && (
+                    <div className="p-4 bg-gradient-to-r from-amber-50 via-rose-50 to-orange-50 border border-amber-300/80 rounded-2xl space-y-2.5 shadow-sm">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-amber-950 flex items-center gap-2">
+                          <Loader2 size={15} className="animate-spin text-amber-600 shrink-0" />
+                          <span>{uploadStatusText || 'Uploading images...'}</span>
+                        </span>
+                        <span className="font-black text-amber-800 bg-white/90 px-2.5 py-0.5 rounded-lg border border-amber-200 shadow-xs text-xs">
+                          {uploadProgress}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-amber-200/50 rounded-full h-3 overflow-hidden p-0.5 border border-amber-200/70">
+                        <div
+                          className="bg-gradient-to-r from-amber-500 via-rose-500 to-orange-500 h-full rounded-full transition-all duration-300 ease-out"
+                          style={{ width: `${Math.max(5, uploadProgress)}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-amber-900/80 font-medium">
+                        <span>Optimizing and saving high-res imagery to server...</span>
+                        <span className="font-semibold text-rose-600">Please do not refresh or click again</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Display folder images */}
                   {(() => {
                     const catKey = activeFolderCategory.toLowerCase().replace(' ', '');
                     const imagesList = formData.gallery[catKey] || [];
-                    if (imagesList.length === 0) {
+                    const isThisCatUploading = isUploading && uploadingCategory === catKey;
+
+                    if (imagesList.length === 0 && !isThisCatUploading) {
                       return (
                         <p className="text-[10px] font-bold text-slate-400 py-6 text-center">
                           No Images Uploaded in this category folder yet.
@@ -2232,89 +2492,121 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
                     }
                     return (
                       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
-                        {imagesList.map((url, idx) => (
-                          <div key={url} className="relative group aspect-video rounded-xl overflow-hidden border border-slate-200 bg-white">
-                            <img src={getImageUrl(url)} alt="Gallery" className="w-full h-full object-cover" />
-                            
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-                              {/* Move Left */}
-                              {idx > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const list = [...imagesList];
-                                    const temp = list[idx];
-                                    list[idx] = list[idx - 1];
-                                    list[idx - 1] = temp;
-                                    const updated = {
-                                      ...formData,
-                                      gallery: { ...formData.gallery, [catKey]: list }
-                                    };
-                                    setFormData(updated);
-                                    autoSave(updated);
-                                  }}
-                                  className="p-1 bg-slate-800 text-white rounded hover:bg-slate-900 border-none cursor-pointer text-[10px] font-bold"
-                                >
-                                  &larr;
-                                </button>
+                        {imagesList.map((url, idx) => {
+                          const isThisItemReplacing = isUploading && uploadingCategory === `${catKey}-replace-${idx}`;
+                          return (
+                            <div key={url} className="relative group aspect-video rounded-xl overflow-hidden border border-slate-200 bg-white shadow-xs">
+                              <img src={getImageUrl(url)} alt="Gallery" className="w-full h-full object-cover" />
+
+                              {/* Replacing overlay */}
+                              {isThisItemReplacing && (
+                                <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center p-2 text-center text-white z-20">
+                                  <Loader2 size={18} className="animate-spin text-amber-400 mb-1" />
+                                  <span className="text-[9px] font-bold">Replacing...</span>
+                                  <span className="text-[9px] text-amber-300">{uploadProgress}%</span>
+                                </div>
                               )}
                               
-                              {/* Move Right */}
-                              {idx < imagesList.length - 1 && (
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 z-10">
+                                {/* Move Left */}
+                                {idx > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const list = [...imagesList];
+                                      const temp = list[idx];
+                                      list[idx] = list[idx - 1];
+                                      list[idx - 1] = temp;
+                                      const updated = {
+                                        ...formData,
+                                        gallery: { ...formData.gallery, [catKey]: list }
+                                      };
+                                      setFormData(updated);
+                                      autoSave(updated);
+                                    }}
+                                    className="p-1 bg-slate-800 text-white rounded hover:bg-slate-900 border-none cursor-pointer text-[10px] font-bold"
+                                  >
+                                    &larr;
+                                  </button>
+                                )}
+                                
+                                {/* Move Right */}
+                                {idx < imagesList.length - 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const list = [...imagesList];
+                                      const temp = list[idx];
+                                      list[idx] = list[idx + 1];
+                                      list[idx + 1] = temp;
+                                      const updated = {
+                                        ...formData,
+                                        gallery: { ...formData.gallery, [catKey]: list }
+                                      };
+                                      setFormData(updated);
+                                      autoSave(updated);
+                                    }}
+                                    className="p-1 bg-slate-800 text-white rounded hover:bg-slate-900 border-none cursor-pointer text-[10px] font-bold"
+                                  >
+                                    &rarr;
+                                  </button>
+                                )}
+
+                                {/* Delete */}
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const list = [...imagesList];
-                                    const temp = list[idx];
-                                    list[idx] = list[idx + 1];
-                                    list[idx + 1] = temp;
+                                    const updatedList = imagesList.filter((_, i) => i !== idx);
                                     const updated = {
                                       ...formData,
-                                      gallery: { ...formData.gallery, [catKey]: list }
+                                      gallery: { ...formData.gallery, [catKey]: updatedList }
                                     };
                                     setFormData(updated);
                                     autoSave(updated);
                                   }}
-                                  className="p-1 bg-slate-800 text-white rounded hover:bg-slate-900 border-none cursor-pointer text-[10px] font-bold"
+                                  className="p-1 bg-rose-700 text-white rounded hover:bg-rose-800 border-none cursor-pointer"
                                 >
-                                  &rarr;
+                                  <Trash2 size={11} />
                                 </button>
-                              )}
 
-                              {/* Delete */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updatedList = imagesList.filter((_, i) => i !== idx);
-                                  const updated = {
-                                    ...formData,
-                                    gallery: { ...formData.gallery, [catKey]: updatedList }
-                                  };
-                                  setFormData(updated);
-                                  autoSave(updated);
-                                }}
-                                className="p-1 bg-rose-700 text-white rounded hover:bg-rose-800 border-none cursor-pointer"
-                              >
-                                <Trash2 size={11} />
-                              </button>
+                                {/* Replace */}
+                                <label
+                                  htmlFor={`replace-gallery-${catKey}-${idx}`}
+                                  className="p-1 bg-blue-700 text-white rounded hover:bg-blue-850 border-none cursor-pointer flex items-center justify-center"
+                                >
+                                  <RefreshCw size={11} />
+                                </label>
+                                <input
+                                  type="file"
+                                  id={`replace-gallery-${catKey}-${idx}`}
+                                  className="hidden"
+                                  accept="image/*"
+                                  disabled={isUploading}
+                                  onChange={(e) => handleReplaceImage(e, catKey, idx)}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
 
-                              {/* Replace */}
-                              <label
-                                htmlFor={`replace-gallery-${catKey}-${idx}`}
-                                className="p-1 bg-blue-700 text-white rounded hover:bg-blue-850 border-none cursor-pointer flex items-center justify-center"
-                              >
-                                <RefreshCw size={11} />
-                              </label>
-                              <input
-                                type="file"
-                                id={`replace-gallery-${catKey}-${idx}`}
-                                className="hidden"
-                                accept="image/*"
-                                onChange={(e) => handleReplaceImage(e, catKey, idx)}
+                        {/* Uploading In-Progress Placeholder Card */}
+                        {isThisCatUploading && (
+                          <div className="relative aspect-video rounded-xl overflow-hidden border-2 border-dashed border-amber-400 bg-amber-50/70 flex flex-col items-center justify-center p-3 text-center shadow-xs animate-pulse">
+                            <Loader2 size={22} className="animate-spin text-amber-600 mb-1.5" />
+                            <span className="text-[10px] font-black text-amber-900">
+                              {uploadingFilesCount.total > 1
+                                ? `Uploading ${uploadingFilesCount.current} of ${uploadingFilesCount.total}`
+                                : 'Uploading image...'}
+                            </span>
+                            <span className="text-[11px] font-black text-rose-600 mt-0.5">{uploadProgress}%</span>
+                            <div className="w-16 bg-amber-200/80 h-1.5 rounded-full mt-2 overflow-hidden">
+                              <div
+                                className="bg-amber-600 h-full rounded-full transition-all duration-200"
+                                style={{ width: `${Math.max(10, uploadProgress)}%` }}
                               />
                             </div>
                           </div>
-                        ))}
+                        )}
                       </div>
                     );
                   })()}

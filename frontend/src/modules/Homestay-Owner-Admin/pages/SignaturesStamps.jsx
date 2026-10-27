@@ -29,6 +29,16 @@ const getApiUrl = (path) => {
   return `${base}${cleanPath}`;
 };
 
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
+  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+  return `${base}${cleanPath}`;
+};
+
 export default function SignaturesStamps() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -64,7 +74,7 @@ export default function SignaturesStamps() {
   const signatureInputRef = useRef(null);
 
   const getAuthToken = () => {
-    return localStorage.getItem('homestayOwnerToken') || localStorage.getItem('superAdminToken');
+    return localStorage.getItem('homestayOwnerToken') || localStorage.getItem('token') || localStorage.getItem('superAdminToken');
   };
 
   // 1. Fetch Owner's Properties
@@ -152,13 +162,21 @@ export default function SignaturesStamps() {
     setSearchParams({ propertyId: newId });
   };
 
-  // Image upload handler with fallback
+  // Image upload handler with validation and fallback
   const handleFileUpload = async (e, fieldName) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type.toLowerCase())) {
+      alert('Only JPG, PNG, and WebP images are allowed.');
+      if (e.target) e.target.value = '';
+      return;
+    }
+
     if (file.size > 5 * 1024 * 1024) {
       alert('File size exceeds 5MB limit. Please choose a smaller image.');
+      if (e.target) e.target.value = '';
       return;
     }
 
@@ -198,6 +216,7 @@ export default function SignaturesStamps() {
       reader.readAsDataURL(file);
     } finally {
       setUploadingField(null);
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -375,7 +394,7 @@ export default function SignaturesStamps() {
               <div className="flex items-start gap-3.5">
                 {formData.logo ? (
                   <img 
-                    src={formData.logo} 
+                    src={getImageUrl(formData.logo)} 
                     alt="Homestay Logo" 
                     className="w-16 h-16 object-contain rounded-xl border border-slate-200 p-1 bg-white shrink-0 shadow-xs"
                   />
@@ -443,7 +462,7 @@ export default function SignaturesStamps() {
                   {/* Seal / Stamp Image */}
                   {formData.stampImage && (
                     <img 
-                      src={formData.stampImage} 
+                      src={getImageUrl(formData.stampImage)} 
                       alt="Official Stamp" 
                       className="absolute right-0 top-0 h-20 w-20 object-contain opacity-85 pointer-events-none drop-shadow-xs"
                       title="Homestay Official Seal / Stamp"
@@ -453,7 +472,7 @@ export default function SignaturesStamps() {
                   {/* Signature Image */}
                   {formData.signatureImage ? (
                     <img 
-                      src={formData.signatureImage} 
+                      src={getImageUrl(formData.signatureImage)} 
                       alt="Authorized Signature" 
                       className="relative z-10 max-h-16 max-w-[170px] object-contain drop-shadow-xs"
                     />
@@ -529,7 +548,7 @@ export default function SignaturesStamps() {
                   {formData.logo ? (
                     <div className="relative group shrink-0">
                       <img 
-                        src={formData.logo} 
+                        src={getImageUrl(formData.logo)} 
                         alt="Homestay Logo Preview" 
                         className="w-20 h-20 object-contain rounded-2xl border border-slate-250 bg-white p-1.5 shadow-xs"
                       />
@@ -718,7 +737,7 @@ export default function SignaturesStamps() {
                   {formData.stampImage ? (
                     <div className="relative group shrink-0">
                       <img 
-                        src={formData.stampImage} 
+                        src={getImageUrl(formData.stampImage)} 
                         alt="Stamp preview" 
                         className="w-20 h-20 object-contain rounded-2xl border border-slate-250 bg-white p-1.5 shadow-xs"
                       />
@@ -779,7 +798,7 @@ export default function SignaturesStamps() {
                   {formData.signatureImage ? (
                     <div className="relative group shrink-0">
                       <img 
-                        src={formData.signatureImage} 
+                        src={getImageUrl(formData.signatureImage)} 
                         alt="Signature preview" 
                         className="w-20 h-20 object-contain rounded-2xl border border-slate-250 bg-white p-1.5 shadow-xs"
                       />

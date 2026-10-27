@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 
-const API_BASE = (window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app');
+const API_BASE = ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? (import.meta.env.VITE_API_URL || 'http://localhost:5005') : 'https://backend-sand-nine-13.vercel.app');
 
 const getAuthToken = () => {
   return localStorage.getItem('superAdminToken') || localStorage.getItem('token');
@@ -81,7 +81,12 @@ export default function ManageOwnerSubscriptionModal({
       }
     } catch (err) {
       console.error('Error loading subscription details:', err);
-      Swal.fire('Error', err.response?.data?.message || 'Failed to load subscription details.', 'error');
+      const msg = err.response?.data?.message || err.response?.data?.error || 'Failed to load subscription details.';
+      if (err.response?.status === 404) {
+        Swal.fire('Owner Notice', msg || 'Homestay owner record could not be found.', 'info');
+      } else {
+        Swal.fire('Error', msg, 'error');
+      }
     } finally {
       setLoading(false);
     }

@@ -723,8 +723,17 @@ export default function Availability() {
 
   // 3. Reschedule Stay
   const handleOpenRescheduleModal = () => {
-    setRescheduleCheckIn(selectedBooking?.rawCheckIn || '');
-    setRescheduleCheckOut(selectedBooking?.rawCheckOut || '');
+    const toInput = (dVal) => {
+      if (!dVal) return '';
+      if (typeof dVal === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dVal)) return dVal.slice(0, 10);
+      try {
+        const d = new Date(dVal);
+        if (isNaN(d.getTime())) return '';
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      } catch { return ''; }
+    };
+    setRescheduleCheckIn(toInput(selectedBooking?.rawCheckIn || selectedBooking?.checkInDate || selectedBooking?.checkIn));
+    setRescheduleCheckOut(toInput(selectedBooking?.rawCheckOut || selectedBooking?.checkOutDate || selectedBooking?.checkOut));
     setIsRescheduleModalOpen(true);
   };
 
@@ -743,7 +752,11 @@ export default function Availability() {
       setRescheduleSubmitting(true);
       const token = getAuthToken();
       await axios.patch(getApiUrl(`/api/homestay-owner/bookings/${selectedBooking.dbId || selectedBooking.id}/reschedule`), {
+        checkInDate: rescheduleCheckIn,
+        checkIn: rescheduleCheckIn,
         newCheckIn: rescheduleCheckIn,
+        checkOutDate: rescheduleCheckOut,
+        checkOut: rescheduleCheckOut,
         newCheckOut: rescheduleCheckOut
       }, {
         headers: { Authorization: `Bearer ${token}` }
@@ -786,6 +799,16 @@ export default function Availability() {
     const amt = Number(paymentAmount);
     if (!amt || amt <= 0) {
       Swal.fire('Validation', 'Please enter a valid payment amount in ₹.', 'warning');
+      return;
+    }
+
+    const maxPending = Number(selectedBooking?.pendingAmount || 0);
+    if (amt > maxPending) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Overpayment Not Allowed',
+        text: `Cannot collect ₹${amt.toLocaleString()}. Maximum collectible remaining balance is ₹${maxPending.toLocaleString()}.`
+      });
       return;
     }
 
@@ -866,8 +889,13 @@ export default function Availability() {
     }
   };
 
-  // 6. Edit Booking Details (Guest & Add-ons Remark)
+  // 6. Edit Booking Details (Navigates to CreateBookingFlow in edit mode)
   const handleOpenEditModal = () => {
+    const bId = selectedBooking?.dbId || selectedBooking?.id;
+    if (bId) {
+      navigate(`/homestay-owner/bookings/create?editId=${bId}`);
+      return;
+    }
     setEditGuestName(selectedBooking?.guestName || '');
     setEditGuestPhone(selectedBooking?.phone === 'Not provided' ? '' : selectedBooking?.phone || '');
     setEditGuestEmail(selectedBooking?.email || '');
@@ -1941,10 +1969,23 @@ export default function Availability() {
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2.5">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h3 className="text-base font-black text-slate-900">{selectedBooking.guestName}</h3>
-                    <span className="text-[10px] text-slate-400 font-bold block uppercase mt-0.5 font-mono">
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/homestay-owner/guests/${selectedBooking.dbId || selectedBooking.id || selectedBooking.phone}`)}
+                      className="text-base font-black text-slate-900 hover:text-rose-600 flex items-center gap-1.5 bg-transparent border-none cursor-pointer p-0 text-left group"
+                      title="View Guest Profile and Stay History"
+                    >
+                      <span>{selectedBooking.guestName}</span>
+                      <ExternalLink size={12} className="text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/homestay-owner/bookings/${selectedBooking.dbId || selectedBooking.id}`)}
+                      className="text-[10px] text-slate-400 hover:text-rose-600 hover:underline font-bold block uppercase mt-0.5 font-mono bg-transparent border-none cursor-pointer p-0 text-left"
+                      title="Open Full Booking Details Page"
+                    >
                       Booking Ref: #{selectedBooking.id}
-                    </span>
+                    </button>
                   </div>
                   <button
                     onClick={handleWhatsAppShareFromDrawer}

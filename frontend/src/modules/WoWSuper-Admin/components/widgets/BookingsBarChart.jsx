@@ -35,8 +35,8 @@ export default function BookingsBarChart({ data = [], loading = false }) {
         </div>
       </div>
 
-      <div className="flex-1 w-full text-xs font-medium text-slate-400">
-        <ResponsiveContainer width="100%" height="100%">
+      <div className="flex-1 w-full text-xs font-medium text-slate-400 min-w-0 min-h-0">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
           <BarChart
             data={data}
             margin={{ top: 10, right: 10, left: -25, bottom: 0 }}

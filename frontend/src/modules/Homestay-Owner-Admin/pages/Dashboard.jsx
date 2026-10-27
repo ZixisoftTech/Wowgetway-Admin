@@ -26,8 +26,11 @@ import {
   CreditCard,
   CheckCircle2,
   Clock,
-  ExternalLink
+  ExternalLink,
+  Filter,
+  ChevronDown
 } from 'lucide-react';
+import FullBookingDetailsModal from '../components/FullBookingDetailsModal.jsx';
 
 const getApiUrl = (path) => {
   const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
@@ -101,7 +104,26 @@ export default function Dashboard() {
   const [checkOutsToday, setCheckOutsToday] = useState([]);
   const [yesterdayBookings, setYesterdayBookings] = useState([]);
   const [tomorrowBookings, setTomorrowBookings] = useState([]);
+  const [allBookings, setAllBookings] = useState([]);
   const [selectedBookingModal, setSelectedBookingModal] = useState(null);
+
+  // Change 2: Dashboard Date Filters State
+  const [filterStatus, setFilterStatus] = useState('Check-in'); // 'Check-in' | 'Check-out'
+  const [filterDatePreset, setFilterDatePreset] = useState('Today'); // 'Today' | 'Yesterday' | 'Tomorrow' | 'Custom Date'
+  const [customDateValue, setCustomDateValue] = useState(() => new Date().toISOString().split('T')[0]);
+  const [appliedFilter, setAppliedFilter] = useState({
+    status: 'Check-in',
+    datePreset: 'Today',
+    customDate: new Date().toISOString().split('T')[0]
+  });
+
+  const handleApplyFilter = () => {
+    setAppliedFilter({
+      status: filterStatus,
+      datePreset: filterDatePreset,
+      customDate: customDateValue
+    });
+  };
 
   useEffect(() => {
     fetchDashboardData();
@@ -160,6 +182,11 @@ export default function Dashboard() {
         setCheckOutsToday(checkOuts);
         setYesterdayBookings(yesterday);
         setTomorrowBookings(tomorrow);
+        if (Array.isArray(res.data.allBookings)) {
+          setAllBookings(res.data.allBookings);
+        } else {
+          setAllBookings([...checkIns, ...checkOuts, ...yesterday, ...tomorrow]);
+        }
       }
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
@@ -212,20 +239,60 @@ export default function Dashboard() {
 
   const { linePath, areaPath, validPoints = [] } = getSvgPaths();
 
-  // Get active table data
+  // Date helper formatting YYYY-MM-DD
+  const toDateStr = (dateVal) => {
+    if (!dateVal) return '';
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return '';
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Change 2: Get active table data matching applied filter
   const getActiveGuestsList = () => {
-    switch (activeTableTab) {
-      case 'Check-in Today':
-        return checkInsToday;
-      case 'Check-out Today':
-        return checkOutsToday;
-      case 'Yesterday':
-        return yesterdayBookings;
-      case 'Tomorrow':
-        return tomorrowBookings;
-      default:
-        return checkInsToday;
+    const { status, datePreset, customDate } = appliedFilter;
+    const now = new Date();
+    let targetDateStr = '';
+
+    if (datePreset === 'Today') {
+      targetDateStr = toDateStr(now);
+    } else if (datePreset === 'Yesterday') {
+      const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      targetDateStr = toDateStr(y);
+    } else if (datePreset === 'Tomorrow') {
+      const t = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      targetDateStr = toDateStr(t);
+    } else if (datePreset === 'Custom Date') {
+      targetDateStr = customDate || toDateStr(now);
     }
+
+    const source = allBookings.length > 0 
+      ? allBookings 
+      : [...checkInsToday, ...checkOutsToday, ...yesterdayBookings, ...tomorrowBookings];
+
+    const uniqueList = [];
+    const seen = new Set();
+    for (const b of source) {
+      const id = b.dbId || b.id || b._id;
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        uniqueList.push(b);
+      }
+    }
+
+    const filtered = uniqueList.filter(b => {
+      const cinStr = toDateStr(b.rawCheckIn || b.checkInDate || b.checkIn);
+      const coutStr = toDateStr(b.rawCheckOut || b.checkOutDate || b.checkOut);
+      if (status === 'Check-in') {
+        return cinStr === targetDateStr;
+      } else {
+        return coutStr === targetDateStr;
+      }
+    });
+
+    return filtered;
   };
 
   const activeGuests = getActiveGuestsList();
@@ -840,33 +907,62 @@ export default function Dashboard() {
 
       {/* Bottom Section: Dynamic Check-in / Check-out Table */}
       <div className="bg-white border border-slate-100 rounded-3xl shadow-sm overflow-hidden space-y-4">
-        {/* Table Header Controls */}
-        <div className="p-6 pb-0 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          {/* Tabs */}
-          <div className="flex border-b border-slate-100 w-full sm:w-auto">
-            {['Check-in Today', 'Check-out Today', 'Yesterday', 'Tomorrow'].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTableTab(tab)}
-                className={`pb-3.5 px-4.5 text-xs font-bold transition-all border-none bg-transparent cursor-pointer relative ${
-                  activeTableTab === tab
-                    ? 'text-rose-600 font-extrabold'
-                    : 'text-slate-400 hover:text-slate-600'
-                }`}
+        {/* Table Header Controls (Change 2) */}
+        <div className="p-6 pb-0 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            {/* Status Dropdown */}
+            <div className="relative">
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="appearance-none bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800 font-bold text-xs rounded-xl px-3.5 py-2.5 pr-8 cursor-pointer focus:outline-none focus:ring-2 focus:ring-rose-500/20"
               >
-                <span>{tab}</span>
-                {activeTableTab === tab && (
-                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-rose-600"></span>
-                )}
-              </button>
-            ))}
+                <option value="Check-in">Check-in</option>
+                <option value="Check-out">Check-out</option>
+              </select>
+              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+
+            {/* Date Preset Dropdown */}
+            <div className="relative">
+              <select
+                value={filterDatePreset}
+                onChange={(e) => setFilterDatePreset(e.target.value)}
+                className="appearance-none bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800 font-bold text-xs rounded-xl px-3.5 py-2.5 pr-8 cursor-pointer focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+              >
+                <option value="Today">Today</option>
+                <option value="Yesterday">Yesterday</option>
+                <option value="Tomorrow">Tomorrow</option>
+                <option value="Custom Date">Custom Date</option>
+              </select>
+              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+
+            {/* Custom Date Input (shown when Custom Date selected) */}
+            {filterDatePreset === 'Custom Date' && (
+              <input
+                type="date"
+                value={customDateValue}
+                onChange={(e) => setCustomDateValue(e.target.value)}
+                className="bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800 font-bold text-xs rounded-xl px-3 py-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+              />
+            )}
+
+            {/* Apply Filter Button */}
+            <button
+              onClick={handleApplyFilter}
+              className="bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold text-xs rounded-xl px-4 py-2.5 flex items-center gap-1.5 transition-all shadow-sm shadow-rose-200 cursor-pointer border-none"
+            >
+              <Filter size={13} className="stroke-[2.5]" />
+              <span>Apply Filter</span>
+            </button>
           </div>
 
           {/* Right Action controls */}
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2">
             <button 
               onClick={() => fetchDashboardData()}
-              className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-500 rounded-xl transition-all cursor-pointer bg-white flex items-center justify-center"
+              className="p-2.5 border border-slate-200 hover:bg-slate-50 text-slate-500 rounded-xl transition-all cursor-pointer bg-white flex items-center justify-center shadow-xs"
               title="Refresh Dashboard"
             >
               <RefreshCw size={13} className="stroke-[2.5]" />
@@ -888,11 +984,11 @@ export default function Dashboard() {
                 <th className="pb-3 px-4 text-center">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50 font-semibold text-slate-707">
+            <tbody className="divide-y divide-slate-50 font-semibold text-slate-700">
               {activeGuests.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-8 text-center text-slate-400 text-xs font-bold">
-                    No reservations found for {activeTableTab.toLowerCase()}.
+                    No reservations found for {appliedFilter.status} ({appliedFilter.datePreset === 'Custom Date' ? appliedFilter.customDate : appliedFilter.datePreset}).
                   </td>
                 </tr>
               ) : (
@@ -905,12 +1001,22 @@ export default function Dashboard() {
                           alt={guest.name} 
                           className="w-7.5 h-7.5 rounded-full border border-slate-100 object-cover shadow-sm"
                         />
-                        <button
-                          onClick={() => navigate(`/homestay-owner/guests/${guest.dbId || guest.id}`)}
-                          className="font-extrabold text-slate-800 hover:text-rose-700 bg-transparent border-none cursor-pointer p-0 text-left"
-                        >
-                          {guest.name}
-                        </button>
+                        <div>
+                          <button
+                            onClick={() => navigate(`/homestay-owner/guests/${guest.dbId || guest.id}`)}
+                            className="font-extrabold text-slate-800 hover:text-rose-700 bg-transparent border-none cursor-pointer p-0 text-left block"
+                            title="View Guest Details"
+                          >
+                            {guest.name}
+                          </button>
+                          <button
+                            onClick={() => setSelectedBookingModal(guest)}
+                            className="font-mono text-[9px] text-rose-600 hover:underline bg-transparent border-none cursor-pointer p-0 text-left block mt-0.5"
+                            title="View Full Booking Details"
+                          >
+                            #{guest.id ? String(guest.id).replace(/^#/, '') : 'BK'}
+                          </button>
+                        </div>
                       </div>
                     </td>
                     <td className="py-3 px-4">
@@ -980,145 +1086,13 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Booking Details Modal */}
-      {selectedBookingModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 border border-slate-100 max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="flex justify-between items-start border-b border-slate-100 pb-4">
-              <div>
-                <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest block">
-                  Reservation Summary
-                </span>
-                <h2 className="text-base font-black text-slate-800 tracking-tight mt-0.5">
-                  {selectedBookingModal.bookingId || selectedBookingModal.id || 'Booking Details'}
-                </h2>
-              </div>
-              <button 
-                onClick={() => setSelectedBookingModal(null)}
-                className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-600 cursor-pointer bg-transparent border-none transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Guest Header Info */}
-            <div className="flex items-center gap-3.5 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-              <img 
-                src={selectedBookingModal.avatar || 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'} 
-                alt="" 
-                className="w-12 h-12 rounded-2xl object-cover border border-white shadow-xs"
-              />
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-black text-slate-800 truncate">{selectedBookingModal.name}</h3>
-                <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 font-semibold">
-                  <span>{selectedBookingModal.phone || 'No phone'}</span>
-                  {selectedBookingModal.email && <span>• {selectedBookingModal.email}</span>}
-                </div>
-              </div>
-
-              {/* Direct Contact Icons */}
-              {selectedBookingModal.phone && (
-                <div className="flex items-center gap-1.5">
-                  <a 
-                    href={`tel:${selectedBookingModal.phone}`}
-                    className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-rose-600 flex items-center justify-center hover:bg-rose-50 transition-colors"
-                    title="Call Guest"
-                  >
-                    <Phone size={13} className="stroke-[2.5]" />
-                  </a>
-                  <a 
-                    href={`https://wa.me/${selectedBookingModal.phone.replace(/[^0-9]/g, '')}`}
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="w-8 h-8 rounded-xl bg-white border border-slate-200 text-emerald-600 flex items-center justify-center hover:bg-emerald-50 transition-colors"
-                    title="WhatsApp Guest"
-                  >
-                    <MessageSquare size={13} className="stroke-[2.5]" />
-                  </a>
-                </div>
-              )}
-            </div>
-
-            {/* Stay & Room Details */}
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Property & Room</span>
-                <span className="font-bold text-slate-800 block mt-1">{selectedBookingModal.propertyName || 'Homestay'}</span>
-                <span className="text-[11px] font-extrabold text-rose-600 block mt-0.5">{selectedBookingModal.room || selectedBookingModal.roomNumber || selectedBookingModal.roomType || 'Standard Room'}</span>
-              </div>
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Stay Duration</span>
-                <span className="font-bold text-slate-800 block mt-1 font-mono text-[11px]">In: {selectedBookingModal.checkIn}</span>
-                <span className="font-bold text-slate-800 block mt-0.5 font-mono text-[11px]">Out: {selectedBookingModal.checkOut}</span>
-              </div>
-            </div>
-
-            {/* Financial & Status Summary */}
-            <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-100 space-y-2 text-xs">
-              <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-semibold">Booking Status</span>
-                <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-700 font-extrabold rounded-lg text-[10px] uppercase">
-                  {selectedBookingModal.status || 'Confirmed'}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-semibold">Payment Status</span>
-                <span className="px-2.5 py-0.5 bg-rose-100 text-rose-700 font-extrabold rounded-lg text-[10px] uppercase">
-                  {selectedBookingModal.paymentStatus || 'Paid / Active'}
-                </span>
-              </div>
-              {selectedBookingModal.totalAmount != null && (
-                <div className="flex justify-between items-center pt-2 border-t border-slate-200">
-                  <span className="text-slate-800 font-black">Total Bill</span>
-                  <span className="text-sm font-black font-mono text-slate-800">
-                    ₹{Number(selectedBookingModal.totalAmount || 0).toLocaleString()}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Actions */}
-            <div className="space-y-2 pt-2">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => {
-                    const id = selectedBookingModal.dbId || selectedBookingModal.id;
-                    setSelectedBookingModal(null);
-                    navigate(`/homestay-owner/bookings/confirmation-slip/${id}`);
-                  }}
-                  className="py-2.5 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Receipt size={13} />
-                  <span>Confirmation Slip</span>
-                </button>
-                <button
-                  onClick={() => {
-                    const id = selectedBookingModal.dbId || selectedBookingModal.id;
-                    setSelectedBookingModal(null);
-                    navigate(`/homestay-owner/bookings/invoice/${id}`);
-                  }}
-                  className="py-2.5 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-707 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <FileText size={13} />
-                  <span>Tax Invoice</span>
-                </button>
-              </div>
-
-              <button
-                onClick={() => {
-                  setSelectedBookingModal(null);
-                  navigate('/homestay-owner/bookings/manage');
-                }}
-                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-rose-200 flex items-center justify-center gap-2 transition-colors"
-              >
-                <CalendarCheck size={15} />
-                <span>Manage in Bookings Dashboard</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Full Booking Details Modal (Change 1) */}
+      <FullBookingDetailsModal
+        isOpen={!!selectedBookingModal}
+        onClose={() => setSelectedBookingModal(null)}
+        booking={selectedBookingModal}
+        onRefresh={fetchDashboardData}
+      />
 
       {/* Global Footer */}
       <footer className="mt-8 flex flex-col sm:flex-row justify-between items-center text-[10px] font-bold text-slate-400 border-t border-slate-100 pt-6 gap-3">

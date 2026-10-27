@@ -4016,16 +4016,17 @@ router.get('/homestays-list', async (req, res) => {
     }
     const propertiesList = await Property.find(query).sort({ updatedAt: -1, createdAt: -1 }).lean();
     
-    // Batch load owners for subscription details
-    const ownerIds = [...new Set(propertiesList.map(p => p.ownerId).filter(Boolean))];
-    const ownersMap = new Map();
-    if (ownerIds.length > 0) {
-      try {
-        const owners = await HomestayOwner.find({ _id: { $in: ownerIds } }).select('_id firstName lastName email mobile subscription').lean();
-        owners.forEach(o => ownersMap.set(String(o._id), o));
-      } catch (err) {
-        console.error('Error batch fetching owners for homestays list:', err);
-      }
+    // Batch load owners for subscription details and resolve real owner IDs
+    const allOwners = await HomestayOwner.find({ status: { $ne: 'Deleted' } }).select('_id firstName lastName email mobile subscription').lean();
+    const ownersById = new Map();
+    const ownersByMobile = new Map();
+    const ownersByName = new Map();
+
+    for (const o of allOwners) {
+      ownersById.set(String(o._id), o);
+      if (o.mobile) ownersByMobile.set(o.mobile, o);
+      const fullName = `${o.firstName || ''} ${o.lastName || ''}`.trim().toLowerCase();
+      if (fullName) ownersByName.set(fullName, o);
     }
 
     const formatted = [];
@@ -4034,7 +4035,11 @@ router.get('/homestays-list', async (req, res) => {
       const rooms = await PropertyRooms.find({ propertyId: p._id });
       const pricingList = await PropertyPricing.find({ propertyId: p._id });
       const approval = await PropertyApproval.findOne({ propertyId: p._id });
-      const owner = p.ownerId ? ownersMap.get(String(p.ownerId)) : null;
+      
+      const owner = (p.ownerId && ownersById.get(String(p.ownerId))) || 
+                    (p.ownerMobile && ownersByMobile.get(p.ownerMobile)) ||
+                    (p.ownerName && ownersByName.get(p.ownerName.trim().toLowerCase())) || null;
+      const resolvedOwnerId = owner ? owner._id : p.ownerId;
       
       let minPrice = 'N/A';
       if (pricingList.length > 0) {
@@ -4049,9 +4054,9 @@ router.get('/homestays-list', async (req, res) => {
         propertyId: p.propertyId || p._id,
         name: p.name || 'Untitled Property',
         type: p.type || 'Homestay',
-        ownerId: p.ownerId,
-        ownerName: p.ownerName,
-        ownerMobile: p.ownerMobile,
+        ownerId: resolvedOwnerId,
+        ownerName: owner ? `${owner.firstName} ${owner.lastName}`.trim() : (p.ownerName || 'Verified Host'),
+        ownerMobile: owner ? owner.mobile : (p.ownerMobile || ''),
         ownerSubscription: owner?.subscription ? {
           planId: owner.subscription.planId,
           planName: owner.subscription.planName,
@@ -4077,7 +4082,33 @@ router.get('/homestays-list', async (req, res) => {
     const legacyHomestays = await Homestay.find(query).sort({ createdAt: -1 }).lean();
     for (const h of legacyHomestays) {
       if (!formatted.some(f => String(f._id) === String(h._id) || f.name === h.name)) {
-        formatted.push(h);
+        const owner = (h.ownerMobile && ownersByMobile.get(h.ownerMobile)) ||
+                      (h.ownerName && ownersByName.get(h.ownerName.trim().toLowerCase())) || null;
+        formatted.push({
+          _id: h._id,
+          propertyId: h._id,
+          name: h.name || 'Untitled Homestay',
+          type: h.type || 'Homestay',
+          ownerId: owner ? owner._id : null,
+          ownerName: owner ? `${owner.firstName} ${owner.lastName}`.trim() : (h.ownerName || 'Verified Host'),
+          ownerMobile: owner ? owner.mobile : (h.ownerMobile || ''),
+          ownerSubscription: owner?.subscription ? {
+            planId: owner.subscription.planId,
+            planName: owner.subscription.planName,
+            status: owner.subscription.status,
+            expiresAt: owner.subscription.expiresAt,
+            maxHomestays: owner.subscription.maxHomestays,
+            maxRoomsPerHomestay: owner.subscription.maxRoomsPerHomestay,
+            extraRoomPrice: owner.subscription.extraRoomPrice
+          } : null,
+          city: h.city || '',
+          region: h.region || '',
+          status: h.status || 'Active',
+          rawStatus: h.status,
+          rooms: (h.rooms || []).map(r => ({ roomType: r.roomType, totalRooms: r.totalRooms, roomNumbers: r.roomNumbers })),
+          images: h.images || [],
+          rates: h.rates || []
+        });
       }
     }
 
@@ -11174,7 +11205,7 @@ const uploadPropertyImage = multer({
   }
 });
 
-router.post('/homestay-owner/properties/upload-image', authenticateToken, uploadPropertyImage.single('file'), async (req, res) => {
+router.post(['/homestay-owner/properties/upload-image', '/api/homestay-owner/properties/upload-image'], authenticateToken, uploadPropertyImage.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'NoFileUploaded', message: 'No file was uploaded.' });
   }
@@ -12192,12 +12223,13 @@ router.post('/homestay-owner/properties/publish', authenticateToken, async (req,
 
 router.get('/homestay-owner/properties', authenticateToken, async (req, res) => {
   try {
+    const isSuperAdmin = req.user.role === 'Super Admin';
     const ownerId = req.user._id;
     let list;
     if (!isMongoConnected()) {
-      list = mockPropertiesDatabase.filter(p => String(p.ownerId) === String(ownerId) && !p.deleted);
+      list = isSuperAdmin ? mockPropertiesDatabase.filter(p => !p.deleted) : mockPropertiesDatabase.filter(p => String(p.ownerId) === String(ownerId) && !p.deleted);
     } else {
-      list = await Property.find({ ownerId, deleted: false }).lean().sort({ createdAt: -1 });
+      list = await Property.find(isSuperAdmin ? { deleted: false } : { ownerId, deleted: false }).lean().sort({ createdAt: -1 });
     }
 
     const enrichedList = [];
@@ -13053,12 +13085,20 @@ router.get('/homestay-owner/bookings/available-rooms', authenticateToken, async 
     const categories = await PropertyRooms.find({ propertyId });
 
     // Fetch Active Bookings overlapping [checkIn, checkOut)
-    const bookings = await Booking.find({
+    const bookingQuery = {
       propertyId,
       bookingStatus: { $nin: ['Cancelled'] },
       checkInDate: { $lt: outDate },
       checkOutDate: { $gt: inDate }
-    });
+    };
+    if (req.query.excludeBookingId) {
+      const isOid = mongoose.isValidObjectId(req.query.excludeBookingId);
+      bookingQuery.$and = [
+        { _id: { $ne: isOid ? req.query.excludeBookingId : null } },
+        { bookingId: { $ne: req.query.excludeBookingId } }
+      ];
+    }
+    const bookings = await Booking.find(bookingQuery);
 
     // Fetch Blocked Dates overlapping [checkIn, checkOut)
     const blocks = await PropertyBlockedDate.find({
@@ -13335,16 +13375,19 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
         adults: totalAdults,
         children: totalChildren
       },
-      bookedRooms: rooms.map(r => ({
-        roomCategoryId: r.roomCategoryId || r.categoryId,
-        roomCategoryName: r.roomCategoryName || r.category || 'Standard',
-        roomNumber: String(r.roomNumber),
-        adults: Number(r.adults || 1),
-        child5_9: Number(r.child5_9 || 0),
-        child0_4: Number(r.child0_4 || 0),
-        mealPlan: r.mealPlan || 'EP',
-        roomPrice: Number(r.roomPrice || r.price || 0)
-      })),
+      bookedRooms: rooms.map(r => {
+        const catId = r.roomCategoryId || r.categoryId;
+        return {
+          roomCategoryId: (catId && mongoose.isValidObjectId(catId)) ? catId : null,
+          roomCategoryName: r.roomCategoryName || r.category || 'Standard',
+          roomNumber: String(r.roomNumber),
+          adults: Number(r.adults || 1),
+          child5_9: Number(r.child5_9 || 0),
+          child0_4: Number(r.child0_4 || 0),
+          mealPlan: r.mealPlan || 'EP',
+          roomPrice: Number(r.roomPrice || r.price || 0)
+        };
+      }),
       propertyDetails: {
         propertyId: property.propertyId,
         propertyName: property.name,
@@ -13357,6 +13400,7 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
       pricing: {
         bookingAmount: roomCost,
         discount: Number(pricing.discount) || 0,
+        couponCode: req.body.couponCode || pricing.couponCode || '',
         tax,
         addOns,
         addOnsRemark: pricing.addOnsRemark || '',
@@ -13386,6 +13430,25 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
     });
 
     await newBooking.save();
+
+    const usedCode = req.body.couponCode || pricing?.couponCode;
+    if (usedCode) {
+      const cleanC = String(usedCode).trim().toUpperCase();
+      await Coupon.updateOne(
+        { code: cleanC },
+        { 
+          $inc: { usedCount: 1 },
+          $push: {
+            usedBy: {
+              userIdentifier: guestMobile || customer?.email || 'Guest',
+              usedAt: new Date(),
+              bookingId: bookingIdStr,
+              discountAmount: Number(pricing?.discount) || 0
+            }
+          }
+        }
+      ).catch(e => console.warn('Could not update coupon count:', e.message));
+    }
 
     res.status(201).json({
       success: true,
@@ -13511,13 +13574,15 @@ router.get('/homestay-owner/bookings/:id', authenticateToken, async (req, res) =
   try {
     const isSuperAdmin = req.user.role === 'Super Admin';
     const ownerId = req.user._id || req.user.id;
-    const isObjectId = mongoose.isValidObjectId(req.params.id);
+    const cleanId = String(req.params.id || '').replace(/^#/, '');
+    const targetObjId = mongoose.isValidObjectId(req.params.id) ? req.params.id : (mongoose.isValidObjectId(cleanId) ? cleanId : null);
 
     const booking = await Booking.findOne({
       $or: [
-        ...(isObjectId ? [{ _id: req.params.id }] : []),
+        ...(targetObjId ? [{ _id: targetObjId }] : []),
         { bookingId: req.params.id },
-        { bookingId: `#${req.params.id}` }
+        { bookingId: cleanId },
+        { bookingId: `#${cleanId}` }
       ]
     }).populate('propertyId');
 
@@ -13645,8 +13710,8 @@ router.patch('/homestay-owner/bookings/:id/reschedule', authenticateToken, async
   try {
     const isSuperAdmin = req.user.role === 'Super Admin';
     const ownerId = req.user._id || req.user.id;
-    const checkInDate = req.body.checkInDate || req.body.newCheckIn;
-    const checkOutDate = req.body.checkOutDate || req.body.newCheckOut;
+    const checkInDate = req.body.checkInDate || req.body.checkIn || req.body.newCheckIn || req.body.check_in || req.body.newCheckInDate;
+    const checkOutDate = req.body.checkOutDate || req.body.checkOut || req.body.newCheckOut || req.body.check_out || req.body.newCheckOutDate;
 
     if (!checkInDate || !checkOutDate) {
       return res.status(400).json({ error: 'ValidationError', message: 'Both check-in and check-out dates are required.' });
@@ -13658,12 +13723,15 @@ router.patch('/homestay-owner/bookings/:id/reschedule', authenticateToken, async
       return res.status(400).json({ error: 'ValidationError', message: 'Check-out date must be after check-in date.' });
     }
 
-    const isObjectId = mongoose.isValidObjectId(req.params.id);
+    const cleanId = String(req.params.id || '').replace(/^#/, '');
+    const targetObjId = mongoose.isValidObjectId(req.params.id) ? req.params.id : (mongoose.isValidObjectId(cleanId) ? cleanId : null);
+
     const booking = await Booking.findOne({
       $or: [
-        ...(isObjectId ? [{ _id: req.params.id }] : []),
+        ...(targetObjId ? [{ _id: targetObjId }] : []),
         { bookingId: req.params.id },
-        { bookingId: `#${req.params.id}` }
+        { bookingId: cleanId },
+        { bookingId: `#${cleanId}` }
       ]
     });
 
@@ -13719,12 +13787,55 @@ router.patch('/homestay-owner/bookings/:id/reschedule', authenticateToken, async
       }
     }
 
-    const prevIn = booking.checkInDate.toISOString().split('T')[0];
-    const prevOut = booking.checkOutDate.toISOString().split('T')[0];
+    const prevIn = (booking.checkInDate instanceof Date) ? booking.checkInDate.toISOString().split('T')[0] : String(booking.checkInDate);
+    const prevOut = (booking.checkOutDate instanceof Date) ? booking.checkOutDate.toISOString().split('T')[0] : String(booking.checkOutDate);
+
+    // Stay nights calculation
+    const prevNights = Math.max(1, Math.round((new Date(booking.checkOutDate) - new Date(booking.checkInDate)) / (1000 * 60 * 60 * 24)));
+    const newNights = Math.max(1, Math.round((newOut - newIn) / (1000 * 60 * 60 * 24)));
+
+    if (!booking.pricing) booking.pricing = {};
+    const oldFinalAmount = Number(booking.pricing.finalAmount || booking.amount || 0);
+    let newFinalAmount = oldFinalAmount;
+
+    // Recalculate price if nights changed
+    if (newNights !== prevNights && prevNights > 0) {
+      const prevBookingAmt = Number(booking.pricing.bookingAmount || (oldFinalAmount * 0.89));
+      const nightlyRoomRate = prevBookingAmt / prevNights;
+      const newRoomCost = Math.round(nightlyRoomRate * newNights);
+
+      const taxRate = prevBookingAmt > 0 ? ((Number(booking.pricing.tax) || 0) / prevBookingAmt) : 0.12;
+      const effectiveTaxRate = (taxRate > 0 && taxRate <= 0.28) ? taxRate : 0.12;
+      const newTax = Math.round(newRoomCost * effectiveTaxRate);
+
+      const addOns = Number(booking.pricing.addOns || 0);
+      const discount = Number(booking.pricing.discount || 0);
+
+      newFinalAmount = Math.max(0, newRoomCost + newTax + addOns - discount);
+
+      booking.pricing.bookingAmount = newRoomCost;
+      booking.pricing.tax = newTax;
+      booking.pricing.finalAmount = newFinalAmount;
+      booking.amount = newFinalAmount;
+    }
+
+    const paidTotal = (Array.isArray(booking.paymentHistory) && booking.paymentHistory.length > 0)
+      ? booking.paymentHistory.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+      : (Number(booking.pricing.paidAmount) || 0);
+
+    booking.pricing.paidAmount = paidTotal;
+    const newPending = Math.max(0, newFinalAmount - paidTotal);
+    booking.pricing.pendingAmount = newPending;
+    booking.paymentStatus = (newPending <= 0) ? 'Paid' : (paidTotal > 0 ? 'Partial' : 'Pending');
+
     booking.checkInDate = newIn;
     booking.checkOutDate = newOut;
+
+    const diff = newFinalAmount - oldFinalAmount;
+    const diffStr = diff !== 0 ? ` (Price adjusted by ₹${diff > 0 ? '+' : ''}${diff.toLocaleString()} to ₹${newFinalAmount.toLocaleString()}, balance: ₹${newPending.toLocaleString()})` : '';
+
     booking.timeline.push({
-      activity: `Rescheduled stay from (${prevIn} → ${prevOut}) to (${checkInDate} → ${checkOutDate})`,
+      activity: `Rescheduled stay from (${prevIn} → ${prevOut}, ${prevNights} night${prevNights > 1 ? 's' : ''}) to (${checkInDate} → ${checkOutDate}, ${newNights} night${newNights > 1 ? 's' : ''})${diffStr}`,
       timestamp: new Date(),
       createdBy: req.user.email || 'Owner'
     });
@@ -13746,11 +13857,18 @@ router.patch('/homestay-owner/bookings/:id/reschedule', authenticateToken, async
         {
           $set: {
             checkInDate: newIn,
-            checkOutDate: newOut
+            checkOutDate: newOut,
+            amount: newFinalAmount,
+            "pricing.bookingAmount": booking.pricing.bookingAmount,
+            "pricing.tax": booking.pricing.tax,
+            "pricing.finalAmount": newFinalAmount,
+            "pricing.paidAmount": paidTotal,
+            "pricing.pendingAmount": newPending,
+            paymentStatus: booking.paymentStatus
           },
           $push: {
             timeline: {
-              activity: `Rescheduled stay from (${prevIn} → ${prevOut}) to (${checkInDate} → ${checkOutDate})`,
+              activity: `Rescheduled stay from (${prevIn} → ${prevOut}) to (${checkInDate} → ${checkOutDate})${diffStr}`,
               timestamp: new Date(),
               createdBy: req.user.email || 'Owner'
             }
@@ -13759,7 +13877,7 @@ router.patch('/homestay-owner/bookings/:id/reschedule', authenticateToken, async
       ).catch(e => console.warn('Could not sync duplicate booking records:', e.message));
     }
 
-    res.json({ success: true, message: `Booking rescheduled to ${checkInDate} - ${checkOutDate}!`, booking });
+    res.json({ success: true, message: `Booking rescheduled to ${checkInDate} - ${checkOutDate}!`, booking, priceDifference: diff });
   } catch (err) {
     res.status(500).json({ error: 'ServerError', message: err.message });
   }
@@ -13770,14 +13888,22 @@ router.patch('/homestay-owner/bookings/:id/cancel', authenticateToken, async (re
   try {
     const isSuperAdmin = req.user.role === 'Super Admin';
     const ownerId = req.user._id || req.user.id;
-    const { reason = 'Cancelled by Owner' } = req.body;
+    const { reason } = req.body;
 
-    const isObjectId = mongoose.isValidObjectId(req.params.id);
+    if (!reason || !String(reason).trim()) {
+      return res.status(400).json({ error: 'ValidationError', message: 'A non-empty cancellation reason is required.' });
+    }
+
+    const cleanReason = String(reason).trim();
+    const cleanId = String(req.params.id || '').replace(/^#/, '');
+    const targetObjId = mongoose.isValidObjectId(req.params.id) ? req.params.id : (mongoose.isValidObjectId(cleanId) ? cleanId : null);
+
     const booking = await Booking.findOne({
       $or: [
-        ...(isObjectId ? [{ _id: req.params.id }] : []),
+        ...(targetObjId ? [{ _id: targetObjId }] : []),
         { bookingId: req.params.id },
-        { bookingId: `#${req.params.id}` }
+        { bookingId: cleanId },
+        { bookingId: `#${cleanId}` }
       ]
     });
 
@@ -13786,9 +13912,16 @@ router.patch('/homestay-owner/bookings/:id/cancel', authenticateToken, async (re
       return res.status(403).json({ error: 'Forbidden', message: 'Access denied.' });
     }
 
+    if (booking.bookingStatus === 'Cancelled') {
+      return res.status(400).json({ error: 'AlreadyCancelled', message: 'This booking is already cancelled.' });
+    }
+
     booking.bookingStatus = 'Cancelled';
+    booking.cancellationReason = cleanReason;
+    booking.cancelledAt = new Date();
+    booking.cancelledBy = req.user.email || 'Owner';
     booking.timeline.push({
-      activity: `Booking cancelled: ${reason}`,
+      activity: `Booking cancelled: ${cleanReason}`,
       timestamp: new Date(),
       createdBy: req.user.email || 'Owner'
     });
@@ -13797,10 +13930,10 @@ router.patch('/homestay-owner/bookings/:id/cancel', authenticateToken, async (re
     await createOwnerNotification({
       ownerId: booking.ownerId,
       title: 'Booking Cancelled',
-      message: `Booking ${booking.bookingId} was cancelled (${reason}). Room released back to calendar.`,
+      message: `Booking ${booking.bookingId} was cancelled (${cleanReason}). Room released back to calendar.`,
       type: 'cancellation',
       bookingId: booking.bookingId,
-      metadata: { reason }
+      metadata: { reason: cleanReason }
     });
 
     res.json({ success: true, message: 'Booking cancelled. Rooms are now open for new reservations.', booking });
@@ -13821,12 +13954,15 @@ router.patch('/homestay-owner/bookings/:id/payment', authenticateToken, async (r
       return res.status(400).json({ error: 'ValidationError', message: 'Please enter a valid payment amount greater than 0.' });
     }
 
-    const isObjectId = mongoose.isValidObjectId(req.params.id);
+    const cleanId = String(req.params.id || '').replace(/^#/, '');
+    const targetObjId = mongoose.isValidObjectId(req.params.id) ? req.params.id : (mongoose.isValidObjectId(cleanId) ? cleanId : null);
+
     const booking = await Booking.findOne({
       $or: [
-        ...(isObjectId ? [{ _id: req.params.id }] : []),
+        ...(targetObjId ? [{ _id: targetObjId }] : []),
         { bookingId: req.params.id },
-        { bookingId: `#${req.params.id}` }
+        { bookingId: cleanId },
+        { bookingId: `#${cleanId}` }
       ]
     });
 
@@ -13835,8 +13971,29 @@ router.patch('/homestay-owner/bookings/:id/payment', authenticateToken, async (r
       return res.status(403).json({ error: 'Forbidden', message: 'Access denied.' });
     }
 
-    const curPaid = Number(booking.pricing?.paidAmount) || 0;
-    const finalAmt = Number(booking.pricing?.finalAmount) || Number(booking.amount) || 0;
+    if (!booking.pricing) booking.pricing = {};
+    const finalAmt = Number(booking.pricing?.finalAmount !== undefined ? booking.pricing.finalAmount : (booking.amount || 0));
+    const curPaid = (Array.isArray(booking.paymentHistory) && booking.paymentHistory.length > 0)
+      ? booking.paymentHistory.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+      : (Number(booking.pricing?.paidAmount) || 0);
+
+    const pendingBalance = Math.max(0, finalAmt - curPaid);
+
+    if (pendingBalance <= 0) {
+      return res.status(400).json({
+        error: 'AlreadyPaid',
+        message: 'This booking is already fully settled. No outstanding balance remains.'
+      });
+    }
+
+    // STRICT INVARIANT ENFORCEMENT: payment cannot exceed pending balance
+    if (paymentAmount > pendingBalance) {
+      return res.status(400).json({
+        error: 'OverpaymentNotAllowed',
+        message: `Payment amount of ₹${paymentAmount.toLocaleString()} exceeds the outstanding balance of ₹${pendingBalance.toLocaleString()}. Maximum collectible amount is ₹${pendingBalance.toLocaleString()}.`
+      });
+    }
+
     const newPaid = curPaid + paymentAmount;
     const newPending = Math.max(0, finalAmt - newPaid);
 
@@ -13849,18 +14006,56 @@ router.patch('/homestay-owner/bookings/:id/payment', authenticateToken, async (r
       amount: paymentAmount,
       method,
       transactionId,
-      remark: remark || 'Payment installment recorded by Owner',
+      remark: remark || 'Payment installment recorded by Host',
       date: new Date(),
       recordedBy: req.user.email || 'Owner'
     });
 
     booking.timeline.push({
-      activity: `Payment of ₹${paymentAmount.toLocaleString()} recorded via ${method}. Pending balance: ₹${newPending.toLocaleString()}`,
+      activity: `Payment of ₹${paymentAmount.toLocaleString()} recorded via ${method}. Outstanding balance: ₹${newPending.toLocaleString()}`,
       timestamp: new Date(),
       createdBy: req.user.email || 'Owner'
     });
 
     await booking.save();
+
+    // Synchronize any duplicate records with the same bookingId
+    if (booking.bookingId) {
+      await Booking.updateMany(
+        {
+          _id: { $ne: booking._id },
+          bookingId: { 
+            $in: [
+              booking.bookingId, 
+              `#${booking.bookingId.replace(/^#/, '')}`, 
+              booking.bookingId.replace(/^#/, '')
+            ] 
+          }
+        },
+        {
+          $set: {
+            "pricing.paidAmount": newPaid,
+            "pricing.pendingAmount": newPending,
+            paymentStatus: booking.paymentStatus
+          },
+          $push: {
+            paymentHistory: {
+              amount: paymentAmount,
+              method,
+              transactionId,
+              remark: remark || 'Payment installment recorded by Host',
+              date: new Date(),
+              recordedBy: req.user.email || 'Owner'
+            },
+            timeline: {
+              activity: `Payment of ₹${paymentAmount.toLocaleString()} recorded via ${method}. Outstanding balance: ₹${newPending.toLocaleString()}`,
+              timestamp: new Date(),
+              createdBy: req.user.email || 'Owner'
+            }
+          }
+        }
+      ).catch(e => console.warn('Could not sync duplicate booking records:', e.message));
+    }
 
     res.json({
       success: true,
@@ -13892,7 +14087,22 @@ router.patch('/homestay-owner/bookings/:id', authenticateToken, async (req, res)
       return res.status(403).json({ error: 'Forbidden', message: 'Access denied.' });
     }
 
-    const { customer, guestDetails, pricing, notes, specialRequests } = req.body;
+    const {
+      customer,
+      guestDetails,
+      checkInDate,
+      checkOutDate,
+      dates,
+      rooms: inputRooms,
+      bookedRooms: inputBookedRooms,
+      bookingMode,
+      pricing,
+      couponCode,
+      notes,
+      specialRequests
+    } = req.body;
+
+    // 1. Update customer info if provided
     if (customer || guestDetails) {
       const gName = customer?.name || guestDetails?.fullName;
       const gPhone = customer?.mobile || customer?.phone || guestDetails?.phone;
@@ -13906,27 +14116,153 @@ router.patch('/homestay-owner/bookings/:id', authenticateToken, async (req, res)
       if (gAddress !== undefined) booking.customer.address = gAddress;
     }
 
-    if (pricing) {
-      if (!booking.pricing) booking.pricing = {};
-      const prevAddOns = Number(booking.pricing.addOns) || 0;
-      if (pricing.addOns !== undefined) booking.pricing.addOns = Number(pricing.addOns) || 0;
-      if (pricing.addOnsRemark !== undefined) booking.pricing.addOnsRemark = pricing.addOnsRemark;
-      
-      const addOnsDiff = (Number(booking.pricing.addOns) || 0) - prevAddOns;
-      if (addOnsDiff !== 0) {
-        const curFinal = Number(booking.pricing.finalAmount) || Number(booking.amount) || 0;
-        const newFinal = Math.max(0, curFinal + addOnsDiff);
-        booking.pricing.finalAmount = newFinal;
-        booking.amount = newFinal;
-        const curPaid = Number(booking.pricing.paidAmount) || 0;
-        booking.pricing.pendingAmount = Math.max(0, newFinal - curPaid);
-        booking.paymentStatus = booking.pricing.pendingAmount <= 0 ? 'Paid' : (curPaid > 0 ? 'Partial' : 'Pending');
-      } else if (pricing.finalAmount !== undefined) {
-        booking.pricing.finalAmount = Number(pricing.finalAmount);
-        booking.amount = Number(pricing.finalAmount);
+    // 2. Stay dates and rooms update with availability verification
+    const finalCheckIn = checkInDate || dates?.checkIn;
+    const finalCheckOut = checkOutDate || dates?.checkOut;
+    const targetRooms = (Array.isArray(inputRooms) && inputRooms.length > 0) ? inputRooms : ((Array.isArray(inputBookedRooms) && inputBookedRooms.length > 0) ? inputBookedRooms : null);
+
+    if (finalCheckIn || finalCheckOut || targetRooms) {
+      const inDate = finalCheckIn ? new Date(finalCheckIn) : new Date(booking.checkInDate);
+      const outDate = finalCheckOut ? new Date(finalCheckOut) : new Date(booking.checkOutDate);
+
+      if (isNaN(inDate.getTime()) || isNaN(outDate.getTime()) || inDate >= outDate) {
+        return res.status(400).json({ error: 'ValidationError', message: 'Check-out date must be strictly after check-in date.' });
+      }
+
+      const roomsToCheck = targetRooms || booking.bookedRooms || [];
+
+      // Verify availability against OTHER bookings (excluding this booking)
+      for (const r of roomsToCheck) {
+        const rNo = String(r.roomNumber);
+        const conflict = await Booking.findOne({
+          _id: { $ne: booking._id },
+          propertyId: booking.propertyId,
+          bookingStatus: { $nin: ['Cancelled'] },
+          $or: [
+            { "bookedRooms.roomNumber": rNo },
+            { "propertyDetails.roomNumber": rNo }
+          ],
+          checkInDate: { $lt: outDate },
+          checkOutDate: { $gt: inDate }
+        });
+
+        if (conflict) {
+          return res.status(409).json({
+            error: 'RoomUnavailable',
+            message: `Room ${rNo} is already booked by another reservation (${conflict.bookingId}) for the requested dates.`
+          });
+        }
+
+        const conflictBlock = await PropertyBlockedDate.findOne({
+          propertyId: booking.propertyId,
+          roomNumber: rNo,
+          startDate: { $lt: outDate },
+          endDate: { $gte: inDate }
+        });
+
+        if (conflictBlock) {
+          return res.status(409).json({
+            error: 'RoomBlocked',
+            message: `Room ${rNo} is blocked for maintenance during the requested dates.`
+          });
+        }
+      }
+
+      booking.checkInDate = inDate;
+      booking.checkOutDate = outDate;
+
+      if (targetRooms) {
+        let totalAdults = 0;
+        let totalChildren = 0;
+        booking.bookedRooms = targetRooms.map(r => {
+          const adults = Number(r.adults || 1);
+          const child5_9 = Number(r.child5_9 || 0);
+          const child0_4 = Number(r.child0_4 || 0);
+          totalAdults += adults;
+          totalChildren += (child5_9 + child0_4);
+          const catId = r.roomCategoryId || r.categoryId;
+          return {
+            roomCategoryId: (catId && mongoose.isValidObjectId(catId)) ? catId : null,
+            roomCategoryName: r.roomCategoryName || r.categoryName || r.category || 'Standard',
+            roomNumber: String(r.roomNumber),
+            adults,
+            child5_9,
+            child0_4,
+            mealPlan: r.mealPlan || 'EP',
+            roomPrice: Number(r.roomPrice || r.price || 0)
+          };
+        });
+
+        booking.guests = {
+          total: totalAdults + totalChildren,
+          adults: totalAdults,
+          children: totalChildren
+        };
+
+        if (booking.propertyDetails) {
+          booking.propertyDetails.roomNumber = booking.bookedRooms.map(r => r.roomNumber).join(', ');
+          if (booking.bookedRooms[0]?.roomCategoryName) {
+            booking.propertyDetails.roomCategory = booking.bookedRooms[0].roomCategoryName;
+          }
+          if (booking.bookedRooms[0]?.mealPlan) {
+            booking.propertyDetails.mealPlan = booking.bookedRooms[0].mealPlan;
+          }
+        }
       }
     }
 
+    if (bookingMode) {
+      booking.bookingMode = bookingMode === 'Travel Agent' ? 'Travel Agent' : 'Guest';
+    }
+
+    // 3. Pricing update
+    if (pricing) {
+      if (!booking.pricing) booking.pricing = {};
+      const prevAddOns = Number(booking.pricing.addOns) || 0;
+      if (pricing.roomCost !== undefined) booking.pricing.bookingAmount = Number(pricing.roomCost);
+      if (pricing.bookingAmount !== undefined) booking.pricing.bookingAmount = Number(pricing.bookingAmount);
+      if (pricing.tax !== undefined) booking.pricing.tax = Number(pricing.tax);
+      if (pricing.addOns !== undefined) booking.pricing.addOns = Number(pricing.addOns);
+      if (pricing.addOnsRemark !== undefined) booking.pricing.addOnsRemark = pricing.addOnsRemark;
+      if (pricing.discount !== undefined) booking.pricing.discount = Number(pricing.discount);
+      if (pricing.couponCode !== undefined || couponCode !== undefined) {
+        booking.pricing.couponCode = couponCode || pricing.couponCode || '';
+      }
+
+      // Calculate final amount
+      let newFinal = 0;
+      if (pricing.finalAmount !== undefined) {
+        newFinal = Number(pricing.finalAmount);
+      } else {
+        const roomCost = Number(booking.pricing.bookingAmount) || 0;
+        const tax = Number(booking.pricing.tax) || 0;
+        const addOns = Number(booking.pricing.addOns) || 0;
+        const discount = Number(booking.pricing.discount) || 0;
+        newFinal = Math.max(0, roomCost + tax + addOns - discount);
+      }
+
+      booking.pricing.finalAmount = newFinal;
+      booking.amount = newFinal;
+
+      // Preserve existing payment history total
+      const paidTotal = (Array.isArray(booking.paymentHistory) && booking.paymentHistory.length > 0)
+        ? booking.paymentHistory.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+        : (Number(booking.pricing.paidAmount) || 0);
+
+      booking.pricing.paidAmount = paidTotal;
+      const pendingAmount = Math.max(0, newFinal - paidTotal);
+      booking.pricing.pendingAmount = pendingAmount;
+
+      if (pendingAmount <= 0) {
+        booking.paymentStatus = 'Paid';
+      } else if (paidTotal > 0) {
+        booking.paymentStatus = 'Partial';
+      } else {
+        booking.paymentStatus = 'Pending';
+      }
+    }
+
+    // 4. Notes & special requests
     if (specialRequests !== undefined) {
       booking.specialRequests = specialRequests;
       booking.notes = specialRequests;
@@ -13939,7 +14275,7 @@ router.patch('/homestay-owner/bookings/:id', authenticateToken, async (req, res)
     }
 
     booking.timeline.push({
-      activity: 'Booking details updated by Owner',
+      activity: 'Booking details updated by Host / Admin',
       timestamp: new Date(),
       createdBy: req.user.email || 'Owner'
     });
@@ -15107,12 +15443,27 @@ router.get('/homestay-owner/dashboard', authenticateToken, async (req, res) => {
         checkInsYesterday: yesterdayList.length,
         checkOutsYesterday: 0
       },
+      kpis: {
+        totalRooms,
+        availableToday: availableRooms,
+        unoccupiedToday: unoccupiedRooms,
+        occupancyRate: availabilityPercent,
+        vacancyRate: vacancyPercent,
+        todayRevenue: Number(todayRevenue || 0),
+        checkInsCount: checkInsList.length,
+        checkOutsCount: checkOutsList.length,
+        checkInsYesterday: yesterdayList.length,
+        checkOutsYesterday: 0
+      },
+      checkIns: checkInsList,
+      checkOuts: checkOutsList,
       todayCheckIns: checkInsList,
       checkInsToday: checkInsList,
       todayCheckOuts: checkOutsList,
       checkOutsToday: checkOutsList,
       yesterdayBookings: yesterdayList,
       tomorrowBookings: tomorrowList,
+      allBookings: allPropBookings.map(b => mapBookingItem(b)),
       chartPoints: timeframeData.chartPoints,
       revenueTimeframe: timeframeData,
       properties: properties.map(p => ({ id: p._id, name: p.name }))
@@ -15733,12 +16084,9 @@ const isCouponApplicableToProperty = (coupon, property) => {
     return false;
   }
 
-  // If 'all', coupon is valid ONLY for homestays owned by this coupon's owner
+  // If 'all', coupon is valid for all homestays
   if (applicable.includes('all')) {
-    if (coupon.ownerId && property.ownerId) {
-      return String(coupon.ownerId) === String(property.ownerId);
-    }
-    return false;
+    return true;
   }
 
   const propIdStr = String(property._id || '');
@@ -15849,12 +16197,18 @@ router.post(['/public/coupons/validate', '/api/public/coupons/validate'], async 
       return res.status(400).json({ valid: false, message: 'Property information is required to validate coupon.' });
     }
 
-    const propertyDoc = await Property.findOne({
+    let propertyDoc = await Property.findOne({
       $or: [
         { _id: mongoose.Types.ObjectId.isValid(propertyId) ? propertyId : null },
         { propertyId: propertyId }
       ].filter(Boolean)
     });
+
+    if (!propertyDoc) {
+      propertyDoc = await Homestay.findOne({
+        _id: mongoose.Types.ObjectId.isValid(propertyId) ? propertyId : null
+      });
+    }
 
     if (!propertyDoc) {
       return res.status(404).json({ valid: false, message: 'Homestay property not found.' });
@@ -17450,11 +17804,103 @@ router.delete(['/admin/subscription-plans/:id', '/api/admin/subscription-plans/:
 // ADMIN: ASSIGN & MANAGE HOMESTAY OWNER SUBSCRIPTIONS
 // ==========================================
 
+// Robust resolver helper to locate an owner by HomestayOwner ID, Property ID, Homestay ID, mobile, or email
+async function findOwnerByIdOrReference(id) {
+  if (!id) return null;
+  const idStr = String(id).trim();
+
+  // 1. Direct match by HomestayOwner ObjectId
+  if (mongoose.Types.ObjectId.isValid(idStr)) {
+    let owner = await HomestayOwner.findById(idStr);
+    if (owner && owner.status !== 'Deleted') return owner;
+
+    // 2. Could idStr be a Property._id?
+    const prop = await Property.findById(idStr).lean();
+    if (prop) {
+      if (prop.ownerId && mongoose.Types.ObjectId.isValid(prop.ownerId)) {
+        owner = await HomestayOwner.findById(prop.ownerId);
+        if (owner && owner.status !== 'Deleted') return owner;
+      }
+      if (prop.ownerMobile) {
+        owner = await HomestayOwner.findOne({ mobile: prop.ownerMobile, status: { $ne: 'Deleted' } });
+        if (owner) return owner;
+      }
+      if (prop.ownerName) {
+        const parts = prop.ownerName.trim().split(/\s+/);
+        owner = await HomestayOwner.findOne({
+          status: { $ne: 'Deleted' },
+          $or: [
+            { firstName: { $regex: new RegExp(`^${parts[0]}`, 'i') } },
+            { mobile: prop.ownerMobile }
+          ]
+        });
+        if (owner) return owner;
+      }
+    }
+
+    // 3. Could idStr be a legacy Homestay._id?
+    const h = await Homestay.findById(idStr).lean();
+    if (h) {
+      if (h.ownerMobile) {
+        owner = await HomestayOwner.findOne({ mobile: h.ownerMobile, status: { $ne: 'Deleted' } });
+        if (owner) return owner;
+      }
+      if (h.ownerName) {
+        const parts = h.ownerName.trim().split(/\s+/);
+        owner = await HomestayOwner.findOne({
+          status: { $ne: 'Deleted' },
+          $or: [
+            { firstName: { $regex: new RegExp(`^${parts[0]}`, 'i') } },
+            { mobile: h.ownerMobile }
+          ]
+        });
+        if (owner) return owner;
+      }
+    }
+
+    // 4. Could idStr be an admin ID or staff ID stored on a property?
+    const propByAdmin = await Property.findOne({ ownerId: idStr, deleted: { $ne: true } }).lean();
+    if (propByAdmin) {
+      if (propByAdmin.ownerMobile) {
+        owner = await HomestayOwner.findOne({ mobile: propByAdmin.ownerMobile, status: { $ne: 'Deleted' } });
+        if (owner) return owner;
+      }
+      if (propByAdmin.ownerName) {
+        const parts = propByAdmin.ownerName.trim().split(/\s+/);
+        owner = await HomestayOwner.findOne({
+          status: { $ne: 'Deleted' },
+          $or: [
+            { firstName: { $regex: new RegExp(`^${parts[0]}`, 'i') } }
+          ]
+        });
+        if (owner) return owner;
+      }
+    }
+  }
+
+  // 5. Lookup by mobile, whatsapp, or email
+  let owner = await HomestayOwner.findOne({
+    status: { $ne: 'Deleted' },
+    $or: [
+      { mobile: idStr },
+      { whatsApp: idStr },
+      { email: idStr }
+    ]
+  });
+  if (owner) return owner;
+
+  return null;
+}
+
 // GET /api/admin/homestay-owners/:id/subscription (View owner's current plan & limits)
 router.get(['/admin/homestay-owners/:id/subscription', '/api/admin/homestay-owners/:id/subscription'], authenticateToken, async (req, res) => {
   try {
-    const owner = await HomestayOwner.findById(req.params.id).populate('subscription.planId');
-    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found.' });
+    let owner = await findOwnerByIdOrReference(req.params.id);
+    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found in the database. Please verify owner registration.' });
+
+    if (owner.subscription?.planId) {
+      await owner.populate('subscription.planId');
+    }
 
     const activeHomestaysCount = await Property.countDocuments({ ownerId: owner._id, deleted: false, status: { $ne: 'Deleted' } });
     
@@ -17487,12 +17933,19 @@ router.get(['/admin/homestay-owners/:id/subscription', '/api/admin/homestay-owne
       success: true,
       owner: {
         _id: owner._id,
-        name: `${owner.firstName} ${owner.lastName}`,
-        mobile: owner.mobile,
-        email: owner.email,
+        name: `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || 'Owner',
+        mobile: owner.mobile || '',
+        email: owner.email || '',
         activeHomestaysCount,
         properties: propertyDetails,
         subscription: {
+          status: sub.status || 'None',
+          planName: sub.planName || '',
+          baseRooms: sub.baseRooms || 5,
+          extraRooms: sub.extraRooms || 0,
+          maxHomestays: sub.maxHomestays || 1,
+          maxRoomsPerHomestay: sub.maxRoomsPerHomestay || 5,
+          extraRoomPrice: sub.extraRoomPrice || 500,
           ...sub.toObject?.() || sub,
           isExpired,
           daysRemaining
@@ -17515,8 +17968,8 @@ router.post(['/admin/homestay-owners/:id/subscription/assign', '/api/admin/homes
     const plan = await SubscriptionPlan.findById(planId);
     if (!plan) return res.status(404).json({ error: 'NotFound', message: 'Subscription Plan not found.' });
 
-    const owner = await HomestayOwner.findById(req.params.id);
-    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found.' });
+    const owner = await findOwnerByIdOrReference(req.params.id);
+    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found in the database.' });
 
     const start = startDate ? new Date(startDate) : new Date();
     const duration = customDurationDays ? Number(customDurationDays) : (plan.durationDays || 365);
@@ -17602,8 +18055,8 @@ router.post(['/admin/homestay-owners/:id/subscription/add-rooms', '/api/admin/ho
     const { additionalRooms, paymentMethod } = req.body;
     const roomsToAdd = Math.max(1, Number(additionalRooms) || 1);
 
-    const owner = await HomestayOwner.findById(req.params.id);
-    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found.' });
+    const owner = await findOwnerByIdOrReference(req.params.id);
+    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found in the database.' });
 
     if (!owner.subscription || owner.subscription.status !== 'Active') {
       return res.status(400).json({ error: 'NoActivePlan', message: 'Owner does not have an active subscription plan.' });
@@ -17650,7 +18103,8 @@ router.post(['/admin/homestay-owners/:id/subscription/add-rooms', '/api/admin/ho
 // DELETE /api/admin/homestay-owners/:id/subscription (Remove Assigned Subscription Plan)
 router.delete(['/admin/homestay-owners/:id/subscription', '/api/admin/homestay-owners/:id/subscription'], authenticateToken, async (req, res) => {
   try {
-    const owner = await HomestayOwner.findById(req.params.id);
+    const owner = await findOwnerByIdOrReference(req.params.id);
+    if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found in the database.' });
     if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Homestay Owner not found.' });
 
     if (owner.subscription && owner.subscription.status === 'Active') {

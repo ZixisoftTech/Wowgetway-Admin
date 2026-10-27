@@ -324,8 +324,9 @@ export default function GuestListing() {
                       {/* Booking ID */}
                       <td className="py-3.5 px-2 sm:px-3 whitespace-nowrap">
                         <button
-                          onClick={() => navigate(`/homestay-owner/guests/${b.dbId || b.id}`)}
+                          onClick={() => navigate(`/homestay-owner/bookings/${b.dbId || b.id}`)}
                           className="font-extrabold text-xs text-[#E11D48] hover:underline font-mono bg-transparent border-none cursor-pointer p-0 text-left tracking-wide"
+                          title="Open Booking Details"
                         >
                           #{String(b.id).replace(/^#/, '')}
                         </button>

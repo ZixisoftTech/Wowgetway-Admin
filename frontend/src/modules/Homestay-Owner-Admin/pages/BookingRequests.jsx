@@ -303,8 +303,15 @@ export default function BookingRequests() {
               {filteredRequests.map((req) => (
                 <tr key={req.id} className="hover:bg-slate-50/10">
                   <td className="py-5 px-6">
-                    <span className="block font-black text-slate-800">{req.id}</span>
-                    <span className="block text-[8px] text-slate-400 font-mono mt-0.5 leading-none">ID: {req.qtnId}</span>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/homestay-owner/bookings/${req.dbId || req.id}`)}
+                      className="block font-black text-rose-600 hover:text-rose-800 hover:underline bg-transparent border-none cursor-pointer p-0 text-left font-mono"
+                      title="Open Booking Details"
+                    >
+                      {req.id}
+                    </button>
+                    <span className="block text-[8px] text-slate-400 font-mono mt-0.5 leading-none">{req.qtnId}</span>
                   </td>
                   
                   <td className="py-5 px-6">
@@ -320,7 +327,14 @@ export default function BookingRequests() {
                   </td>
 
                   <td className="py-5 px-6">
-                    <span className="block font-black text-slate-800">{req.guestName}</span>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/homestay-owner/guests/${req.dbId || req.id || req.phone}`)}
+                      className="block font-black text-slate-800 hover:text-rose-600 hover:underline bg-transparent border-none cursor-pointer p-0 text-left"
+                      title="View Guest Details & Stay History"
+                    >
+                      {req.guestName}
+                    </button>
                     <span className="block text-[9px] text-slate-400 mt-0.5 leading-none">{req.phone}</span>
                     <span className="block text-[9px] text-slate-400 mt-0.5 leading-none">{req.email}</span>
                   </td>

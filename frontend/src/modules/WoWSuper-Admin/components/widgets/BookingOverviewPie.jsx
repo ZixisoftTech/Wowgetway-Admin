@@ -46,8 +46,8 @@ export default function BookingOverviewPie({ data = [], total = 1248, loading = 
 
       <div className="flex-1 flex flex-col sm:flex-row items-center gap-6 justify-center">
         {/* Doughnut Chart Canvas */}
-        <div className="relative w-40 h-40 flex-shrink-0">
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="relative w-40 h-40 flex-shrink-0 min-w-0 min-h-0">
+          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
             <PieChart>
               <Pie
                 activeIndex={activeIndex}

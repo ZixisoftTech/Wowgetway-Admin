@@ -197,8 +197,12 @@ export default function Revenue() {
       setRescheduleSubmitting(true);
       const token = getAuthToken();
       const res = await axios.patch(getApiUrl(`/api/homestay-owner/bookings/${bookingId}/reschedule`), {
+        checkInDate: rescheduleCheckIn,
         checkIn: rescheduleCheckIn,
-        checkOut: rescheduleCheckOut
+        newCheckIn: rescheduleCheckIn,
+        checkOutDate: rescheduleCheckOut,
+        checkOut: rescheduleCheckOut,
+        newCheckOut: rescheduleCheckOut
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -250,9 +254,20 @@ export default function Revenue() {
     e.preventDefault();
     if (!paymentBooking) return;
     const bookingId = paymentBooking._id || paymentBooking.id || paymentBooking.dbId;
+    const numAmt = Number(paymentAmount);
 
-    if (!paymentAmount || Number(paymentAmount) <= 0) {
+    if (!numAmt || numAmt <= 0) {
       Swal.fire({ icon: 'warning', title: 'Invalid Amount', text: 'Please enter a valid payment amount.' });
+      return;
+    }
+
+    const pend = Number(paymentBooking.pricing?.pendingAmount !== undefined ? paymentBooking.pricing.pendingAmount : (paymentBooking.pendingAmount !== undefined ? paymentBooking.pendingAmount : Math.max(0, (paymentBooking.pricing?.finalAmount || paymentBooking.totalAmount || 0) - (paymentBooking.pricing?.paidAmount || paymentBooking.paidAmount || 0))));
+    if (numAmt > pend) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Overpayment Not Allowed',
+        text: `Cannot collect ₹${numAmt.toLocaleString()}. Maximum collectible remaining balance is ₹${pend.toLocaleString()}.`
+      });
       return;
     }
 

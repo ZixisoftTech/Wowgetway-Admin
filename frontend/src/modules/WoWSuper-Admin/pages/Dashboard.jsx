@@ -319,8 +319,8 @@ export default function Dashboard() {
             </div>
 
             {/* Bar Chart Area */}
-            <div className="h-64 sm:h-72 w-full pt-2">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-64 sm:h-72 w-full pt-2 min-w-0 min-h-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <BarChart
                   data={revenueData}
                   margin={{ top: 25, right: 10, left: 10, bottom: 5 }}
@@ -455,8 +455,8 @@ export default function Dashboard() {
             {/* Donut Chart + Legend */}
             <div className="flex flex-col sm:flex-row items-center justify-center gap-6 py-2">
               {/* Donut Container with Center Text */}
-              <div className="relative w-48 h-48 shrink-0 flex items-center justify-center">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="relative w-48 h-48 shrink-0 flex items-center justify-center min-w-0 min-h-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <PieChart>
                     <Pie
                       data={overviewSlices.filter(s => s.count > 0)}

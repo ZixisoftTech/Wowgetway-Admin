@@ -27,6 +27,16 @@ const getApiUrl = (path) => {
   return `${base}${cleanPath}`;
 };
 
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
+  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+  return `${base}${cleanPath}`;
+};
+
 export default function BookingConfirmationSlip() {
   const navigate = useNavigate();
   const { requestId } = useParams();
@@ -37,7 +47,7 @@ export default function BookingConfirmationSlip() {
   const [copiedLink, setCopiedLink] = useState(false);
 
   const getAuthToken = () => {
-    return localStorage.getItem('homestayOwnerToken') || localStorage.getItem('superAdminToken');
+    return localStorage.getItem('homestayOwnerToken') || localStorage.getItem('token') || localStorage.getItem('superAdminToken');
   };
 
   useEffect(() => {
@@ -308,7 +318,7 @@ ${propertyName} Team`;
         <div className="text-center space-y-2">
           {homestayLogo ? (
             <img 
-              src={homestayLogo} 
+              src={getImageUrl(homestayLogo)} 
               alt={propertyName} 
               className="w-16 h-16 object-contain rounded-2xl border border-slate-200 p-1 bg-white mx-auto shadow-sm"
             />
@@ -482,14 +492,14 @@ ${propertyName} Team`;
             <div className="relative h-20 w-full flex items-center justify-center">
               {stampImage && (
                 <img 
-                  src={stampImage} 
+                  src={getImageUrl(stampImage)} 
                   alt="Official Seal / Stamp" 
                   className="absolute right-0 top-0 h-20 w-20 object-contain opacity-85 pointer-events-none drop-shadow-xs"
                 />
               )}
               {signatureImage ? (
                 <img 
-                  src={signatureImage} 
+                  src={getImageUrl(signatureImage)} 
                   alt="Authorized Signature" 
                   className="relative z-10 max-h-16 max-w-[170px] object-contain drop-shadow-xs"
                 />

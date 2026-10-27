@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import axios from 'axios';
 import Swal from 'sweetalert2';
 import { 
@@ -22,7 +22,8 @@ import {
   BedDouble,
   Receipt,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  Tag
 } from 'lucide-react';
 
 const getApiUrl = (path) => {
@@ -34,9 +35,13 @@ const getApiUrl = (path) => {
 export default function CreateBookingFlow() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { bookingId } = useParams();
+
+  const searchParams = new URLSearchParams(location.search);
+  const editId = bookingId || searchParams.get('editId') || searchParams.get('editBookingId');
 
   const getAuthToken = () => {
-    return localStorage.getItem('homestayOwnerToken') || localStorage.getItem('superAdminToken');
+    return localStorage.getItem('homestayOwnerToken') || localStorage.getItem('token') || localStorage.getItem('superAdminToken');
   };
 
   // Property selection
@@ -89,9 +94,17 @@ export default function CreateBookingFlow() {
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [isCustomPriceEdited, setIsCustomPriceEdited] = useState(false);
 
+  // Coupon state (Change 4B)
+  const [couponCodeInput, setCouponCodeInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponDiscount, setCouponDiscount] = useState(0);
+  const [couponError, setCouponError] = useState('');
+  const [validatingCoupon, setValidatingCoupon] = useState(false);
+
   // Submission State
   const [submitting, setSubmitting] = useState(false);
   const [createdBooking, setCreatedBooking] = useState(null);
+  const [loadingEdit, setLoadingEdit] = useState(false);
 
   // Initialize from Query Params (e.g. from calendar cell click)
   useEffect(() => {
@@ -132,6 +145,98 @@ export default function CreateBookingFlow() {
       }]);
     }
   }, [location.search]);
+
+  // Change 5: Fetch existing booking when editing
+  useEffect(() => {
+    if (!editId) return;
+    const fetchBookingForEdit = async () => {
+      try {
+        setLoadingEdit(true);
+        const token = getAuthToken();
+        const res = await axios.get(getApiUrl(`/api/homestay-owner/bookings/${editId}`), {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        const b = res.data?.booking || res.data;
+        if (!b) return;
+
+        setCreatedBooking(b);
+
+        // Guest info
+        if (b.customer) {
+          setGuestName(b.customer.name || '');
+          const fullMobile = b.customer.mobile || '';
+          if (fullMobile.startsWith('+91')) {
+            setPhoneCountryCode('+91');
+            setGuestMobile(fullMobile.replace('+91', '').trim());
+          } else {
+            setGuestMobile(fullMobile.trim());
+          }
+          setGuestEmail(b.customer.email || '');
+        }
+
+        // Property
+        const pId = b.propertyId?._id || b.propertyId || b.propertyDetails?.propertyId;
+        if (pId) {
+          setSelectedPropertyId(String(pId));
+        }
+
+        // Mode
+        if (b.bookingMode) {
+          setBookingMode(b.bookingMode);
+        }
+
+        // Stay dates
+        const inStr = b.checkInDate ? new Date(b.checkInDate).toISOString().split('T')[0] : '';
+        const outStr = b.checkOutDate ? new Date(b.checkOutDate).toISOString().split('T')[0] : '';
+        if (inStr) setCheckInDate(inStr);
+        if (outStr) setCheckOutDate(outStr);
+
+        // Booked rooms
+        if (Array.isArray(b.bookedRooms) && b.bookedRooms.length > 0) {
+          setRoomCount(b.bookedRooms.length);
+          const configs = b.bookedRooms.map((r, i) => ({
+            id: i + 1,
+            adults: Number(r.adults || 1),
+            child5_9: Number(r.child5_9 || 0),
+            child0_4: Number(r.child0_4 || 0),
+            expanded: i === 0
+          }));
+          setRoomsConfig(configs);
+
+          const selRooms = b.bookedRooms.map((r, i) => ({
+            roomIndex: i,
+            categoryId: r.roomCategoryId || r.categoryId,
+            categoryName: r.roomCategoryName || r.category || 'Selected Room',
+            roomNumber: String(r.roomNumber),
+            mealPlan: r.mealPlan || 'EP',
+            price: Number(r.roomPrice || r.price || 3000)
+          }));
+          setSelectedRooms(selRooms);
+        }
+
+        // Pricing
+        if (b.pricing) {
+          setTotalCost(Number(b.pricing.bookingAmount) || Number(b.pricing.roomCost) || 3000);
+          setTotalTax(Number(b.pricing.tax) || 0);
+          setAddOns(Number(b.pricing.addOns) || 0);
+          setAddOnsRemark(b.pricing.addOnsRemark || '');
+          setAdvanceAmount(String(b.pricing.paidAmount || ''));
+          setIsCustomPriceEdited(true);
+
+          if (b.pricing.couponCode) {
+            setCouponCodeInput(b.pricing.couponCode);
+            setAppliedCoupon({ code: b.pricing.couponCode });
+            setCouponDiscount(Number(b.pricing.discount) || 0);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load booking for edit:', err);
+      } finally {
+        setLoadingEdit(false);
+      }
+    };
+    fetchBookingForEdit();
+  }, [editId]);
 
   // Fetch available rooms whenever property or stay dates change
   useEffect(() => {
@@ -262,12 +367,16 @@ export default function CreateBookingFlow() {
     try {
       setLoadingRooms(true);
       const token = getAuthToken();
+      const params = {
+        propertyId: propId,
+        checkIn: inD,
+        checkOut: outD
+      };
+      if (editId) {
+        params.excludeBookingId = editId;
+      }
       const res = await axios.get(getApiUrl('/api/homestay-owner/bookings/available-rooms'), {
-        params: {
-          propertyId: propId,
-          checkIn: inD,
-          checkOut: outD
-        },
+        params,
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -384,15 +493,65 @@ export default function CreateBookingFlow() {
     const cost = Math.max(0, Number(totalCost) || 0);
     const tax = Math.max(0, Number(totalTax) || 0);
     const addons = Math.max(0, Number(addOns) || 0);
-    return cost + tax + addons;
-  }, [totalCost, totalTax, addOns]);
+    const discount = Math.max(0, Number(couponDiscount) || 0);
+    return Math.max(0, cost + tax + addons - discount);
+  }, [totalCost, totalTax, addOns, couponDiscount]);
 
   const balanceAmount = useMemo(() => {
     const advance = Math.max(0, Number(advanceAmount) || 0);
     return Math.max(0, finalCost - advance);
   }, [finalCost, advanceAmount]);
 
-  // Create Booking Submission
+  // Coupon Handlers (Change 4B)
+  const handleApplyCoupon = async () => {
+    if (!couponCodeInput.trim()) {
+      setCouponError('Please enter a coupon code.');
+      return;
+    }
+    try {
+      setValidatingCoupon(true);
+      setCouponError('');
+      const subtotal = (Number(totalCost) || 0) + (Number(totalTax) || 0) + (Number(addOns) || 0);
+      const res = await axios.post(getApiUrl('/api/public/coupons/validate'), {
+        code: couponCodeInput.trim(),
+        propertyId: selectedPropertyId,
+        subtotal,
+        bookingType: bookingMode === 'Travel Agent' ? 'agent' : 'guest',
+        guestMobile: guestMobile.trim(),
+        guestEmail: guestEmail.trim()
+      });
+
+      if (res.data?.valid) {
+        setAppliedCoupon(res.data.coupon);
+        setCouponDiscount(Number(res.data.discountAmount) || 0);
+        setCouponError('');
+        Swal.fire({
+          icon: 'success',
+          title: 'Coupon Applied!',
+          text: res.data.message || `You save ₹${res.data.discountAmount}!`,
+          timer: 2000,
+          showConfirmButton: false
+        });
+      }
+    } catch (err) {
+      console.error('Coupon validation error:', err);
+      const msg = err.response?.data?.message || 'Invalid coupon code.';
+      setCouponError(msg);
+      setAppliedCoupon(null);
+      setCouponDiscount(0);
+    } finally {
+      setValidatingCoupon(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponDiscount(0);
+    setCouponCodeInput('');
+    setCouponError('');
+  };
+
+  // Create or Update Booking Submission (Change 5)
   const handleSubmitBooking = async (isHold = false) => {
     // 1. Validation
     if (!guestName.trim()) {
@@ -449,53 +608,91 @@ export default function CreateBookingFlow() {
           tax: totalTax,
           addOns,
           addOnsRemark,
+          discount: couponDiscount,
+          couponCode: appliedCoupon?.code || '',
           finalAmount: finalCost,
           advanceAmount: Number(advanceAmount) || 0,
           balanceAmount
         },
+        couponCode: appliedCoupon?.code || '',
         advanceAmount: Number(advanceAmount) || 0
       };
 
-      const res = await axios.post(getApiUrl('/api/homestay-owner/bookings'), bookingPayload, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      let savedBooking;
+      if (editId) {
+        const res = await axios.patch(getApiUrl(`/api/homestay-owner/bookings/${editId}`), bookingPayload, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        savedBooking = res.data.booking || res.data;
+        setCreatedBooking(savedBooking);
 
-      const savedBooking = res.data.booking;
-      setCreatedBooking(savedBooking);
+        Swal.fire({
+          icon: 'success',
+          title: 'Booking Updated Successfully!',
+          html: `
+            <div class="text-xs space-y-1">
+              <p><strong>Booking Ref:</strong> ${savedBooking.bookingId || editId}</p>
+              <p><strong>Guest:</strong> ${savedBooking.customer?.name || guestName}</p>
+              <p><strong>Dates:</strong> ${checkInDate} to ${checkOutDate}</p>
+              <p><strong>Final Amount:</strong> ₹${(savedBooking.amount || finalCost).toLocaleString()}</p>
+            </div>
+          `,
+          showCancelButton: true,
+          confirmButtonText: 'View Calendar',
+          cancelButtonText: 'Back to Dashboard',
+          confirmButtonColor: '#e11d48'
+        }).then((result) => {
+          if (result.isConfirmed) {
+            navigate(`/homestay-owner/availability?propertyId=${selectedPropertyId}`);
+          } else {
+            navigate('/homestay-owner/dashboard');
+          }
+        });
+      } else {
+        const res = await axios.post(getApiUrl('/api/homestay-owner/bookings'), bookingPayload, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
 
-      Swal.fire({
-        icon: 'success',
-        title: isHold ? 'Booking Placed on Hold!' : 'Booking Created Successfully!',
-        html: `
-          <div class="text-xs space-y-1">
-            <p><strong>Booking Ref:</strong> ${savedBooking.bookingId}</p>
-            <p><strong>Guest:</strong> ${savedBooking.customer.name}</p>
-            <p><strong>Rooms:</strong> ${savedBooking.bookedRooms.map(r => r.roomNumber).join(', ')}</p>
-            <p><strong>Final Amount:</strong> ₹${savedBooking.amount.toLocaleString()}</p>
-          </div>
-        `,
-        showCancelButton: true,
-        confirmButtonText: 'View in Calendar',
-        cancelButtonText: 'Create Another',
-        confirmButtonColor: '#e11d48'
-      }).then((result) => {
-        if (result.isConfirmed) {
-          navigate(`/homestay-owner/availability?propertyId=${selectedPropertyId}`);
-        } else {
-          // Reset for new booking
-          setGuestName('');
-          setGuestMobile('');
-          setSelectedRooms([]);
-          setCreatedBooking(null);
-        }
-      });
+        savedBooking = res.data.booking;
+        setCreatedBooking(savedBooking);
+
+        Swal.fire({
+          icon: 'success',
+          title: isHold ? 'Booking Placed on Hold!' : 'Booking Created Successfully!',
+          html: `
+            <div class="text-xs space-y-1">
+              <p><strong>Booking Ref:</strong> ${savedBooking.bookingId}</p>
+              <p><strong>Guest:</strong> ${savedBooking.customer.name}</p>
+              <p><strong>Rooms:</strong> ${savedBooking.bookedRooms.map(r => r.roomNumber).join(', ')}</p>
+              <p><strong>Final Amount:</strong> ₹${savedBooking.amount.toLocaleString()}</p>
+            </div>
+          `,
+          showCancelButton: true,
+          confirmButtonText: 'View in Calendar',
+          cancelButtonText: 'Create Another',
+          confirmButtonColor: '#e11d48'
+        }).then((result) => {
+          if (result.isConfirmed) {
+            navigate(`/homestay-owner/availability?propertyId=${selectedPropertyId}`);
+          } else {
+            // Reset for new booking
+            setGuestName('');
+            setGuestMobile('');
+            setSelectedRooms([]);
+            setCreatedBooking(null);
+            setAppliedCoupon(null);
+            setCouponDiscount(0);
+            setCouponCodeInput('');
+          }
+        });
+      }
 
     } catch (err) {
-      console.error('Error creating booking:', err);
-      const errMsg = err.response?.data?.message || 'Failed to create booking.';
+      console.error('Error saving booking:', err);
+      const errMsg = err.response?.data?.message || 'Failed to save booking.';
       Swal.fire({
         icon: 'error',
-        title: 'Booking Failed',
+        title: editId ? 'Update Failed' : 'Booking Failed',
         text: errMsg
       });
     } finally {
@@ -535,7 +732,7 @@ export default function CreateBookingFlow() {
           <span>/</span>
           <span className="text-slate-700 font-black">{propertyDisplayName}</span>
           <span>/</span>
-          <span className="text-rose-700 font-extrabold">Create Booking</span>
+          <span className="text-rose-700 font-extrabold">{editId ? 'Edit Reservation' : 'Create Booking'}</span>
         </div>
 
         {/* Property Switcher if owner has multiple homestays */}
@@ -957,6 +1154,70 @@ export default function CreateBookingFlow() {
                 )}
               </div>
 
+              {/* Coupon Code Section (Change 4B) */}
+              <div className="space-y-1.5 border-t border-slate-100 pt-3">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-1 text-slate-700 font-bold">
+                    <Tag size={12} className="text-rose-600" />
+                    <span>Promo / Coupon Code</span>
+                  </div>
+                  {appliedCoupon && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveCoupon}
+                      className="text-rose-600 hover:text-rose-700 bg-transparent border-none cursor-pointer font-bold text-[10px]"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+
+                {!appliedCoupon ? (
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="Enter coupon code"
+                      value={couponCodeInput}
+                      onChange={(e) => {
+                        setCouponCodeInput(e.target.value.toUpperCase());
+                        setCouponError('');
+                      }}
+                      className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 uppercase focus:outline-none focus:bg-white focus:border-rose-500 shadow-2xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyCoupon}
+                      disabled={validatingCoupon || !couponCodeInput.trim()}
+                      className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 text-white font-bold text-xs rounded-xl cursor-pointer border-none transition-all shadow-2xs"
+                    >
+                      {validatingCoupon ? 'Checking...' : 'Apply'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex justify-between items-center text-xs bg-emerald-50 text-emerald-800 px-3 py-2 rounded-xl border border-emerald-200 font-bold">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles size={13} className="text-emerald-600" />
+                      <span>{appliedCoupon.code || couponCodeInput} Applied</span>
+                    </div>
+                    <span className="font-mono text-emerald-700">- ₹{couponDiscount.toLocaleString()}</span>
+                  </div>
+                )}
+
+                {couponError && (
+                  <p className="text-[10px] text-rose-600 font-semibold flex items-center gap-1 mt-1">
+                    <AlertCircle size={10} className="shrink-0" />
+                    <span>{couponError}</span>
+                  </p>
+                )}
+
+                {appliedCoupon && couponDiscount > 0 && (
+                  <div className="flex justify-between items-center text-xs text-emerald-700 font-bold pt-1">
+                    <span>Coupon Discount</span>
+                    <span className="font-mono">- ₹ {couponDiscount.toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
+
               {/* Final Cost */}
               <div className="border-t border-slate-100 pt-3.5 flex justify-between items-baseline">
                 <span className="text-sm font-black text-rose-700">Final Cost</span>
@@ -995,7 +1256,7 @@ export default function CreateBookingFlow() {
 
             {/* Action Buttons */}
             <div className="space-y-3 pt-2">
-              {/* Create Booking (Primary Red) */}
+              {/* Create / Update Booking (Primary Red) */}
               <button
                 type="button"
                 onClick={() => handleSubmitBooking(false)}
@@ -1003,30 +1264,33 @@ export default function CreateBookingFlow() {
                 className="w-full py-4 bg-rose-700 hover:bg-rose-800 disabled:bg-slate-300 text-white font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer border-none shadow-md shadow-rose-200 flex items-center justify-center gap-2 transition-all"
               >
                 <CheckCircle2 size={15} className="stroke-[2.5]" />
-                <span>{submitting ? 'Creating Booking...' : 'Create Booking'}</span>
+                <span>{submitting ? (editId ? 'Saving Changes...' : 'Creating Booking...') : (editId ? 'Save & Update Booking' : 'Create Booking')}</span>
               </button>
 
-              {/* Hold Booking (Secondary White) */}
-              <button
-                type="button"
-                onClick={() => handleSubmitBooking(true)}
-                disabled={submitting}
-                className="w-full py-3.5 border-2 border-slate-200 hover:bg-slate-50 text-slate-700 font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer bg-white flex items-center justify-center gap-2 transition-all shadow-xs"
-              >
-                <Clock size={14} className="stroke-[2.5]" />
-                <span>Hold Booking</span>
-              </button>
+              {/* Hold Booking (Secondary White) - Only for new bookings */}
+              {!editId && (
+                <button
+                  type="button"
+                  onClick={() => handleSubmitBooking(true)}
+                  disabled={submitting}
+                  className="w-full py-3.5 border-2 border-slate-200 hover:bg-slate-50 text-slate-700 font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer bg-white flex items-center justify-center gap-2 transition-all shadow-xs"
+                >
+                  <Clock size={14} className="stroke-[2.5]" />
+                  <span>Hold Booking</span>
+                </button>
+              )}
             </div>
 
-            {/* Helper Action Buttons matching screenshot */}
+            {/* Helper Action Buttons matching screenshot (Change 3) */}
             <div className="grid grid-cols-3 gap-2 border-t border-slate-100 pt-4">
               <button 
                 type="button"
                 onClick={() => {
-                  if (createdBooking) {
-                    navigate(`/homestay-owner/bookings/confirmation-slip/${createdBooking._id}`);
+                  const bId = createdBooking?._id || createdBooking?.id || editId;
+                  if (bId) {
+                    navigate(`/homestay-owner/bookings/confirmation-slip/${bId}`);
                   } else {
-                    Swal.fire('Info', 'Create a booking first to view confirmation slip.', 'info');
+                    Swal.fire('Info', 'Create or select a booking first to view confirmation slip.', 'info');
                   }
                 }}
                 className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-center cursor-pointer transition-all flex flex-col items-center gap-1"
@@ -1041,10 +1305,11 @@ export default function CreateBookingFlow() {
               <button 
                 type="button"
                 onClick={() => {
-                  if (createdBooking) {
-                    navigate(`/homestay-owner/bookings/invoice/${createdBooking._id}`);
+                  const bId = createdBooking?._id || createdBooking?.id || editId;
+                  if (bId) {
+                    navigate(`/homestay-owner/bookings/invoice/${bId}`);
                   } else {
-                    Swal.fire('Info', 'Create a booking first to generate invoice.', 'info');
+                    Swal.fire('Info', 'Create or select a booking first to generate invoice.', 'info');
                   }
                 }}
                 className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-center cursor-pointer transition-all flex flex-col items-center gap-1"
@@ -1059,10 +1324,11 @@ export default function CreateBookingFlow() {
               <button 
                 type="button"
                 onClick={() => {
-                  if (createdBooking) {
-                    navigate(`/homestay-owner/bookings/quotation/${createdBooking._id}`);
+                  const bId = createdBooking?._id || createdBooking?.id || editId;
+                  if (bId) {
+                    navigate(`/homestay-owner/bookings/quotation/${bId}`);
                   } else {
-                    Swal.fire('Info', 'Create a booking first to generate quotation.', 'info');
+                    Swal.fire('Info', 'Create or select a booking first to generate quotation.', 'info');
                   }
                 }}
                 className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-center cursor-pointer transition-all flex flex-col items-center gap-1"

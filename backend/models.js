@@ -123,6 +123,10 @@ const BookingSchema = new mongoose.Schema({
 
   paymentScreenshot: { type: String, default: '' },
 
+  cancellationReason: { type: String, default: '' },
+  cancelledAt: { type: Date, default: null },
+  cancelledBy: { type: String, default: '' },
+
   paymentHistory: [{
     amount: { type: Number, required: true },
     method: { type: String, default: 'UPI' },

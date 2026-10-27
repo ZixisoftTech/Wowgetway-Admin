@@ -13335,9 +13335,14 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
       totalChildren += Number(r.child5_9 || 0) + Number(r.child0_4 || 0);
     });
 
-    // 6. Generate Booking ID
+    // 6. Generate Collision-Safe Unique Booking ID
     const count = await Booking.countDocuments();
-    const bookingIdStr = `WG-BK-${String(count + 1001).padStart(5, '0')}`;
+    let nextNum = count + 1001;
+    let bookingIdStr = `WG-BK-${String(nextNum).padStart(5, '0')}`;
+    while (await Booking.exists({ bookingId: bookingIdStr })) {
+      nextNum++;
+      bookingIdStr = `WG-BK-${String(nextNum).padStart(5, '0')}`;
+    }
 
     // 7. Calculate Pricing
     const roomCost = Number(pricing.roomCost) || Number(pricing.totalCost) || Number(pricing.baseRate) || 0;
@@ -16451,7 +16456,12 @@ router.post('/public/create-booking', async (req, res) => {
 
     // Generate unique sequential Booking ID
     const count = await Booking.countDocuments();
-    const bookingId = `WG-BK-${String(count + 1001).padStart(5, '0')}`;
+    let nextNum = count + 1001;
+    let bookingId = `WG-BK-${String(nextNum).padStart(5, '0')}`;
+    while (await Booking.exists({ bookingId: bookingId })) {
+      nextNum++;
+      bookingId = `WG-BK-${String(nextNum).padStart(5, '0')}`;
+    }
 
     // Calculate pricing
     let totalRoomCost = 0;

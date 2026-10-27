@@ -93,6 +93,7 @@ const BookingSchema = new mongoose.Schema({
   pricing: {
     bookingAmount: { type: Number, default: 0 },
     discount: { type: Number, default: 0 },
+    couponCode: { type: String, default: '' },
     tax: { type: Number, default: 0 },
     convenienceFee: { type: Number, default: 0 },
     addOns: { type: Number, default: 0 },
@@ -102,6 +103,7 @@ const BookingSchema = new mongoose.Schema({
     refundAmount: { type: Number, default: 0 },
     finalAmount: { type: Number, default: 0 }
   },
+  couponCode: { type: String, default: '' },
 
   paymentDetails: {
     method: { type: String, default: 'UPI' },

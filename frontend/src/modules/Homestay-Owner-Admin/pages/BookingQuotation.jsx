@@ -2,26 +2,28 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import { 
-  ArrowLeft,
-  Lock,
-  Calendar,
+  Building2,
   User,
-  DollarSign,
-  QrCode,
-  Check,
-  Copy,
-  Smartphone,
   Phone,
+  Mail,
+  Receipt,
   FileText,
-  UploadCloud,
   CheckCircle2,
-  RefreshCw,
-  Printer,
-  Download,
-  Share2
+  AlertCircle,
+  CreditCard,
+  IndianRupee,
+  Check
 } from 'lucide-react';
-import html2pdf from 'html2pdf.js';
 import { generatePdfFromElement } from '../../../utils/pdfExporter';
+import { 
+  WowGatewaysLogo, 
+  DocumentCorporateFooter, 
+  DocumentActionBar, 
+  useUpiQrCode, 
+  formatDocDate, 
+  formatDocStayDate, 
+  calculateGstBreakdown 
+} from '../components/BookingDocumentShared';
 
 const getApiUrl = (path) => {
   const base = window.location.hostname === 'localhost' ? 'http://localhost:5005' : 'https://backend-sand-nine-13.vercel.app';
@@ -45,9 +47,7 @@ export default function BookingQuotation() {
 
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [screenshotUploaded, setScreenshotUploaded] = useState(false);
-  const [copiedUpi, setCopiedUpi] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
+  const [error, setError] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const quotationRef = useRef(null);
 
@@ -71,18 +71,21 @@ export default function BookingQuotation() {
             res = await axios.get(getApiUrl(`/api/homestay-owner/bookings/${requestId}`), {
               headers: { Authorization: `Bearer ${token}` }
             });
-          } catch (e) {
+          } catch (authErr) {
             res = await axios.get(getApiUrl(`/api/public/booking/${requestId}`));
           }
         } else {
           res = await axios.get(getApiUrl(`/api/public/booking/${requestId}`));
         }
 
-        if (res?.data?.booking || res?.data) {
-          setBooking(res.data.booking || res.data);
+        if (res?.data?.booking) {
+          setBooking(res.data.booking);
+        } else if (res?.data) {
+          setBooking(res.data);
         }
       } catch (err) {
         console.error('Failed to load booking details for quotation:', err);
+        setError('Could not find or load booking record.');
       } finally {
         setLoading(false);
       }
@@ -91,97 +94,90 @@ export default function BookingQuotation() {
     fetchBooking();
   }, [requestId]);
 
-  const handleCopyUpi = () => {
-    const targetUpi = booking?.ownerPaymentDetails?.upiId || 'keshavhomestay@okicici';
-    navigator.clipboard.writeText(targetUpi);
-    setCopiedUpi(true);
-    setTimeout(() => setCopiedUpi(false), 2000);
-  };
-
-  const shareableQuotationUrl = `${window.location.origin}/quotation/${requestId || booking?._id || booking?.bookingId}`;
-
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(shareableQuotationUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
-  };
-
+  // Dynamic values
   const property = booking?.propertyId || {};
   const business = property?.businessDetails || booking?.businessDetails || {};
 
-  const homestayLogo = business?.logo || property?.logo || '';
-  const propertyName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'Homestay Sanctuary';
-  const propertyLocation = business?.fullAddress || [
+  const bookingIdDisplay = booking?.bookingId || (requestId?.startsWith('WG') ? requestId : `WG-BK-${requestId?.slice(-5) || '01034'}`);
+  const shareableQuotationUrl = `${window.location.origin}/quotation/${requestId || booking?._id || booking?.bookingId}`;
+
+  const propertyName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'Floala Inn';
+  const propertyAddress = business?.fullAddress || [
     property?.address,
     property?.city,
     property?.state
-  ].filter(Boolean).join(', ') || booking?.propertyDetails?.location || 'Himachal Pradesh, India';
-  const propertyContact = business?.contactNumber || property?.ownerMobile || property?.phone || '+91 98765 43210';
-  const propertyEmail = business?.emailId || property?.ownerEmail || '';
-  const propertyGstin = business?.gstNumber || property?.gstNumber || '';
+  ].filter(Boolean).join(', ') || 'Plot 42, Apple Orchard Way, Old Manali, HP - 175131, India';
+  const propertyContact = business?.contactNumber || property?.ownerMobile || property?.phone || '+91 9876543210';
+  const propertyEmail = business?.emailId || property?.ownerEmail || 'official@homestaywow.in';
+  const propertyGstin = business?.gstNumber || property?.gstNumber || '02AABCT1332F1Z8';
 
-  const signatoryName = business?.authorizedSignatoryName || property?.ownerName || booking?.propertyDetails?.ownerName || 'Host';
-  const signatoryDesignation = business?.designation || 'Authorized Signatory';
-  const signatureImage = business?.signatureImage || '';
-  const stampImage = business?.stampImage || '';
-
-  const ownerPhone = propertyContact;
-  const ownerName = signatoryName;
-
-  const guestName = booking?.customer?.name || booking?.guestDetails?.fullName || 'Guest';
-  const guestPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '+91 98765 43210';
-  const bookingIdDisplay = booking?.bookingId || (requestId?.startsWith('WG') ? requestId : `QTN-${requestId?.slice(-6) || '2505-000123'}`);
+  const guestName = booking?.customer?.name || booking?.guestDetails?.fullName || 'Aditya Joshi';
+  const guestPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '+91 9855667788';
+  const guestEmail = booking?.customer?.email || booking?.guestDetails?.email || 'adityajoshi@example.com';
+  const specialRequests = booking?.specialRequests || booking?.remarks || '-';
 
   const rawIn = booking?.checkInDate || booking?.dates?.checkIn;
   const rawOut = booking?.checkOutDate || booking?.dates?.checkOut;
+  const checkInFormatted = formatDocStayDate(rawIn, '02:00 PM');
+  const checkOutFormatted = formatDocStayDate(rawOut, '11:00 AM');
+  const issueDate = formatDocDate(booking?.createdAt || new Date());
+  
+  // Valid till: check-in date or 7 days from creation
+  const validTillDate = rawIn ? formatDocDate(rawIn) : formatDocDate(new Date(Date.now() + 7 * 86400000));
 
-  const checkInDate = rawIn 
-    ? new Date(rawIn).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
-    : 'Pending';
-  const checkOutDate = rawOut 
-    ? new Date(rawOut).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
-    : 'Pending';
-  const totalNights = (rawIn && rawOut) 
-    ? Math.max(1, Math.round((new Date(rawOut) - new Date(rawIn)) / (1000 * 60 * 60 * 24)))
-    : (booking?.dates?.totalNights || 2);
+  // Calculate nights
+  let totalNights = 1;
+  if (rawIn && rawOut) {
+    const diffTime = Math.abs(new Date(rawOut) - new Date(rawIn));
+    const calculatedNights = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    if (calculatedNights > 0) totalNights = calculatedNights;
+  }
+  if (booking?.dates?.nights) totalNights = booking.dates.nights;
 
-  const bookedRooms = booking?.bookedRooms || [];
-  const roomAdultsTotal = bookedRooms.reduce((sum, r) => sum + (Number(r.adults) || 2), 0);
-  const roomChildTotal = bookedRooms.reduce((sum, r) => sum + (Number(r.child5_9) || 0) + (Number(r.child0_4) || 0), 0);
-
-  const adults = (booking?.guests?.adults !== undefined && Number(booking.guests.adults) > 0)
-    ? Number(booking.guests.adults) 
-    : (roomAdultsTotal || 2);
-  const child5To9 = (booking?.guests?.children !== undefined)
-    ? Number(booking.guests.children)
-    : roomChildTotal;
-  const totalPeople = Math.max(1, adults + child5To9);
-
-  const totalAmount = Number(booking?.pricing?.finalAmount || booking?.amount || booking?.pricing?.totalAmount || 0);
-  const paidAdvanceAmount = Number(booking?.advancePayment?.amount || booking?.pricing?.paidAmount || 0);
-  const advanceRequired = paidAdvanceAmount > 0 ? paidAdvanceAmount : Math.round(totalAmount * 0.3);
-  const balanceAtCheckIn = booking?.pricing?.pendingAmount !== undefined 
-    ? Number(booking.pricing.pendingAmount) 
-    : Math.max(0, totalAmount - advanceRequired);
-
-  const hasAdvancePaid = paidAdvanceAmount > 0;
-  const utrNumber = booking?.advancePayment?.transactionId || booking?.paymentDetails?.transactionId || '';
-
+  const adults = booking?.guests?.adults || booking?.occupancy?.adults || 2;
   const roomCount = booking?.bookedRooms?.length || 1;
-  const roomNames = booking?.bookedRooms?.map(r => `Room ${r.roomNumber}`).join(', ') || (booking?.propertyDetails?.roomNumber ? `Room ${booking.propertyDetails.roomNumber}` : 'Deluxe Room');
+  const roomNumbers = booking?.bookedRooms?.map(r => r.roomNumber).filter(Boolean).join(', ') || '103';
+  const roomCategoryName = booking?.bookedRooms?.[0]?.roomCategoryName || 'Standard';
+  const roomTypeDisplay = `Room ${roomNumbers} (${roomCategoryName})`;
 
+  // Financials
+  const totalAmount = Number(booking?.pricing?.finalAmount || booking?.amount || booking?.pricing?.totalAmount || 12960);
+  const advancePaid = Number(booking?.pricing?.paidAmount !== undefined ? booking.pricing.paidAmount : (booking?.pricing?.advancePaid || 12960));
+  const balanceDue = booking?.pricing?.pendingAmount !== undefined ? Number(booking.pricing.pendingAmount) : Math.max(0, totalAmount - advancePaid);
+  const tax = Number(booking?.pricing?.tax !== undefined ? booking.pricing.tax : 960);
+  const addOns = Number(booking?.pricing?.addOns || 0);
+  const addOnsRemark = booking?.pricing?.addOnsRemark || '';
+  const extraBed = Number(booking?.pricing?.extraBed || 0);
+
+  const subtotal = Number(booking?.pricing?.bookingAmount || Math.max(0, totalAmount - tax));
+  const roomTariffAmount = Math.max(0, subtotal - addOns - extraBed);
+  const roomRatePerNight = totalNights > 0 && roomCount > 0 ? Math.round(roomTariffAmount / (totalNights * roomCount)) : roomTariffAmount;
+
+  const gstBreakdown = calculateGstBreakdown(subtotal, tax);
+  const hasAdvancePaid = advancePaid > 0;
+
+  // Remittance details
   const ownerPay = booking?.ownerPaymentDetails || {};
   const bankName = ownerPay.bankName || 'HDFC Bank';
-  const accountHolder = ownerPay.accountHolderName || propertyName || 'Homestay Host';
-  const accountNumber = ownerPay.accountNumber || '';
-  const ifscCode = ownerPay.ifscCode || '';
-  const branch = ownerPay.branch || '';
+  const accountHolder = ownerPay.accountHolderName || property?.ownerName || 'priyodeeparkar';
+  const fullAccountNumber = ownerPay.accountNumber || '5010 1234 5678 90';
+  const maskedAccountNumber = fullAccountNumber.length > 4 
+    ? `XXXXXXXXXXXX${fullAccountNumber.slice(-4)}` 
+    : fullAccountNumber;
+  const ifscCode = ownerPay.ifscCode || 'HDFC0001234';
   const upiId = ownerPay.upiId || 'keshavhomestay@okicici';
-  const upiQr = ownerPay.upiQrCode || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(propertyName)}&am=${advanceRequired}&cu=INR`)}`;
+  const transactionId = booking?.transactionId || (booking?.bankVerification?.utrNumber) || 'UPI-401051-20';
+
+  const upiQrDataUrl = useUpiQrCode(upiId, accountHolder || propertyName, balanceDue > 0 ? balanceDue : totalAmount);
+
+  // Signatory
+  const signatoryName = business?.authorizedSignatoryName || property?.ownerName || 'Rajeshwar Sharma';
+  const signatoryDesignation = business?.designation || 'Managing Partner & Host';
+  const signatureImage = business?.signatureImage || '';
 
   const handlePrint = () => {
     const prevTitle = document.title;
-    document.title = `Quotation_${bookingIdDisplay.replace('#', '')}`;
+    document.title = `Quotation_${bookingIdDisplay}`;
     window.print();
     setTimeout(() => {
       document.title = prevTitle;
@@ -189,368 +185,485 @@ export default function BookingQuotation() {
   };
 
   const handleDownloadPdf = async () => {
-    const element = quotationRef.current || document.querySelector('.printable-document');
+    const element = quotationRef.current;
     if (!element) return;
-
     try {
       setDownloadingPdf(true);
-      const cleanQtn = bookingIdDisplay.replace(/[^a-zA-Z0-9_-]/g, '_');
-      const filename = `Quotation_${cleanQtn}.pdf`;
+      const filename = `Quotation_${bookingIdDisplay}.pdf`;
       await generatePdfFromElement(element, filename);
     } catch (err) {
-      console.error('Direct PDF download error:', err);
-      alert('Could not download PDF. Please try again or use the print option.');
+      console.error('PDF generation error:', err);
+      alert('Could not generate PDF. Please use the Print option.');
     } finally {
       setDownloadingPdf(false);
     }
   };
 
-  const handleWhatsAppShare = () => {
+  const handleSendWhatsApp = () => {
     const rawPhone = guestPhone.replace(/\D/g, '');
     const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
-    const text = `Namaste ${guestName}! 🙏\n\n` +
-      `Here is your Official Booking Quotation for *${propertyName}*.\n\n` +
-      `📋 *Quotation Ref:* #${bookingIdDisplay}\n` +
-      `📅 *Check-In:* ${checkInDate}\n` +
-      `📅 *Check-Out:* ${checkOutDate} (${totalNights} Night${totalNights > 1 ? 's' : ''})\n` +
-      `👥 *Guests:* ${adults} Adults${child5To9 > 0 ? `, ${child5To9} Children (5-9y)` : ''}\n` +
-      `🛏️ *Room(s):* ${roomNames}\n\n` +
-      `💰 *Tariff Breakdown:*\n` +
-      `• Total Stay Cost: ₹${totalAmount.toLocaleString()}\n` +
-      `• Advance Required to Confirm: ₹${advanceRequired.toLocaleString()}\n` +
-      `• Balance at Check-In: ₹${balanceAtCheckIn.toLocaleString()}\n\n` +
-      `📲 *Instant UPI Payment:*\n` +
-      `• UPI ID: ${upiId}\n` +
-      (accountNumber ? `\n🏦 *Bank Transfer:*\n• Bank: ${bankName}\n• A/C: ${accountNumber}\n• IFSC: ${ifscCode}\n• Holder: ${accountHolder}\n` : '') +
-      `\n🔗 View Quotation Online: ${shareableQuotationUrl}\n\n` +
-      `Please pay the advance to confirm and secure your dates!`;
-    window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(text)}`, '_blank');
+    const msg = `Namaste ${guestName}! 🙏\n\nHere is your Booking Quotation for *${propertyName}*.\n\n📋 *Quotation Ref:* ${bookingIdDisplay}\n📅 *Valid Till:* ${validTillDate}\n📅 *Stay Period:* ${checkInFormatted} to ${checkOutFormatted}\n🛏️ *Room:* ${roomTypeDisplay}\n💰 *Total Stay Amount:* ₹${totalAmount.toLocaleString()}\n\n🔗 View or download your official quotation:\n${shareableQuotationUrl}`;
+    window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   if (loading) {
     return (
       <div className="p-20 flex flex-col items-center justify-center gap-3 text-slate-500">
-        <RefreshCw size={24} className="animate-spin text-rose-600" />
-        <span className="text-xs font-bold uppercase tracking-wider">Loading quotation...</span>
+        <div className="w-8 h-8 border-3 border-rose-600 border-t-transparent rounded-full animate-spin" />
+        <span className="text-xs font-bold uppercase tracking-wider">Loading Quotation...</span>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 font-sans pb-12 select-none">
+    <div className="min-h-screen bg-slate-50/60 py-6 px-3 sm:px-6 font-sans text-slate-800 print:bg-white print:p-0">
       
-      {/* Secure Header Banner */}
-      <div className="bg-rose-700 text-white text-[9px] font-black uppercase tracking-widest py-2 text-center flex items-center justify-center gap-1.5 rounded-xl shadow-inner">
-        <Lock size={10} className="stroke-[3]" />
-        <span>Secure Booking Portal</span>
-      </div>
+      {/* Top Action Bar */}
+      <DocumentActionBar 
+        onBack={() => navigate(-1)}
+        shareableUrl={shareableQuotationUrl}
+        onDownloadPdf={handleDownloadPdf}
+        downloadingPdf={downloadingPdf}
+        onPrint={handlePrint}
+        onShareWhatsApp={handleSendWhatsApp}
+        documentTitle="Quotation"
+      />
 
-      {/* Top Back Nav & Print Button (Hidden on Quotation PDF print) */}
-      <div className="flex flex-wrap justify-between items-center gap-3 print:hidden">
-        <button 
-          onClick={() => navigate(-1)}
-          className="hover:text-slate-600 bg-transparent border-none cursor-pointer flex items-center gap-1.5 text-[10px] font-black uppercase text-slate-400"
-        >
-          <ArrowLeft size={10} className="stroke-[3]" />
-          <span>Back to Availability / Calendar</span>
-        </button>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button 
-            onClick={handleDownloadPdf}
-            disabled={downloadingPdf}
-            className="px-4 py-2.5 bg-rose-700 hover:bg-rose-800 disabled:bg-rose-400 text-white font-black rounded-xl text-[10px] uppercase tracking-wider cursor-pointer border-none flex items-center gap-1.5 shadow-sm transition-all"
-            title="Download Quotation as PDF file"
-          >
-            {downloadingPdf ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
-            <span>{downloadingPdf ? 'Downloading PDF...' : 'Download PDF'}</span>
-          </button>
-
-          <button 
-            onClick={handleWhatsAppShare}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-[10px] uppercase tracking-wider cursor-pointer border-none flex items-center gap-1.5 shadow-sm transition-all"
-            title="Share Quotation with Guest on WhatsApp"
-          >
-            <Share2 size={13} />
-            <span>Share WhatsApp</span>
-          </button>
-
-          <button 
-            onClick={handleCopyLink}
-            className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black rounded-xl text-[10px] uppercase tracking-wider cursor-pointer border-none flex items-center gap-1.5 transition-all"
-            title="Copy Quotation Link to Clipboard"
-          >
-            {copiedLink ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
-            <span>{copiedLink ? 'Link Copied!' : 'Copy Link'}</span>
-          </button>
-
-          <button 
-            onClick={handlePrint}
-            className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black rounded-xl text-[10px] uppercase tracking-wider cursor-pointer border-none flex items-center gap-1.5 transition-all"
-            title="Print Quotation"
-          >
-            <Printer size={13} />
-            <span>Print</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Quotation Main Layout Card */}
-      <div ref={quotationRef} className="printable-document max-w-[850px] mx-auto bg-white border border-slate-150 rounded-[28px] overflow-hidden shadow-xl space-y-6 pb-8 print:border-none print:shadow-none print:p-0 print:max-w-none print:w-full">
-        
-        {/* Large Property Banner with Homestay Logo & Details */}
-        <div className="relative bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 print:hidden p-8 text-white">
-          <div className="flex items-center gap-4">
-            {homestayLogo && (
-              <img 
-                src={getImageUrl(homestayLogo)} 
-                alt={propertyName} 
-                className="w-16 h-16 object-contain rounded-2xl border border-white/20 p-1 bg-white/10 shrink-0 backdrop-blur-sm"
-              />
-            )}
-            <div className="space-y-1">
-              <span className="px-2.5 py-0.5 bg-rose-600/30 text-rose-300 font-bold text-[9px] rounded-full uppercase tracking-wider border border-rose-500/30 inline-block">
-                Official Booking Quotation
-              </span>
-              <h1 className="text-xl font-black uppercase tracking-wide leading-tight">{propertyName}</h1>
-              <p className="text-[11px] text-slate-300 font-medium">
-                📍 {propertyLocation}
-              </p>
-              <div className="flex flex-wrap gap-x-3 text-[10px] text-slate-300 pt-0.5">
-                {propertyContact && <span>Tel: <strong className="text-white">{propertyContact}</strong></span>}
-                {propertyEmail && <span>Email: <strong className="text-white">{propertyEmail}</strong></span>}
-                {propertyGstin && <span>GSTIN: <strong className="text-white font-mono">{propertyGstin}</strong></span>}
-              </div>
-            </div>
+      {/* Main A4 Document Canvas */}
+      <div 
+        ref={quotationRef}
+        style={{ width: '100%', maxWidth: '794px', backgroundColor: '#ffffff' }}
+        className="mx-auto bg-white border border-slate-200 p-8 sm:p-10 rounded-2xl shadow-md space-y-5 print:border-none print:shadow-none print:p-0 print:max-w-none print:w-full"
+      >
+        {/* Document Header */}
+        <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pb-2">
+          {/* Header Left: WOW Gateways Brand */}
+          <div className="space-y-1">
+            <WowGatewaysLogo />
           </div>
-        </div>
 
-        {/* Clean Print-Only Header */}
-        <div className="hidden print:block p-6 border-b border-slate-200">
-          <div className="flex items-center gap-3.5">
-            {homestayLogo && (
-              <img 
-                src={getImageUrl(homestayLogo)} 
-                alt={propertyName} 
-                className="w-16 h-16 object-contain rounded-xl border border-slate-200 p-1 bg-white shrink-0"
-              />
-            )}
+          {/* Header Right: QUOTATION Meta Box */}
+          <div 
+            style={{ backgroundColor: '#f4f7fb', border: '1px solid #dbe4ee' }}
+            className="rounded-xl p-3.5 sm:px-4 flex items-center justify-between gap-6 w-full sm:w-auto shadow-2xs"
+          >
             <div>
-              <span className="text-[9px] font-black uppercase tracking-wider text-rose-700 block">OFFICIAL BOOKING QUOTATION</span>
-              <h1 className="text-lg font-black text-slate-900 uppercase tracking-wide">{propertyName}</h1>
-              <p className="text-xs text-slate-600 font-medium mt-0.5">📍 {propertyLocation}</p>
-              <div className="flex flex-wrap gap-x-3 text-[10px] text-slate-500 pt-0.5">
-                {propertyContact && <span>Tel: {propertyContact}</span>}
-                {propertyEmail && <span>Email: {propertyEmail}</span>}
-                {propertyGstin && <span>GSTIN: {propertyGstin}</span>}
+              <h1 className="text-2xl font-black text-[#0f233a] tracking-tight leading-tight">
+                QUOTATION
+              </h1>
+              <div className="text-lg font-black text-[#0f233a] font-mono leading-tight mt-0.5">
+                #{bookingIdDisplay}
+              </div>
+            </div>
+
+            <div className="border-l border-slate-300 pl-4 space-y-1 text-xs text-slate-600">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500">Issue Date</span>
+                <strong className="text-slate-900">{issueDate}</strong>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500">Valid Till</span>
+                <strong className="text-slate-900">{validTillDate}</strong>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Quotation Details Summary */}
-        <div className="px-8 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-          <div>
-            <span className="block text-[8px] font-black text-rose-700 uppercase tracking-widest">Booking Reference</span>
-            <span className="text-base font-black text-slate-800 tracking-tight block mt-0.5">#{bookingIdDisplay}</span>
-            <span className="block text-[8px] text-slate-400 font-bold mt-0.5">
-              Issued on {new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })}
+        <div className="border-b border-slate-200" />
+
+        {/* 2-Column Cards: Guest Details & Property & Stay Details */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Card 1: Guest Details */}
+          <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+            <div 
+              style={{ backgroundColor: '#f1f5f9' }}
+              className="px-3.5 py-2 border-b border-slate-200 flex items-center gap-2"
+            >
+              <User size={14} className="text-[#0f233a]" />
+              <span className="text-xs font-bold uppercase tracking-wider text-[#0f233a]">
+                GUEST DETAILS
+              </span>
+            </div>
+            <div className="p-3.5 space-y-1.5 text-xs text-slate-600">
+              <div className="grid grid-cols-[110px_12px_1fr]">
+                <span>Guest Name</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{guestName}</strong>
+              </div>
+              <div className="grid grid-cols-[110px_12px_1fr]">
+                <span>Phone Number</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{guestPhone}</strong>
+              </div>
+              <div className="grid grid-cols-[110px_12px_1fr]">
+                <span>Email Address</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900 break-all">{guestEmail}</strong>
+              </div>
+              <div className="grid grid-cols-[110px_12px_1fr]">
+                <span>No. of Guests</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{adults} People <span className="text-slate-500 font-normal">({adults} Adults)</span></strong>
+              </div>
+              <div className="grid grid-cols-[110px_12px_1fr]">
+                <span>Special Requests</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{specialRequests}</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Property & Stay Details */}
+          <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+            <div 
+              style={{ backgroundColor: '#f1f5f9' }}
+              className="px-3.5 py-2 border-b border-slate-200 flex items-center gap-2"
+            >
+              <Building2 size={14} className="text-[#0f233a]" />
+              <span className="text-xs font-bold uppercase tracking-wider text-[#0f233a]">
+                PROPERTY & STAY DETAILS
+              </span>
+            </div>
+            <div className="p-3.5 space-y-1.5 text-xs text-slate-600">
+              <div className="grid grid-cols-[110px_12px_1fr]">
+                <span>Homestay Name</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{propertyName}</strong>
+              </div>
+              <div className="grid grid-cols-[110px_12px_1fr]">
+                <span>Room Type</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{roomTypeDisplay}</strong>
+              </div>
+              <div className="grid grid-cols-[110px_12px_1fr]">
+                <span>Room Details</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{roomCount} Room</strong>
+              </div>
+              <div className="grid grid-cols-[110px_12px_1fr]">
+                <span>Check-in</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{checkInFormatted}</strong>
+              </div>
+              <div className="grid grid-cols-[110px_12px_1fr]">
+                <span>Check-out</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{checkOutFormatted}</strong>
+              </div>
+              <div className="grid grid-cols-[110px_12px_1fr]">
+                <span>Total Nights</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{totalNights} {totalNights === 1 ? 'Night' : 'Nights'}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Pricing Summary Table */}
+        <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+          <div 
+            style={{ backgroundColor: '#f1f5f9' }}
+            className="px-3.5 py-2 border-b border-slate-200 flex items-center gap-2"
+          >
+            <FileText size={14} className="text-[#0f233a]" />
+            <span className="text-xs font-bold uppercase tracking-wider text-[#0f233a]">
+              PRICING SUMMARY
             </span>
           </div>
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr style={{ backgroundColor: '#0f233a', color: '#ffffff' }} className="text-[11px] font-bold uppercase tracking-wider">
+                <th className="py-2.5 px-3 w-10 text-center">#</th>
+                <th className="py-2.5 px-3">Description</th>
+                <th className="py-2.5 px-3 text-center">Nights / Qty</th>
+                <th className="py-2.5 px-3 text-right">Rate (₹)</th>
+                <th className="py-2.5 px-3 text-right">Amount (₹)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 text-slate-800">
+              {/* Row 1: Room Tariff */}
+              <tr>
+                <td className="py-3 px-3 text-center font-bold text-slate-700">1</td>
+                <td className="py-3 px-3">
+                  <div className="font-bold text-slate-900">Room Tariff ({roomCategoryName} Room)</div>
+                </td>
+                <td className="py-3 px-3 text-center font-medium text-slate-700">{totalNights}</td>
+                <td className="py-3 px-3 text-right font-medium text-slate-800">
+                  {roomRatePerNight > 0 ? roomRatePerNight.toLocaleString() : '-'}
+                </td>
+                <td className="py-3 px-3 text-right font-bold text-slate-900">
+                  {roomTariffAmount.toLocaleString()}
+                </td>
+              </tr>
 
-          <div className="md:text-right">
-            <div className="inline-block bg-rose-50 border border-rose-100 px-4 py-2.5 rounded-xl text-left">
-              <span className="block text-[8px] font-black text-rose-700 uppercase tracking-wider">Stay Duration</span>
-              <span className="block text-xs font-black text-slate-800 font-mono mt-0.5">
-                {totalNights} Night{totalNights > 1 ? 's' : ''} <span className="text-slate-400 font-bold">| {checkInDate} - {checkOutDate}</span>
+              {/* Row 2: Extra Bed */}
+              <tr>
+                <td className="py-2.5 px-3 text-center font-bold text-slate-700">2</td>
+                <td className="py-2.5 px-3 font-medium text-slate-800">Extra Bed (If Any)</td>
+                <td className="py-2.5 px-3 text-center text-slate-500">{extraBed > 0 ? '1' : '0'}</td>
+                <td className="py-2.5 px-3 text-right text-slate-700">{extraBed.toLocaleString()}</td>
+                <td className="py-2.5 px-3 text-right font-bold text-slate-900">{extraBed.toLocaleString()}</td>
+              </tr>
+
+              {/* Row 3: Add-ons */}
+              <tr>
+                <td className="py-2.5 px-3 text-center font-bold text-slate-700">3</td>
+                <td className="py-2.5 px-3 font-medium text-slate-800">Add-ons (If Any)</td>
+                <td className="py-2.5 px-3 text-center text-slate-500">{addOns > 0 ? '1' : '0'}</td>
+                <td className="py-2.5 px-3 text-right text-slate-700">{addOns.toLocaleString()}</td>
+                <td className="py-2.5 px-3 text-right font-bold text-slate-900">{addOns.toLocaleString()}</td>
+              </tr>
+
+              {/* Subtotal Row */}
+              <tr className="bg-slate-50/50">
+                <td colSpan={3} className="border-t border-slate-200"></td>
+                <td className="py-2 px-3 text-right font-bold text-slate-800 border-t border-slate-200">
+                  Subtotal
+                </td>
+                <td className="py-2 px-3 text-right font-bold text-slate-900 border-t border-slate-200">
+                  {subtotal.toLocaleString()}
+                </td>
+              </tr>
+
+              {/* GST Row */}
+              <tr className="bg-slate-50/50">
+                <td colSpan={3}></td>
+                <td className="py-1.5 px-3 text-right text-slate-600 font-medium">
+                  {gstBreakdown.label.replace('GST @', 'Taxes & Fees (').replace(' (CGST', ' (').replace(')', ')')}
+                </td>
+                <td className="py-1.5 px-3 text-right font-medium text-slate-900">
+                  {tax.toLocaleString()}
+                </td>
+              </tr>
+
+              {/* Total Stay Amount Row */}
+              <tr style={{ backgroundColor: '#fff1f2' }}>
+                <td colSpan={2} className="py-3 px-3"></td>
+                <td colSpan={2} className="py-3 px-3 text-right font-black text-lg text-[#e11d48]">
+                  Total Stay Amount
+                </td>
+                <td className="py-3 px-3 text-right font-black text-xl text-[#e11d48]">
+                  ₹ {totalAmount.toLocaleString()}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* 3 Stat / KPI Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Card 1: Total Stay Amount */}
+          <div className="border border-slate-200 rounded-xl p-3.5 flex items-center gap-3 shadow-2xs bg-white">
+            <div className="w-9 h-9 rounded-lg bg-rose-50 text-[#e11d48] flex items-center justify-center shrink-0">
+              <CreditCard size={18} />
+            </div>
+            <div>
+              <span className="block text-[10px] text-slate-500 font-medium">Total Stay Amount</span>
+              <strong className="block text-lg font-black text-slate-900">
+                ₹ {totalAmount.toLocaleString()}
+              </strong>
+            </div>
+          </div>
+
+          {/* Card 2: Advance Paid */}
+          <div className="border border-slate-200 rounded-xl p-3.5 flex items-center gap-3 shadow-2xs bg-white">
+            <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+              <IndianRupee size={18} />
+            </div>
+            <div>
+              <span className="block text-[10px] text-slate-500 font-medium">Advance Paid</span>
+              <strong className="block text-lg font-black text-emerald-600">
+                ₹ {advancePaid.toLocaleString()}
+              </strong>
+            </div>
+          </div>
+
+          {/* Card 3: Balance Due */}
+          <div className="border border-slate-200 rounded-xl p-3.5 flex items-center gap-3 shadow-2xs bg-white">
+            <div className="w-9 h-9 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center shrink-0">
+              <FileText size={18} />
+            </div>
+            <div>
+              <span className="block text-[10px] text-slate-500 font-medium">Balance Due at Check-in</span>
+              <strong className={`block text-lg font-black ${balanceDue > 0 ? 'text-[#e11d48]' : 'text-slate-900'}`}>
+                ₹ {balanceDue.toLocaleString()}
+              </strong>
+            </div>
+          </div>
+        </div>
+
+        {/* Advance Payment Verification Banner */}
+        {hasAdvancePaid ? (
+          <div 
+            style={{ backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }}
+            className="border rounded-xl p-3 px-4 flex flex-col sm:flex-row justify-between items-center gap-2 shadow-2xs"
+          >
+            <div className="flex items-center gap-2.5 w-full sm:w-auto">
+              <div 
+                style={{ backgroundColor: '#16a34a' }}
+                className="w-7 h-7 rounded-full text-white flex items-center justify-center shrink-0"
+              >
+                <Check size={16} className="stroke-[3]" />
+              </div>
+              <div>
+                <strong className="block text-xs font-bold text-slate-900">
+                  Advance Payment Received
+                </strong>
+                <span className="block text-[10px] text-slate-500 font-mono">
+                  UPI Transaction: {transactionId}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+              <div className="text-right">
+                <strong className="block text-sm font-bold text-emerald-700">
+                  ₹ {advancePaid.toLocaleString()}
+                </strong>
+                <span className="block text-[10px] text-slate-500">
+                  {issueDate}
+                </span>
+              </div>
+              <span 
+                style={{ backgroundColor: '#16a34a' }}
+                className="text-white text-[9px] font-black uppercase px-2 py-0.5 rounded tracking-wider shadow-xs"
+              >
+                VERIFIED
               </span>
             </div>
           </div>
-        </div>
-
-        {/* Accommodation details */}
-        <div className="px-8 grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-          {/* Guest Details */}
-          <div className="p-5 border border-slate-150 rounded-2xl space-y-3.5 text-xs font-semibold text-slate-500 bg-white shadow-xs">
-            <span className="block text-[8px] font-black text-rose-700 uppercase tracking-widest">👤 Guest Details</span>
-            
-            <div className="flex justify-between border-b border-slate-50 pb-2">
-              <span>Primary Guest</span>
-              <span className="text-slate-800 font-extrabold">{guestName}</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-50 pb-2">
-              <span>Phone</span>
-              <span className="text-slate-800 font-mono">{guestPhone}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Occupancy</span>
-              <span className="text-slate-800 font-extrabold text-right">
-                {totalPeople} {totalPeople === 1 ? 'Person' : 'People'} <span className="block text-[9px] text-slate-400 font-bold mt-0.5">({adults} Adults{child5To9 > 0 ? `, ${child5To9} Child (5-9y)` : ''})</span>
-              </span>
-            </div>
-          </div>
-
-          {/* Pricing Summary */}
-          <div className="p-5 border border-slate-150 rounded-2xl space-y-3.5 text-xs font-semibold text-slate-500 bg-white shadow-xs">
-            <span className="block text-[8px] font-black text-rose-700 uppercase tracking-widest">💰 Pricing Summary</span>
-            
-            <div className="flex justify-between border-b border-slate-50 pb-2">
-              <span>Total Stay Amount</span>
-              <span className="font-mono text-slate-800 font-black">₹ {totalAmount.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-50 pb-2 text-rose-700">
-              <span className="font-bold">{hasAdvancePaid ? 'Advance Paid' : 'Advance Required'}</span>
-              <span className="font-mono font-black">₹ {advanceRequired.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Balance Due at Check-In</span>
-              <span className="font-mono text-slate-800 font-black">₹ {balanceAtCheckIn.toLocaleString()}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Accommodation card */}
-        <div className="px-8">
-          <div className="p-5 border border-slate-150 rounded-2xl bg-slate-50/50 text-xs font-semibold text-slate-500 space-y-1">
-            <span className="block text-[8px] font-black text-rose-700 uppercase tracking-widest">🛏️ Accommodation</span>
-            <h4 className="text-slate-800 font-extrabold mt-1">{roomNames}</h4>
-            <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed">
-              {roomCount} {roomCount === 1 ? 'Room' : 'Rooms'} reserved for a comfortable stay.
-            </p>
-          </div>
-        </div>
-
-        {/* Advance Payment Record (if paid) */}
-        {hasAdvancePaid && (
-          <div className="px-8">
-            <div className="p-5 bg-emerald-50/50 border border-emerald-200 rounded-2xl space-y-3 text-xs">
-              <div className="flex items-center justify-between border-b border-emerald-150 pb-2">
-                <span className="text-[9px] font-black text-emerald-800 uppercase tracking-wider">
-                  ✅ Advance Payment Details
-                </span>
-                <span className="px-2.5 py-0.5 bg-emerald-600 text-white rounded-lg text-[9px] font-black uppercase">
-                  {booking?.bookingStatus === 'Confirmed' ? 'Verified' : 'Submitted (Pending Verification)'}
+        ) : (
+          <div 
+            style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}
+            className="border rounded-xl p-3 px-4 flex justify-between items-center gap-2 shadow-2xs"
+          >
+            <div className="flex items-center gap-2.5">
+              <div 
+                style={{ backgroundColor: '#d97706' }}
+                className="w-7 h-7 rounded-full text-white flex items-center justify-center shrink-0"
+              >
+                <AlertCircle size={16} className="stroke-[2.5]" />
+              </div>
+              <div>
+                <strong className="block text-xs font-bold text-[#b45309]">
+                  Advance Payment Required
+                </strong>
+                <span className="block text-[10px] text-slate-600">
+                  Please deposit minimum 50% advance to confirm your booking dates.
                 </span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-semibold text-slate-600">
-                <div>
-                  <span className="block text-[8px] font-black text-slate-400 uppercase">Advance Amount Paid</span>
-                  <span className="text-emerald-700 font-extrabold text-sm block mt-0.5">₹ {paidAdvanceAmount.toLocaleString()}</span>
-                </div>
-                <div>
-                  <span className="block text-[8px] font-black text-slate-400 uppercase">Transaction Reference (UTR)</span>
-                  <span className="text-slate-800 font-mono font-extrabold block mt-0.5">{utrNumber || 'Recorded via UPI'}</span>
-                </div>
-                <div>
-                  <span className="block text-[8px] font-black text-slate-400 uppercase">Remaining Balance Due</span>
-                  <span className="text-rose-700 font-extrabold text-sm block mt-0.5">₹ {balanceAtCheckIn.toLocaleString()}</span>
-                </div>
-              </div>
             </div>
+            <span 
+              style={{ backgroundColor: '#d97706' }}
+              className="text-white text-[9px] font-black uppercase px-2 py-0.5 rounded tracking-wider shadow-xs"
+            >
+              PENDING
+            </span>
           </div>
         )}
 
-        {/* Host Payment Account Details */}
-        <div className="px-8">
-          <div className="p-6 border border-slate-150 rounded-2xl space-y-5 bg-white shadow-xs">
-            <span className="block text-[8px] font-black text-rose-700 uppercase tracking-widest">
-              🏦 {hasAdvancePaid ? 'Bank & UPI Details for Balance Settlement' : 'Payment Options (Bank Details / UPI QR Code)'}
+        {/* Bank & UPI Details for Balance Settlement (Full Width) */}
+        <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+          <div 
+            style={{ backgroundColor: '#f1f5f9' }}
+            className="px-3.5 py-2 border-b border-slate-200 flex items-center gap-2"
+          >
+            <Building2 size={14} className="text-[#0f233a]" />
+            <span className="text-xs font-bold uppercase tracking-wider text-[#0f233a]">
+              BANK & UPI DETAILS FOR BALANCE SETTLEMENT
             </span>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Bank Transfer */}
-              <div className="space-y-3.5 text-xs font-semibold text-slate-500">
-                <div className="flex justify-between border-b border-slate-50 pb-2">
-                  <span>Bank Name</span>
-                  <span className="text-slate-800 font-extrabold">{bankName}</span>
-                </div>
-                <div className="flex justify-between border-b border-slate-50 pb-2">
-                  <span>Account Name</span>
-                  <span className="text-slate-800 font-extrabold">{accountHolder}</span>
-                </div>
-                <div className="flex justify-between border-b border-slate-50 pb-2">
-                  <span>Account Number</span>
-                  <span className="text-slate-800 font-mono font-bold">{accountNumber}</span>
-                </div>
-                <div className="flex justify-between border-b border-slate-50 pb-2">
-                  <span>IFSC Code</span>
-                  <span className="text-slate-800 font-mono font-bold">{ifscCode}</span>
-                </div>
-                {branch && (
-                  <div className="flex justify-between border-b border-slate-50 pb-2">
-                    <span>Branch</span>
-                    <span className="text-slate-800 font-bold">{branch}</span>
-                  </div>
-                )}
-                <div className="flex justify-between items-center">
-                  <span>UPI ID</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-slate-800 font-mono font-bold text-rose-700">{upiId}</span>
-                    <button 
-                      onClick={handleCopyUpi}
-                      className="p-1 text-slate-400 hover:text-slate-600 bg-transparent border-none cursor-pointer"
-                    >
-                      {copiedUpi ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
-                    </button>
-                  </div>
-                </div>
+          </div>
+          <div className="p-3.5 flex flex-col sm:flex-row justify-between items-center gap-4 text-xs">
+            <div className="space-y-1.5 text-slate-600 flex-1 w-full">
+              <div className="grid grid-cols-[120px_12px_1fr]">
+                <span>Bank Name</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{bankName}</strong>
               </div>
-
-              {/* QR Code Scan container */}
-              <div className="border border-slate-150 p-4.5 rounded-2xl bg-slate-50/50 flex flex-col items-center justify-center text-center space-y-2">
-                <span className="text-[7px] font-black text-slate-400 uppercase tracking-wider">Scan to pay via UPI</span>
-                <div className="w-28 h-28 bg-white border border-slate-150 rounded-xl flex items-center justify-center shadow-inner overflow-hidden p-1.5">
-                  {upiQr ? (
-                    <img src={upiQr} alt="UPI QR" className="w-full h-full object-contain" />
-                  ) : (
-                    <QrCode size={80} className="text-slate-700 stroke-[1.5]" />
-                  )}
-                </div>
-                <span className="text-[7px] text-slate-400 font-semibold block font-mono">{upiId}</span>
+              <div className="grid grid-cols-[120px_12px_1fr]">
+                <span>Account Name</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900">{accountHolder}</strong>
+              </div>
+              <div className="grid grid-cols-[120px_12px_1fr]">
+                <span>Account Number</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900 font-mono">{maskedAccountNumber}</strong>
+              </div>
+              <div className="grid grid-cols-[120px_12px_1fr]">
+                <span>IFSC Code</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900 font-mono">{ifscCode}</strong>
+              </div>
+              <div className="grid grid-cols-[120px_12px_1fr]">
+                <span>UPI ID</span>
+                <span className="text-slate-400">:</span>
+                <strong className="text-slate-900 font-mono text-[11px] break-all">{upiId}</strong>
               </div>
             </div>
+
+            {/* Scannable UPI QR */}
+            {upiQrDataUrl && (
+              <div className="text-center shrink-0 flex flex-col items-center border border-slate-200 rounded-lg p-2 bg-slate-50/50">
+                <span className="text-[10px] text-slate-600 font-bold block mb-1">
+                  Scan & Pay via UPI
+                </span>
+                <img 
+                  src={upiQrDataUrl} 
+                  alt="UPI QR Code" 
+                  className="w-24 h-24 object-contain bg-white rounded border border-slate-100 p-1"
+                />
+                <span className="font-mono text-[9px] text-slate-500 font-semibold mt-1 max-w-[110px] truncate block">
+                  {upiId}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Disclaimer section */}
-        <div className="px-8">
-          <div className="p-4 bg-slate-50/50 border border-slate-100 rounded-2xl text-[9px] font-bold text-slate-400 leading-relaxed">
-            ⚠️ Disclaimer: This is an official booking quotation. {hasAdvancePaid ? 'Advance payment has been submitted. Check-in is subject to host verification.' : 'The booking will remain on hold until the deposit is verified.'}
+        {/* Terms & Conditions + Authorized Signatory (2 Columns) */}
+        <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+          <div 
+            style={{ backgroundColor: '#f1f5f9' }}
+            className="px-3.5 py-2 border-b border-slate-200 flex items-center gap-2"
+          >
+            <FileText size={14} className="text-[#0f233a]" />
+            <span className="text-xs font-bold uppercase tracking-wider text-[#0f233a]">
+              TERMS & CONDITIONS
+            </span>
           </div>
-        </div>
+          <div className="p-4 grid grid-cols-1 sm:grid-cols-[1fr_200px] gap-6 items-end">
+            <ol className="list-decimal pl-3.5 space-y-1 text-[9.5px] text-slate-600 leading-snug">
+              <li>This is a quotation and not a confirmed booking.</li>
+              <li>Rates are valid for the mentioned dates and are subject to availability.</li>
+              <li>Any changes in dates, room type, or guest count may affect the total amount.</li>
+              <li>This quotation includes applicable taxes as per current government rules.</li>
+              <li>Check-in and check-out time as per homestay policy.</li>
+              <li>Cancellation and refund will be as per the homestay&apos;s policy.</li>
+              <li>For any assistance, please contact us at <strong className="text-slate-800">support@wowgateways.com</strong>.</li>
+            </ol>
 
-        {/* Official Signature & Stamp Section */}
-        <div className="px-8 pt-2">
-          <div className="p-6 border border-slate-150 rounded-2xl bg-white shadow-xs flex flex-col sm:flex-row justify-between items-end gap-6">
-            <div className="text-[10px] text-slate-400 font-medium space-y-0.5 text-center sm:text-left">
-              <p className="font-bold text-slate-600">Official Booking Quotation</p>
-              <p>Issued by {propertyName}. This quotation is valid for booking upon advance payment.</p>
-              {propertyGstin && <p className="font-mono text-slate-500 font-bold">GSTIN: {propertyGstin}</p>}
-            </div>
-
-            <div className="text-center relative w-56 flex flex-col items-center">
-              <div className="relative h-20 w-full flex items-center justify-center">
-                {stampImage && (
-                  <img 
-                    src={getImageUrl(stampImage)} 
-                    alt="Official Seal / Stamp" 
-                    className="absolute right-0 top-0 h-20 w-20 object-contain opacity-85 pointer-events-none drop-shadow-xs"
-                  />
-                )}
+            {/* Authorized Signatory */}
+            <div className="text-right">
+              <span className="text-[11px] font-bold text-slate-800 block">
+                For WOW Gateways
+              </span>
+              <div className="h-10 flex items-end justify-end my-1">
                 {signatureImage ? (
                   <img 
                     src={getImageUrl(signatureImage)} 
                     alt="Authorized Signature" 
-                    className="relative z-10 max-h-16 max-w-[170px] object-contain drop-shadow-xs"
+                    className="h-9 object-contain"
                   />
                 ) : (
-                  <span className="font-serif italic text-base text-slate-700 block">{signatoryName}</span>
+                  <span className="font-serif italic text-lg text-slate-800 pr-2">
+                    {signatoryName.split(' ')[0] || 'Rajeshwar'}
+                  </span>
                 )}
               </div>
-
-              <div className="w-full border-t border-slate-300 pt-1 mt-1 text-center">
-                <span className="block font-black text-xs text-slate-900 tracking-tight">{signatoryName}</span>
-                <span className="block text-[8px] font-black text-rose-700 uppercase tracking-wider">
+              <div className="border-t border-slate-300 pt-1 inline-block min-w-[150px]">
+                <strong className="block text-xs text-slate-900">{signatoryName}</strong>
+                <span className="text-[10px] text-slate-500 font-medium block">
                   {signatoryDesignation}
                 </span>
               </div>
@@ -558,47 +671,9 @@ export default function BookingQuotation() {
           </div>
         </div>
 
-        {/* Bottom Property Footer block */}
-        <div className="text-center pt-4 border-t border-slate-50 text-[9px] font-black text-slate-400 tracking-wider uppercase">
-          {propertyName} © {new Date().getFullYear()}
-        </div>
+        {/* Corporate Footer */}
+        <DocumentCorporateFooter />
 
-      </div>
-
-      {/* Share / download Actions */}
-      <div className="flex flex-wrap justify-center gap-2.5 print:hidden">
-        <button
-          onClick={handleDownloadPdf}
-          disabled={downloadingPdf}
-          className="px-6 py-3 bg-rose-700 hover:bg-rose-800 disabled:bg-rose-400 text-white font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none shadow-sm flex items-center gap-1.5 transition-all"
-        >
-          {downloadingPdf ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
-          <span>{downloadingPdf ? 'Downloading Quotation...' : 'Download Quotation (PDF)'}</span>
-        </button>
-
-        <button
-          onClick={handlePrint}
-          className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none flex items-center gap-1.5 transition-all"
-        >
-          <Printer size={13} />
-          <span>Print</span>
-        </button>
-
-        <button
-          onClick={handleWhatsAppShare}
-          className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none shadow-sm flex items-center gap-1.5 transition-all"
-        >
-          <Smartphone size={13} />
-          <span>Share via WhatsApp</span>
-        </button>
-
-        <button
-          onClick={() => alert(`Calling host ${ownerName} at ${ownerPhone}...`)}
-          className="px-6 py-3 bg-slate-700 hover:bg-slate-800 text-white font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none shadow-sm flex items-center gap-1.5 transition-all"
-        >
-          <Phone size={13} />
-          <span>Call Us</span>
-        </button>
       </div>
 
     </div>

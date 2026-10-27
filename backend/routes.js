@@ -6,6 +6,7 @@ import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 import { authenticateToken, requirePermission } from './middleware/auth.js';
 import { Booking, Employee, Homestay, Role, Attendance, Salary, HomestayOwner, Ride, Rider, User, TourPackage, Admin, Coupon, ActivityLog, PasswordReset, SmtpSettings, StateCity, NewState, NewCity, NewAmenity, NewRoomType, Property, PropertyGallery, PropertyRooms, PropertyAmenities, PropertySeason, PropertyPricing, PropertyApproval, PropertyAuditLog, PropertyBlockedDate, Media, PublicShareLink, HomestayRole, HomestayStaff, Notification, SubscriptionPlan } from './models.js';
+import { isCouponApplicableToProperty, validateAndCalculateCoupon, atomicRedeemCoupon, atomicRestoreCoupon } from './couponService.js';
 
 const router = express.Router();
 
@@ -13481,8 +13482,8 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
       notes = ''
     } = req.body;
 
-    const guestMobile = customer?.mobile || customer?.phone || '';
-    const guestName = customer?.name || customer?.fullName || '';
+    const guestMobile = customer?.mobile || customer?.phone || req.body.guestMobile || '';
+    const guestName = customer?.name || customer?.fullName || req.body.guestName || '';
     const finalCheckIn = checkInDate || dates?.checkIn;
     const finalCheckOut = checkOutDate || dates?.checkOut;
     let finalRooms = inputRooms;
@@ -13575,11 +13576,56 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
       bookingIdStr = `WG-BK-${String(nextNum).padStart(5, '0')}`;
     }
 
-    // 7. Calculate Pricing
-    const roomCost = Number(pricing.roomCost) || Number(pricing.totalCost) || Number(pricing.baseRate) || 0;
-    const tax = Number(pricing.tax) || 0;
+    // 7. Calculate Pricing & Independent Coupon Validation
+    const nights = Math.max(1, Math.round((outDate - inDate) / (1000 * 60 * 60 * 24)));
+    let roomCost = Number(pricing.roomCost) || Number(pricing.totalCost) || Number(pricing.baseRate) || 0;
+    if (roomCost <= 0 && Array.isArray(rooms) && rooms.length > 0) {
+      roomCost = rooms.reduce((sum, r) => sum + (Number(r.roomPrice || r.price || r.baseRate || 3000) * nights), 0);
+    }
+
+    const requestedCoupon = (req.body.couponCode || pricing.couponCode || '').trim().toUpperCase();
+    let validatedCoupon = null;
+    let authoritativeDiscount = 0;
+
+    if (requestedCoupon) {
+      const valRes = await validateAndCalculateCoupon({
+        code: requestedCoupon,
+        propertyId: property._id,
+        roomCost,
+        cartAmount: roomCost,
+        bookingType: bookingMode === 'Travel Agent' ? 'agent' : 'guest',
+        guestMobile,
+        guestEmail: customer?.email
+      });
+
+      if (!valRes.valid) {
+        return res.status(400).json({
+          error: 'CouponValidationError',
+          message: valRes.message
+        });
+      }
+
+      validatedCoupon = valRes.coupon;
+      authoritativeDiscount = valRes.discountAmount;
+    } else if (Number(pricing.discount) > 0) {
+      authoritativeDiscount = Number(pricing.discount);
+    }
+
+    const netTaxableCost = Math.max(0, roomCost - authoritativeDiscount);
+    let tax = Math.round(netTaxableCost * 0.12);
     const addOns = Number(pricing.addOns) || 0;
-    const finalAmount = Number(pricing.finalAmount) || Number(pricing.grandTotal) || (roomCost + tax + addOns);
+    let finalAmount = netTaxableCost + tax + addOns;
+
+    if (!validatedCoupon) {
+      if (pricing.tax !== undefined && Number(pricing.tax) >= 0) {
+        tax = Number(pricing.tax);
+      }
+      if (pricing.finalAmount !== undefined && Number(pricing.finalAmount) > 0) {
+        finalAmount = Number(pricing.finalAmount);
+      } else if (pricing.grandTotal !== undefined && Number(pricing.grandTotal) > 0) {
+        finalAmount = Number(pricing.grandTotal);
+      }
+    }
     const advAmount = Math.min(finalAmount, Math.max(0, Number(advanceAmount || pricing.advancePayment || pricing.advanceAmount || 0)));
     const balAmount = Math.max(0, finalAmount - advAmount);
 
@@ -13594,6 +13640,7 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
       bookingStatus,
       paymentStatus,
       amount: finalAmount,
+      couponCode: validatedCoupon ? validatedCoupon.code : '',
       checkInDate: inDate,
       checkOutDate: outDate,
       propertyId: property._id,
@@ -13635,8 +13682,8 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
       },
       pricing: {
         bookingAmount: roomCost,
-        discount: Number(pricing.discount) || 0,
-        couponCode: req.body.couponCode || pricing.couponCode || '',
+        discount: authoritativeDiscount,
+        couponCode: validatedCoupon ? validatedCoupon.code : '',
         tax,
         addOns,
         addOnsRemark: pricing.addOnsRemark || '',
@@ -13658,32 +13705,46 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
       }] : [],
       timeline: [
         {
-          activity: `Booking created by Owner (${bookingStatus})`,
+          activity: `Booking created by Owner (${bookingStatus})${validatedCoupon ? ` with coupon ${validatedCoupon.code} (-₹${authoritativeDiscount})` : ''}`,
           timestamp: new Date(),
           createdBy: req.user.email || 'Owner'
         }
       ]
     });
 
-    await newBooking.save();
-
-    const usedCode = req.body.couponCode || pricing?.couponCode;
-    if (usedCode) {
-      const cleanC = String(usedCode).trim().toUpperCase();
-      await Coupon.updateOne(
-        { code: cleanC },
-        { 
-          $inc: { usedCount: 1 },
-          $push: {
-            usedBy: {
-              userIdentifier: guestMobile || customer?.email || 'Guest',
-              usedAt: new Date(),
-              bookingId: bookingIdStr,
-              discountAmount: Number(pricing?.discount) || 0
-            }
-          }
+    let saved = false;
+    let attempts = 0;
+    while (!saved && attempts < 5) {
+      try {
+        attempts++;
+        await newBooking.save();
+        saved = true;
+      } catch (saveErr) {
+        if (saveErr.code === 11000 && (saveErr.keyPattern?.bookingId || String(saveErr.message).includes('bookingId'))) {
+          nextNum++;
+          bookingIdStr = `WG-BK-${String(nextNum).padStart(5, '0')}`;
+          newBooking.bookingId = bookingIdStr;
+        } else {
+          throw saveErr;
         }
-      ).catch(e => console.warn('Could not update coupon count:', e.message));
+      }
+    }
+
+    if (validatedCoupon) {
+      const redeemRes = await atomicRedeemCoupon({
+        couponId: validatedCoupon._id,
+        userIdentifier: guestMobile || customer?.email || 'Guest',
+        bookingId: bookingIdStr,
+        discountAmount: authoritativeDiscount
+      });
+
+      if (!redeemRes.success) {
+        await Booking.deleteOne({ _id: newBooking._id });
+        return res.status(409).json({
+          error: 'CouponExhausted',
+          message: 'This coupon limit has been fully redeemed.'
+        });
+      }
     }
 
     res.status(201).json({
@@ -14161,6 +14222,13 @@ router.patch('/homestay-owner/bookings/:id/cancel', authenticateToken, async (re
       timestamp: new Date(),
       createdBy: req.user.email || 'Owner'
     });
+
+    // Restore coupon usage if coupon was used
+    const usedCoupon = (booking.pricing?.couponCode || booking.couponCode || '').trim();
+    if (usedCoupon) {
+      await atomicRestoreCoupon({ couponCode: usedCoupon, bookingId: booking.bookingId });
+    }
+
     await booking.save();
 
     await createOwnerNotification({
@@ -14451,32 +14519,96 @@ router.patch('/homestay-owner/bookings/:id', authenticateToken, async (req, res)
       booking.bookingMode = bookingMode === 'Travel Agent' ? 'Travel Agent' : 'Guest';
     }
 
-    // 3. Pricing update
-    if (pricing) {
+    // 3. Pricing & Authoritative Coupon update
+    if (pricing || couponCode !== undefined) {
       if (!booking.pricing) booking.pricing = {};
-      const prevAddOns = Number(booking.pricing.addOns) || 0;
-      if (pricing.roomCost !== undefined) booking.pricing.bookingAmount = Number(pricing.roomCost);
-      if (pricing.bookingAmount !== undefined) booking.pricing.bookingAmount = Number(pricing.bookingAmount);
-      if (pricing.tax !== undefined) booking.pricing.tax = Number(pricing.tax);
-      if (pricing.addOns !== undefined) booking.pricing.addOns = Number(pricing.addOns);
-      if (pricing.addOnsRemark !== undefined) booking.pricing.addOnsRemark = pricing.addOnsRemark;
-      if (pricing.discount !== undefined) booking.pricing.discount = Number(pricing.discount);
-      if (pricing.couponCode !== undefined || couponCode !== undefined) {
-        booking.pricing.couponCode = couponCode || pricing.couponCode || '';
+
+      const currentRoomCost = pricing?.roomCost !== undefined
+        ? Number(pricing.roomCost)
+        : (pricing?.bookingAmount !== undefined
+          ? Number(pricing.bookingAmount)
+          : (Number(booking.pricing.bookingAmount) || 0));
+
+      const currentAddOns = pricing?.addOns !== undefined
+        ? Number(pricing.addOns)
+        : (Number(booking.pricing.addOns) || 0);
+
+      if (pricing?.addOnsRemark !== undefined) booking.pricing.addOnsRemark = pricing.addOnsRemark;
+      booking.pricing.bookingAmount = currentRoomCost;
+      booking.pricing.addOns = currentAddOns;
+
+      const oldCoupon = String(booking.pricing.couponCode || booking.couponCode || '').trim().toUpperCase();
+      let targetCoupon = oldCoupon;
+      if (couponCode !== undefined) {
+        targetCoupon = String(couponCode).trim().toUpperCase();
+      } else if (pricing?.couponCode !== undefined) {
+        targetCoupon = String(pricing.couponCode).trim().toUpperCase();
       }
 
-      // Calculate final amount
-      let newFinal = 0;
-      if (pricing.finalAmount !== undefined) {
-        newFinal = Number(pricing.finalAmount);
+      let authoritativeDiscount = 0;
+      let calculatedTax = 0;
+
+      if (targetCoupon) {
+        const valRes = await validateAndCalculateCoupon({
+          code: targetCoupon,
+          propertyId: booking.propertyId,
+          roomCost: currentRoomCost,
+          cartAmount: currentRoomCost,
+          bookingType: booking.bookingMode === 'Travel Agent' ? 'agent' : 'guest',
+          guestMobile: booking.customer?.mobile,
+          guestEmail: booking.customer?.email,
+          currentBookingId: booking.bookingId
+        });
+
+        if (!valRes.valid) {
+          return res.status(400).json({
+            error: 'CouponValidationError',
+            message: valRes.message
+          });
+        }
+
+        authoritativeDiscount = valRes.discountAmount;
+        calculatedTax = valRes.tax;
+
+        if (targetCoupon !== oldCoupon) {
+          if (oldCoupon) {
+            await atomicRestoreCoupon({ couponCode: oldCoupon, bookingId: booking.bookingId });
+          }
+          await atomicRedeemCoupon({
+            couponId: valRes.coupon._id,
+            userIdentifier: booking.customer?.mobile || booking.customer?.email || 'Guest',
+            bookingId: booking.bookingId,
+            discountAmount: authoritativeDiscount
+          });
+        } else {
+          await Coupon.updateOne(
+            { code: targetCoupon, "usedBy.bookingId": String(booking.bookingId) },
+            { $set: { "usedBy.$.discountAmount": authoritativeDiscount } }
+          );
+        }
+
+        booking.pricing.couponCode = valRes.coupon.code;
+        booking.couponCode = valRes.coupon.code;
       } else {
-        const roomCost = Number(booking.pricing.bookingAmount) || 0;
-        const tax = Number(booking.pricing.tax) || 0;
-        const addOns = Number(booking.pricing.addOns) || 0;
-        const discount = Number(booking.pricing.discount) || 0;
-        newFinal = Math.max(0, roomCost + tax + addOns - discount);
+        if (oldCoupon) {
+          await atomicRestoreCoupon({ couponCode: oldCoupon, bookingId: booking.bookingId });
+        }
+        booking.pricing.couponCode = '';
+        booking.couponCode = '';
+        authoritativeDiscount = 0;
+        calculatedTax = Math.round(currentRoomCost * 0.12);
       }
 
+      let newFinal = 0;
+      if (!targetCoupon && pricing?.finalAmount !== undefined) {
+        newFinal = Number(pricing.finalAmount);
+        if (pricing?.tax !== undefined) calculatedTax = Number(pricing.tax);
+      } else {
+        newFinal = Math.max(0, currentRoomCost - authoritativeDiscount) + calculatedTax + currentAddOns;
+      }
+
+      booking.pricing.discount = authoritativeDiscount;
+      booking.pricing.tax = calculatedTax;
       booking.pricing.finalAmount = newFinal;
       booking.amount = newFinal;
 
@@ -16128,7 +16260,9 @@ router.get('/homestay-owner/coupons', authenticateToken, async (req, res) => {
 // POST /api/homestay-owner/coupons (Create new coupon)
 router.post('/homestay-owner/coupons', authenticateToken, async (req, res) => {
   try {
-    const ownerId = req.user._id || req.user.id;
+    const isSuperAdmin = req.user.role === 'Super Admin';
+    const ownerId = isSuperAdmin ? (req.body.ownerId || null) : (req.user._id || req.user.id);
+    const createdBy = isSuperAdmin ? 'Super Admin' : 'Homestay Owner';
     const {
       code,
       title,
@@ -16184,7 +16318,8 @@ router.post('/homestay-owner/coupons', authenticateToken, async (req, res) => {
       status: status === 'Inactive' ? 'Inactive' : 'Active',
       type: discountType === 'fixed' ? 'fixed' : 'percentage',
       value: Number(discountValue),
-      expiry: new Date(endDate)
+      expiry: new Date(endDate),
+      createdBy
     });
 
     await newCoupon.save();
@@ -16312,33 +16447,169 @@ router.patch('/homestay-owner/coupons/:id/status', authenticateToken, async (req
   }
 });
 
-// Helper to check if a coupon is applicable to a specific property
-const isCouponApplicableToProperty = (coupon, property) => {
-  if (!coupon || !property) return false;
-  const applicable = coupon.applicableHomestays;
-  if (!Array.isArray(applicable) || applicable.length === 0) {
-    return false;
+// ==========================================
+// SUPER ADMIN DASHBOARD COUPONS API
+// ==========================================
+
+// GET /api/dashboard/coupons
+router.get(['/dashboard/coupons', '/api/dashboard/coupons'], authenticateToken, async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 10);
+    const search = req.query.search ? String(req.query.search).trim() : '';
+    const status = req.query.status || 'All';
+
+    const filter = {};
+    if (status && status !== 'All') {
+      filter.status = status;
+    }
+    if (search) {
+      filter.$or = [
+        { code: { $regex: search, $options: 'i' } },
+        { title: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const total = await Coupon.countDocuments(filter);
+    const coupons = await Coupon.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit);
+
+    const formatted = coupons.map(c => {
+      const obj = c.toObject();
+      return {
+        ...obj,
+        type: obj.discountType || obj.type || 'percentage',
+        value: obj.discountValue !== undefined ? obj.discountValue : (obj.value || 0),
+        minOrder: obj.minCartAmount !== undefined ? obj.minCartAmount : (obj.minOrder || 0),
+        maxUses: obj.totalUsageLimit !== undefined ? obj.totalUsageLimit : (obj.maxUses || 0),
+        expiry: obj.endDate || obj.expiry
+      };
+    });
+
+    res.json({
+      data: formatted,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching dashboard coupons:', err);
+    res.status(500).json({ error: 'ServerError', message: err.message });
   }
+});
 
-  // If 'all', coupon is valid for all homestays
-  if (applicable.includes('all')) {
-    return true;
+// POST /api/dashboard/coupons
+router.post(['/dashboard/coupons', '/api/dashboard/coupons'], authenticateToken, async (req, res) => {
+  try {
+    const { code, type = 'percentage', value, minOrder = 0, maxUses = 0, expiry, status = 'Active' } = req.body;
+    if (!code || value === undefined || !expiry) {
+      return res.status(400).json({ error: 'Code, value, and expiry date are required.' });
+    }
+
+    const cleanCode = String(code).trim().toUpperCase();
+    const existing = await Coupon.findOne({ code: cleanCode });
+    if (existing) {
+      return res.status(400).json({ error: `Coupon code "${cleanCode}" already exists.` });
+    }
+
+    const newCoupon = new Coupon({
+      code: cleanCode,
+      title: `${cleanCode} Promotional Offer`,
+      description: 'Created by Super Admin',
+      ownerId: null,
+      applicableHomestays: ['all'],
+      targetAudience: 'both',
+      discountType: type === 'fixed' ? 'fixed' : 'percentage',
+      discountValue: Number(value),
+      minCartAmount: Number(minOrder) || 0,
+      endDate: new Date(expiry),
+      totalUsageLimit: Number(maxUses) || 0,
+      perUserLimit: 1,
+      usedCount: 0,
+      usedBy: [],
+      status: status === 'Inactive' ? 'Inactive' : 'Active',
+      type: type === 'fixed' ? 'fixed' : 'percentage',
+      value: Number(value),
+      minOrder: Number(minOrder) || 0,
+      maxUses: Number(maxUses) || 0,
+      expiry: new Date(expiry)
+    });
+
+    await newCoupon.save();
+    res.status(201).json({ success: true, data: newCoupon });
+  } catch (err) {
+    console.error('Error creating dashboard coupon:', err);
+    res.status(500).json({ error: 'ServerError', message: err.message });
   }
+});
 
-  const propIdStr = String(property._id || '');
-  const propCodeStr = String(property.propertyId || '').trim();
-  const propNameStr = String(property.name || '').trim().toLowerCase();
+// PUT /api/dashboard/coupons/:id
+router.put(['/dashboard/coupons/:id', '/api/dashboard/coupons/:id'], authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { code, type, value, minOrder, maxUses, expiry, status } = req.body;
 
-  return applicable.some(h => {
-    if (!h) return false;
-    const val = String(h).trim();
-    if (val === 'all') return false;
-    if (propIdStr && val === propIdStr) return true;
-    if (propCodeStr && val.toLowerCase() === propCodeStr.toLowerCase()) return true;
-    if (propNameStr && val.toLowerCase() === propNameStr) return true;
-    return false;
-  });
-};
+    const coupon = await Coupon.findById(id);
+    if (!coupon) return res.status(404).json({ error: 'Coupon not found.' });
+
+    if (code) {
+      const cleanCode = String(code).trim().toUpperCase();
+      if (cleanCode !== coupon.code) {
+        const dup = await Coupon.findOne({ code: cleanCode, _id: { $ne: id } });
+        if (dup) return res.status(400).json({ error: `Coupon code "${cleanCode}" already exists.` });
+        coupon.code = cleanCode;
+      }
+    }
+
+    if (type !== undefined) {
+      coupon.discountType = type;
+      coupon.type = type;
+    }
+    if (value !== undefined) {
+      coupon.discountValue = Number(value);
+      coupon.value = Number(value);
+    }
+    if (minOrder !== undefined) {
+      coupon.minCartAmount = Number(minOrder);
+      coupon.minOrder = Number(minOrder);
+    }
+    if (maxUses !== undefined) {
+      coupon.totalUsageLimit = Number(maxUses);
+      coupon.maxUses = Number(maxUses);
+    }
+    if (expiry !== undefined) {
+      coupon.endDate = new Date(expiry);
+      coupon.expiry = new Date(expiry);
+    }
+    if (status !== undefined) {
+      coupon.status = status;
+    }
+
+    await coupon.save();
+    res.json({ success: true, data: coupon });
+  } catch (err) {
+    console.error('Error updating dashboard coupon:', err);
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// DELETE /api/dashboard/coupons/:id
+router.delete(['/dashboard/coupons/:id', '/api/dashboard/coupons/:id'], authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const coupon = await Coupon.findByIdAndDelete(id);
+    if (!coupon) return res.status(404).json({ error: 'Coupon not found.' });
+    res.json({ success: true, message: 'Coupon deleted successfully.' });
+  } catch (err) {
+    console.error('Error deleting dashboard coupon:', err);
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
 
 // GET /api/public/coupons/available (Public list of coupons applicable to a property)
 router.get(['/public/coupons/available', '/api/public/coupons/available'], async (req, res) => {
@@ -16395,123 +16666,32 @@ router.get(['/public/coupons/available', '/api/public/coupons/available'], async
 // POST /api/public/coupons/validate (Validate coupon code for a booking)
 router.post(['/public/coupons/validate', '/api/public/coupons/validate'], async (req, res) => {
   try {
-    const { code, propertyId, subtotal = 0, bookingType = 'guest', guestMobile = '', guestEmail = '' } = req.body;
-    if (!code) {
-      return res.status(400).json({ valid: false, message: 'Please enter a coupon code.' });
-    }
-
-    const cleanCode = String(code).trim().toUpperCase();
-    const coupon = await Coupon.findOne({ code: cleanCode });
-
-    if (!coupon) {
-      return res.status(404).json({ valid: false, message: `Coupon code "${cleanCode}" is invalid.` });
-    }
-
-    if (coupon.status !== 'Active') {
-      return res.status(400).json({ valid: false, message: `Coupon code "${cleanCode}" is no longer active.` });
-    }
-
-    const now = new Date();
-    if (coupon.startDate && new Date(coupon.startDate) > now) {
-      return res.status(400).json({ valid: false, message: 'This coupon offer has not started yet.' });
-    }
-
-    if (coupon.endDate && new Date(coupon.endDate) < now) {
-      return res.status(400).json({ valid: false, message: `Coupon code "${cleanCode}" has expired.` });
-    }
-
-    // Check audience (B2B vs B2C)
-    if (bookingType === 'agent' && coupon.targetAudience === 'customer') {
-      return res.status(400).json({ valid: false, message: 'This coupon is exclusively for Direct Guest bookings.' });
-    }
-    if (bookingType === 'guest' && coupon.targetAudience === 'agent') {
-      return res.status(400).json({ valid: false, message: 'This coupon is exclusively for Travel Agent B2B bookings.' });
-    }
-
-    // Check applicable homestay
-    if (!propertyId) {
-      return res.status(400).json({ valid: false, message: 'Property information is required to validate coupon.' });
-    }
-
-    let propertyDoc = await Property.findOne({
-      $or: [
-        { _id: mongoose.Types.ObjectId.isValid(propertyId) ? propertyId : null },
-        { propertyId: propertyId }
-      ].filter(Boolean)
+    const { code, propertyId, subtotal = 0, roomCost = 0, bookingType = 'guest', guestMobile = '', guestEmail = '', currentBookingId = null } = req.body;
+    const evalAmount = Number(roomCost) || Number(subtotal) || 0;
+    const result = await validateAndCalculateCoupon({
+      code,
+      propertyId,
+      roomCost: evalAmount,
+      cartAmount: evalAmount,
+      bookingType,
+      guestMobile,
+      guestEmail,
+      currentBookingId
     });
 
-    if (!propertyDoc) {
-      propertyDoc = await Homestay.findOne({
-        _id: mongoose.Types.ObjectId.isValid(propertyId) ? propertyId : null
-      });
+    if (!result.valid) {
+      const statusCode = result.error === 'NotFound' ? 404 : 400;
+      return res.status(statusCode).json({ valid: false, message: result.message, error: result.error });
     }
-
-    if (!propertyDoc) {
-      return res.status(404).json({ valid: false, message: 'Homestay property not found.' });
-    }
-
-    if (!isCouponApplicableToProperty(coupon, propertyDoc)) {
-      return res.status(400).json({ valid: false, message: 'This coupon is not valid for this homestay.' });
-    }
-
-    // Check cart amount
-    const cartAmount = Number(subtotal) || 0;
-    if (coupon.minCartAmount && cartAmount < coupon.minCartAmount) {
-      return res.status(400).json({ 
-        valid: false, 
-        message: `Minimum booking amount of ₹${Number(coupon.minCartAmount).toLocaleString()} required to use this coupon.` 
-      });
-    }
-
-    if (coupon.maxCartAmount && cartAmount > coupon.maxCartAmount) {
-      return res.status(400).json({ 
-        valid: false, 
-        message: `This coupon is only applicable for bookings up to ₹${Number(coupon.maxCartAmount).toLocaleString()}.` 
-      });
-    }
-
-    // Check total usage limit
-    if (coupon.totalUsageLimit > 0 && coupon.usedCount >= coupon.totalUsageLimit) {
-      return res.status(400).json({ valid: false, message: 'This coupon limit has been fully redeemed.' });
-    }
-
-    // Check single user limit
-    const userIdentifier = (guestMobile || guestEmail || '').trim().toLowerCase();
-    if (userIdentifier && coupon.perUserLimit > 0 && Array.isArray(coupon.usedBy)) {
-      const userUses = coupon.usedBy.filter(u => u.userIdentifier && u.userIdentifier.toLowerCase() === userIdentifier).length;
-      if (userUses >= coupon.perUserLimit) {
-        return res.status(400).json({ 
-          valid: false, 
-          message: `You have already redeemed this coupon the maximum allowed (${coupon.perUserLimit} time${coupon.perUserLimit > 1 ? 's' : ''}).` 
-        });
-      }
-    }
-
-    // Calculate discount
-    let discountAmount = 0;
-    if (coupon.discountType === 'percentage') {
-      discountAmount = Math.round((cartAmount * Number(coupon.discountValue)) / 100);
-      if (coupon.maxDiscountAmount && coupon.maxDiscountAmount > 0) {
-        discountAmount = Math.min(discountAmount, Number(coupon.maxDiscountAmount));
-      }
-    } else {
-      discountAmount = Math.min(cartAmount, Number(coupon.discountValue));
-    }
-
-    const newTotal = Math.max(0, cartAmount - discountAmount);
 
     res.json({
       valid: true,
-      message: `Coupon "${coupon.code}" applied! You save ₹${Number(discountAmount).toLocaleString()}`,
-      coupon: {
-        code: coupon.code,
-        title: coupon.title,
-        discountType: coupon.discountType,
-        discountValue: coupon.discountValue,
-        maxDiscountAmount: coupon.maxDiscountAmount
-      },
-      discountAmount,
-      newTotal
+      message: result.message,
+      coupon: result.coupon,
+      discountAmount: result.discountAmount,
+      netTaxableAmount: result.netTaxableAmount,
+      tax: result.tax,
+      newTotal: result.newTotal
     });
   } catch (err) {
     console.error('Error validating coupon:', err);
@@ -16599,7 +16779,7 @@ router.post('/public/calculate-price', async (req, res) => {
         const now = new Date();
         const validDates = (!coupon.startDate || new Date(coupon.startDate) <= now) && (new Date(coupon.endDate) >= now);
         const validAudience = coupon.targetAudience === 'both' || (bookingType === 'agent' ? coupon.targetAudience === 'agent' : coupon.targetAudience === 'customer');
-        const validProperty = isCouponApplicableToProperty(coupon, propDoc);
+        const validProperty = await isCouponApplicableToProperty(coupon, propDoc);
         const validCart = (!coupon.minCartAmount || totalRoomCost >= coupon.minCartAmount) && (!coupon.maxCartAmount || totalRoomCost <= coupon.maxCartAmount);
         const validUsage = !coupon.totalUsageLimit || (coupon.usedCount < coupon.totalUsageLimit);
 
@@ -16760,7 +16940,7 @@ router.post('/public/create-booking', async (req, res) => {
         const now = new Date();
         const validDates = (!cDoc.startDate || new Date(cDoc.startDate) <= now) && (new Date(cDoc.endDate) >= now);
         const validAudience = cDoc.targetAudience === 'both' || (bookingType === 'agent' ? cDoc.targetAudience === 'agent' : cDoc.targetAudience === 'customer');
-        const validProperty = isCouponApplicableToProperty(cDoc, property);
+        const validProperty = await isCouponApplicableToProperty(cDoc, property);
         const validCart = (!cDoc.minCartAmount || totalRoomCost >= cDoc.minCartAmount) && (!cDoc.maxCartAmount || totalRoomCost <= cDoc.maxCartAmount);
         const validUsage = !cDoc.totalUsageLimit || (cDoc.usedCount < cDoc.totalUsageLimit);
 
@@ -17010,6 +17190,11 @@ router.patch('/homestay-owner/bookings/:id/reject-request', authenticateToken, a
       timestamp: new Date(),
       createdBy: req.user.email || 'Owner'
     });
+
+    const usedCoupon = (booking.pricing?.couponCode || booking.couponCode || '').trim();
+    if (usedCoupon) {
+      await atomicRestoreCoupon({ couponCode: usedCoupon, bookingId: booking.bookingId });
+    }
 
     await booking.save();
 

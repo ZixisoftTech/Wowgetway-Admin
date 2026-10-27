@@ -511,11 +511,12 @@ export default function CreateBookingFlow() {
     try {
       setValidatingCoupon(true);
       setCouponError('');
-      const subtotal = (Number(totalCost) || 0) + (Number(totalTax) || 0) + (Number(addOns) || 0);
+      const roomCost = Number(totalCost) || 0;
       const res = await axios.post(getApiUrl('/api/public/coupons/validate'), {
         code: couponCodeInput.trim(),
         propertyId: selectedPropertyId,
-        subtotal,
+        subtotal: roomCost,
+        roomCost,
         bookingType: bookingMode === 'Travel Agent' ? 'agent' : 'guest',
         guestMobile: guestMobile.trim(),
         guestEmail: guestEmail.trim()
@@ -543,6 +544,42 @@ export default function CreateBookingFlow() {
       setValidatingCoupon(false);
     }
   };
+
+  // Dynamic re-validation if property, price, or booking mode changes
+  useEffect(() => {
+    if (!appliedCoupon || !appliedCoupon.code) return;
+
+    let isMounted = true;
+    const revalidate = async () => {
+      try {
+        const roomCost = Number(totalCost) || 0;
+        const res = await axios.post(getApiUrl('/api/public/coupons/validate'), {
+          code: appliedCoupon.code,
+          propertyId: selectedPropertyId,
+          subtotal: roomCost,
+          roomCost,
+          bookingType: bookingMode === 'Travel Agent' ? 'agent' : 'guest',
+          guestMobile: guestMobile.trim(),
+          guestEmail: guestEmail.trim()
+        });
+
+        if (isMounted && res.data?.valid) {
+          setCouponDiscount(Number(res.data.discountAmount) || 0);
+          setCouponError('');
+        }
+      } catch (err) {
+        if (isMounted) {
+          const msg = err.response?.data?.message || 'Coupon is no longer valid for the selected booking details.';
+          setCouponError(msg);
+          setAppliedCoupon(null);
+          setCouponDiscount(0);
+        }
+      }
+    };
+
+    revalidate();
+    return () => { isMounted = false; };
+  }, [totalCost, selectedPropertyId, bookingMode]);
 
   const handleRemoveCoupon = () => {
     setAppliedCoupon(null);

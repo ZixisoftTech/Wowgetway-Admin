@@ -365,10 +365,31 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
   const autoSave = async (data, stepNum = currentStep) => {
     if (isReadOnly) return;
     localStorage.setItem('propertySetupDraft', JSON.stringify(data));
-    try {
-      const token = getAuthToken();
-      if (!token || !propertyDbId) return;
+    const token = getAuthToken();
+    if (!token) return;
 
+    let targetPropDbId = propertyDbId;
+    if (!targetPropDbId) {
+      try {
+        const draftRes = await axios.get(getApiUrl('/api/homestay-owner/properties/draft?new=true'), {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (draftRes.data && draftRes.data.property && draftRes.data.property._id) {
+          targetPropDbId = draftRes.data.property._id;
+          setPropertyDbId(targetPropDbId);
+          setPropertyStatus(draftRes.data.property.status || 'Draft');
+        }
+      } catch (initErr) {
+        console.error("Failed to self-initialize property draft:", initErr);
+        throw new Error(initErr.response?.data?.message || 'Property draft could not be initialized on the server.');
+      }
+    }
+
+    if (!targetPropDbId) {
+      throw new Error('Property draft ID is missing. Please refresh the page to reconnect.');
+    }
+
+    try {
       let stepData = {};
       if (stepNum === 1) {
         stepData = data;
@@ -394,7 +415,7 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
       }
 
       const res = await axios.post(getApiUrl('/api/homestay-owner/properties/save-step'), {
-        propertyId: propertyDbId,
+        propertyId: targetPropDbId,
         step: stepNum,
         data: stepData
       }, {
@@ -870,14 +891,24 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
 
   const handleSaveDraft = async () => {
     if (isReadOnly) return;
-    await autoSave(formData, currentStep);
-    Swal.fire({
-      title: 'Draft Saved',
-      text: 'Property setup progress has been saved successfully.',
-      icon: 'success',
-      confirmButtonColor: '#be123c'
-    });
-    handleExit();
+    try {
+      await autoSave(formData, currentStep);
+      Swal.fire({
+        title: 'Draft Saved',
+        text: 'Property setup progress has been saved successfully.',
+        icon: 'success',
+        confirmButtonColor: '#be123c'
+      });
+      handleExit();
+    } catch (err) {
+      console.error("Draft save failed:", err);
+      Swal.fire({
+        title: 'Save Draft Failed',
+        text: err?.response?.data?.message || err.message || 'Unable to save draft. Please check your network connection.',
+        icon: 'error',
+        confirmButtonColor: '#be123c'
+      });
+    }
   };
 
   const handleStepClick = async (stepNum) => {
@@ -907,13 +938,17 @@ export default function PropertySetupWizard({ propertyId: propPropertyId = null,
         return;
       }
       if (!propertyDbId) {
-        Swal.fire({
-          title: 'Draft Not Found',
-          text: 'The property draft has not been initialized. Please refresh the page or step back to Step 1 to save first.',
-          icon: 'error',
-          confirmButtonColor: '#be123c'
-        });
-        return;
+        try {
+          await autoSave(formData, 1);
+        } catch (e) {
+          Swal.fire({
+            title: 'Draft Not Found',
+            text: 'The property draft has not been initialized. Please refresh the page or step back to Step 1 to save first.',
+            icon: 'error',
+            confirmButtonColor: '#be123c'
+          });
+          return;
+        }
       }
 
       // E2E validations audit on publish submission

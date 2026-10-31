@@ -62,9 +62,47 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Ensure database connection is active with cached promise (prevents Serverless cold-start race conditions)
 let cachedDbPromise = null;
+let indexesSynced = false;
+
+const syncDatabaseIndexes = async () => {
+  if (indexesSynced) return;
+  try {
+    const db = mongoose.connection.db;
+    if (!db) return;
+    const propColl = db.collection('properties');
+    const indexes = await propColl.indexes();
+    const legacyIndex = indexes.find(idx => idx.name === 'ownerId_1_name_1');
+
+    if (legacyIndex && (!legacyIndex.partialFilterExpression || !legacyIndex.partialFilterExpression.name)) {
+      console.log('[Migration] Dropping legacy unique index ownerId_1_name_1 on properties collection...');
+      await propColl.dropIndex('ownerId_1_name_1');
+      console.log('[Migration] Legacy index dropped successfully.');
+    }
+
+    await propColl.createIndex(
+      { ownerId: 1, name: 1 },
+      {
+        name: 'ownerId_1_name_1',
+        unique: true,
+        background: true,
+        partialFilterExpression: {
+          name: { $gt: '' },
+          deleted: false
+        }
+      }
+    );
+    indexesSynced = true;
+    console.log('[Migration] Partial unique index ownerId_1_name_1 verified successfully.');
+  } catch (err) {
+    console.error('[Migration] Index sync note:', err.message);
+  }
+};
 
 const connectToDatabase = async () => {
   if (mongoose.connection.readyState === 1) {
+    if (!indexesSynced) {
+      syncDatabaseIndexes().catch(() => {});
+    }
     return mongoose.connection;
   }
   if (!cachedDbPromise) {
@@ -73,8 +111,9 @@ const connectToDatabase = async () => {
       serverSelectionTimeoutMS: 15000,
       bufferCommands: false,
       maxPoolSize: 10,
-    }).then((m) => {
+    }).then(async (m) => {
       console.log('[Database Middleware] Connection established successfully!');
+      await syncDatabaseIndexes();
       return m;
     }).catch((err) => {
       console.error('[Database Middleware] Connection error:', err.message);

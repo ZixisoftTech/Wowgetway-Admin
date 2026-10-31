@@ -11510,6 +11510,9 @@ router.get('/homestay-owner/properties/draft', authenticateToken, async (req, re
           prop = mockPropertiesDatabase.find(p => p.ownerId === ownerId && ['Draft', 'Changes Requested'].includes(p.status) && !p.deleted);
         }
       }
+      if (!prop && isNew) {
+        prop = mockPropertiesDatabase.find(p => p.ownerId === ownerId && p.status === 'Draft' && !p.deleted && (!p.name || p.name === 'Untitled Property'));
+      }
       if (!prop) {
         prop = {
           _id: 'WG-PROP-' + Math.floor(100000 + Math.random() * 900000),
@@ -11597,6 +11600,15 @@ router.get('/homestay-owner/properties/draft', authenticateToken, async (req, re
         prop = await Property.findOne({ ownerId, status: { $in: ['Draft', 'Changes Requested'] }, deleted: false });
       }
     }
+    if (!prop && isNew) {
+      // Reuse an existing untouched draft for this owner if available
+      prop = await Property.findOne({
+        ownerId,
+        status: 'Draft',
+        deleted: false,
+        $or: [{ name: '' }, { name: 'Untitled Property' }]
+      }).sort({ updatedAt: -1 });
+    }
     if (!prop) {
       if (!isSuperAdmin) {
         const ownerDoc = await HomestayOwner.findById(ownerId);
@@ -11612,8 +11624,13 @@ router.get('/homestay-owner/properties/draft', authenticateToken, async (req, re
         }
       }
 
-      const count = await Property.countDocuments();
-      const propIdStr = `WG-PROP-${String(count + 1).padStart(6, '0')}`;
+      let candidateNum = (await Property.countDocuments()) + 1;
+      let propIdStr = `WG-PROP-${String(candidateNum).padStart(6, '0')}`;
+      while (await Property.exists({ propertyId: propIdStr })) {
+        candidateNum++;
+        propIdStr = `WG-PROP-${String(candidateNum).padStart(6, '0')}`;
+      }
+
       prop = new Property({
         propertyId: propIdStr,
         name: '',
@@ -11630,7 +11647,18 @@ router.get('/homestay-owner/properties/draft', authenticateToken, async (req, re
         status: 'Draft',
         currentStep: 1
       });
-      await prop.save();
+
+      try {
+        await prop.save();
+      } catch (saveErr) {
+        if (saveErr.code === 11000) {
+          console.warn('[Draft Route] Handled duplicate key, finding existing draft:', saveErr.message);
+          prop = await Property.findOne({ ownerId, status: 'Draft', deleted: false }).sort({ updatedAt: -1 });
+          if (!prop) throw saveErr;
+        } else {
+          throw saveErr;
+        }
+      }
     }
 
     const gallery = await PropertyGallery.findOne({ propertyId: prop._id }) || { coverImage: '', images: [] };

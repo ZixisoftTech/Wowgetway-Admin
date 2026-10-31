@@ -1253,8 +1253,17 @@ const PropertySchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-// Ensure unique property name per owner
-PropertySchema.index({ ownerId: 1, name: 1 }, { unique: true });
+// Ensure unique property name per owner (ignoring blank names and deleted homestays)
+PropertySchema.index(
+  { ownerId: 1, name: 1 }, 
+  { 
+    unique: true, 
+    partialFilterExpression: { 
+      name: { $gt: '' }, 
+      deleted: false 
+    } 
+  }
+);
 
 const PropertyGallerySchema = new mongoose.Schema({
   propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property', required: true, unique: true },

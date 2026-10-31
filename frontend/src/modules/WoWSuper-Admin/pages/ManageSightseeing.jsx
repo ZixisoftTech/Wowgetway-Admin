@@ -1038,7 +1038,7 @@ function DetailsView({ pkg, onBack, onEdit, onPreviewItinerary, onDuplicate, onD
           <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Bookings Performance</h3>
             <div className="h-40">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <AreaChart data={monthlyStatsData}>
                   <defs>
                     <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">

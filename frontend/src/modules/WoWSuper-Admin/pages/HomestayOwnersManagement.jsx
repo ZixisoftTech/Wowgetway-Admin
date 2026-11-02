@@ -281,6 +281,8 @@ export default function HomestayOwnersManagement() {
       localStorage.setItem('homestayOwnerToken', res.data.token);
       localStorage.setItem('homestayOwnerUser', JSON.stringify(ownerData));
       localStorage.setItem('isImpersonated', 'true');
+      localStorage.removeItem('wow_homestay_selected_property');
+      localStorage.removeItem('propertySetupDraft');
 
       // Dispatch token and details to homestayOwnerAuthSlice Redux store
       dispatch(ownerAuthSuccess({ token: res.data.token, user: ownerData }));

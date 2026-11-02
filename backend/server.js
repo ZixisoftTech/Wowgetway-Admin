@@ -64,6 +64,43 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 let cachedDbPromise = null;
 let indexesSynced = false;
 
+const reconcileOrphanedProperties = async (db) => {
+  try {
+    const owners = await db.collection('homestayowners').find({ status: { $ne: 'Deleted' } }).toArray();
+    for (const o of owners) {
+      const linkedIds = (o.properties || [])
+        .map(p => p._id || p.propertyId)
+        .filter(id => id && mongoose.isValidObjectId(id))
+        .map(id => new mongoose.Types.ObjectId(id));
+
+      const orConds = [];
+      if (linkedIds.length > 0) orConds.push({ _id: { $in: linkedIds } });
+      if (o.mobile) orConds.push({ ownerMobile: o.mobile });
+      if (o.email) orConds.push({ ownerEmail: new RegExp(`^${o.email.trim()}$`, 'i') });
+
+      if (orConds.length > 0) {
+        await db.collection('properties').updateMany(
+          {
+            deleted: false,
+            ownerId: { $ne: o._id },
+            $or: orConds
+          },
+          {
+            $set: {
+              ownerId: o._id,
+              ownerName: `${o.firstName || ''} ${o.lastName || ''}`.trim() || undefined,
+              ownerEmail: o.email || undefined
+            }
+          }
+        );
+      }
+    }
+    console.log('[Migration] Reconciled orphaned homestay property ownerIds successfully.');
+  } catch (err) {
+    console.warn('[Migration Note] Property reconciliation note:', err.message);
+  }
+};
+
 const syncDatabaseIndexes = async () => {
   if (indexesSynced) return;
   try {
@@ -93,6 +130,7 @@ const syncDatabaseIndexes = async () => {
     );
     indexesSynced = true;
     console.log('[Migration] Partial unique index ownerId_1_name_1 verified successfully.');
+    await reconcileOrphanedProperties(db);
   } catch (err) {
     console.error('[Migration] Index sync note:', err.message);
   }

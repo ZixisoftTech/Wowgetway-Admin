@@ -361,9 +361,18 @@ export default function Availability() {
       });
 
       setAvailabilityData(res.data);
-      if (res.data.property && !currentPropertyId) {
-        setCurrentPropertyId(res.data.property.id);
-        localStorage.setItem('wow_homestay_selected_property', res.data.property.id);
+      if (res.data.property) {
+        const pId = res.data.property.id || res.data.property._id;
+        setCurrentPropertyId(pId);
+        localStorage.setItem('wow_homestay_selected_property', pId);
+      } else if (res.data.allProperties && res.data.allProperties.length > 0) {
+        const first = res.data.allProperties[0];
+        const fId = first._id || first.id || first.propertyId;
+        setCurrentPropertyId(fId);
+        localStorage.setItem('wow_homestay_selected_property', fId);
+      } else {
+        setCurrentPropertyId('');
+        localStorage.removeItem('wow_homestay_selected_property');
       }
       if (res.data.allProperties) {
         setPropertiesList(res.data.allProperties);

@@ -3097,6 +3097,61 @@ const upload = multer({
   }
 });
 
+export async function getOwnerPropertyFilter(ownerId) {
+  try {
+    if (!ownerId) return { ownerId, deleted: false };
+    const owner = await HomestayOwner.findById(ownerId).select('_id mobile email properties firstName lastName').lean();
+    if (!owner) {
+      return { ownerId, deleted: false };
+    }
+
+    const linkedIds = (owner.properties || [])
+      .map(p => p._id || p.propertyId)
+      .filter(id => id && mongoose.isValidObjectId(id))
+      .map(id => new mongoose.Types.ObjectId(id));
+
+    const orConditions = [{ ownerId: owner._id }];
+    const syncFilters = [];
+
+    if (linkedIds.length > 0) {
+      orConditions.push({ _id: { $in: linkedIds } });
+      syncFilters.push({ _id: { $in: linkedIds } });
+    }
+    if (owner.mobile) {
+      orConditions.push({ ownerMobile: owner.mobile });
+      syncFilters.push({ ownerMobile: owner.mobile });
+    }
+    if (owner.email) {
+      orConditions.push({ ownerEmail: new RegExp(`^${owner.email.trim()}$`, 'i') });
+      syncFilters.push({ ownerEmail: new RegExp(`^${owner.email.trim()}$`, 'i') });
+    }
+
+    // Auto-sync ownerId in background to ensure database integrity
+    if (syncFilters.length > 0) {
+      Property.updateMany(
+        {
+          deleted: false,
+          ownerId: { $ne: owner._id },
+          $or: syncFilters
+        },
+        {
+          $set: {
+            ownerId: owner._id,
+            ownerName: `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || undefined
+          }
+        }
+      ).catch(() => {});
+    }
+
+    return {
+      deleted: false,
+      $or: orConditions
+    };
+  } catch (e) {
+    return { ownerId, deleted: false };
+  }
+}
+
 // Admin impersonate JWT generator
 router.post(['/owners/:id/impersonate', '/admin/homestay-owners/:id/impersonate'], authenticateToken, async (req, res) => {
   const userRole = (req.user?.role || '').trim();
@@ -3144,6 +3199,37 @@ router.post(['/owners/:id/impersonate', '/admin/homestay-owners/:id/impersonate'
         billingCycle: 'Yearly'
       };
       await owner.save();
+    }
+
+    // Auto-sync ownerId on any properties linked to this owner
+    try {
+      const linkedIds = (owner.properties || [])
+        .map(p => p._id || p.propertyId)
+        .filter(pid => pid && mongoose.isValidObjectId(pid))
+        .map(pid => new mongoose.Types.ObjectId(pid));
+
+      const syncFilters = [];
+      if (linkedIds.length > 0) syncFilters.push({ _id: { $in: linkedIds } });
+      if (owner.mobile) syncFilters.push({ ownerMobile: owner.mobile });
+      if (owner.email) syncFilters.push({ ownerEmail: new RegExp(`^${owner.email.trim()}$`, 'i') });
+
+      if (syncFilters.length > 0) {
+        await Property.updateMany(
+          {
+            deleted: false,
+            ownerId: { $ne: owner._id },
+            $or: syncFilters
+          },
+          {
+            $set: {
+              ownerId: owner._id,
+              ownerName: `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || undefined
+            }
+          }
+        );
+      }
+    } catch (syncErr) {
+      console.warn('[Impersonation AutoSync Note]:', syncErr.message);
     }
 
     const payload = {
@@ -3604,6 +3690,30 @@ router.post(['/owners', '/admin/homestay-owners'], authenticateToken, async (req
     await newOwner.save();
     logActivity(req, 'OWNER_CREATED', 'Super Admin Auth', `Created homestay owner: ${emailLower}`);
 
+    // Auto-link any matching properties created previously with this owner's mobile or in ownerData.properties
+    try {
+      const propNames = (ownerData.properties || []).map(p => p.propertyName).filter(Boolean);
+      await Property.updateMany(
+        {
+          deleted: false,
+          $or: [
+            { ownerMobile: mobileClean },
+            ...(propNames.length > 0 ? [{ name: { $in: propNames.map(n => new RegExp(`^${n.trim()}$`, 'i')) } }] : [])
+          ]
+        },
+        {
+          $set: {
+            ownerId: newOwner._id,
+            ownerName: `${newOwner.firstName || ''} ${newOwner.lastName || ''}`.trim() || undefined,
+            ownerMobile: mobileClean,
+            ownerEmail: emailLower
+          }
+        }
+      );
+    } catch (linkErr) {
+      console.warn('[Owner Create AutoLink Note]:', linkErr.message);
+    }
+
     // Send Welcome Email asynchronously
     try {
       let smtp = mockSmtpSettings;
@@ -3907,6 +4017,23 @@ router.post(['/owners/:id/link-property', '/admin/homestay-owners/:id/link-prope
     });
 
     await owner.save();
+
+    // Auto-update any matching Property document's ownerId to this owner
+    try {
+      await Property.updateMany(
+        {
+          name: new RegExp(`^${propertyName.trim()}$`, 'i'),
+          deleted: false
+        },
+        {
+          $set: {
+            ownerId: owner._id,
+            ownerName: `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || undefined,
+            ownerMobile: owner.mobile || undefined
+          }
+        }
+      );
+    } catch (e) {}
     logActivity(req, 'PROPERTY_LINKED', 'Super Admin Auth', `Linked property ${propertyName} to ${owner.email}`);
     res.json(owner);
   } catch (error) {
@@ -12076,12 +12203,48 @@ router.post('/homestay-owner/properties/save-step', authenticateToken, async (re
       }
 
       let targetOwnerId = prop.ownerId || req.user._id;
-      if (isSuperAdmin && ownerId) {
-        targetOwnerId = ownerId;
-      } else if (isSuperAdmin && email) {
-        const matchedOwner = await HomestayOwner.findOne({ email: new RegExp(`^${email.trim()}$`, 'i'), status: { $ne: 'Deleted' } });
+      let matchedOwner = null;
+      if (isSuperAdmin) {
+        if (ownerId && String(ownerId) !== String(req.user._id)) {
+          matchedOwner = await HomestayOwner.findById(ownerId);
+        }
+        if (!matchedOwner && phone) {
+          const cleanP = String(phone).replace(/\s+/g, '').replace(/^\+91/, '').replace(/^91/, '');
+          matchedOwner = await HomestayOwner.findOne({ 
+            $or: [{ mobile: phone.trim() }, { mobile: cleanP }, { whatsApp: cleanP }],
+            status: { $ne: 'Deleted' } 
+          });
+        }
+        if (!matchedOwner && email && email !== req.user.email) {
+          matchedOwner = await HomestayOwner.findOne({ email: new RegExp(`^${email.trim()}$`, 'i'), status: { $ne: 'Deleted' } });
+        }
+        if (!matchedOwner && ownerName && ownerName !== 'Super Admin') {
+          matchedOwner = await HomestayOwner.findOne({
+            $or: [
+              { firstName: new RegExp(`^${ownerName.trim()}$`, 'i') },
+              { $expr: { $eq: [{ $concat: ['$firstName', ' ', '$lastName'] }, ownerName.trim()] } }
+            ],
+            status: { $ne: 'Deleted' }
+          });
+        }
+
         if (matchedOwner) {
           targetOwnerId = matchedOwner._id;
+          // Sync into owner.properties array if not already present
+          const hasProp = (matchedOwner.properties || []).some(p => String(p._id) === String(propertyId) || String(p.propertyId) === String(prop.propertyId));
+          if (!hasProp) {
+            matchedOwner.properties = matchedOwner.properties || [];
+            matchedOwner.properties.push({
+              _id: prop._id,
+              propertyId: prop.propertyId,
+              propertyName: name.trim(),
+              type: type || 'Homestay',
+              location: [city, state].filter(Boolean).join(', ') || address,
+              status: prop.status || 'Active',
+              bookings: 0
+            });
+            await matchedOwner.save();
+          }
         }
       }
 
@@ -12505,7 +12668,8 @@ router.get('/homestay-owner/properties', authenticateToken, async (req, res) => 
     if (!isMongoConnected()) {
       list = isSuperAdmin ? mockPropertiesDatabase.filter(p => !p.deleted) : mockPropertiesDatabase.filter(p => String(p.ownerId) === String(ownerId) && !p.deleted);
     } else {
-      list = await Property.find(isSuperAdmin ? { deleted: false } : { ownerId, deleted: false }).lean().sort({ createdAt: -1 });
+      const filter = isSuperAdmin ? { deleted: false } : await getOwnerPropertyFilter(ownerId);
+      list = await Property.find(filter).lean().sort({ createdAt: -1 });
     }
 
     const enrichedList = [];
@@ -12910,20 +13074,18 @@ router.get('/homestay-owner/availability', authenticateToken, async (req, res) =
 
     // 1. Resolve Property Context
     let propertyId = req.query.propertyId;
-    let propQuery = { deleted: false };
-    if (!isSuperAdmin) propQuery.ownerId = ownerId;
+    let propQuery = isSuperAdmin ? { deleted: false } : await getOwnerPropertyFilter(ownerId);
 
     let property;
     if (propertyId) {
-      propQuery._id = propertyId;
-      property = await Property.findOne(propQuery);
+      property = await Property.findOne({ ...propQuery, _id: propertyId });
     } else {
       // Default to first approved/active property or fallback to latest
       property = await Property.findOne({ ...propQuery, status: { $in: ['Approved', 'Active'] } }) || await Property.findOne(propQuery).sort({ createdAt: -1 });
     }
 
     // Also get all properties owned by this owner for dropdown context
-    const rawOwnerProperties = await Property.find(isSuperAdmin ? { deleted: false } : { ownerId, deleted: false }, '_id propertyId name status city state').lean();
+    const rawOwnerProperties = await Property.find(propQuery, '_id propertyId name status city state').lean();
     const allOwnerProperties = [];
     for (const p of rawOwnerProperties) {
       const pRooms = await PropertyRooms.find({ propertyId: p._id });
@@ -13818,7 +13980,8 @@ router.get('/homestay-owner/bookings', authenticateToken, async (req, res) => {
     const ownerId = req.user._id || req.user.id;
     const { propertyId, status, search, startDate, endDate, month, year } = req.query;
 
-    const properties = await Property.find({ ownerId, deleted: false }).select('_id name');
+    const filter = await getOwnerPropertyFilter(ownerId);
+    const properties = await Property.find(filter).select('_id name');
     const propertyIds = properties.map(p => p._id);
 
     let propFilter = { $in: propertyIds };
@@ -14724,7 +14887,8 @@ router.get('/homestay-owner/settings/payments', authenticateToken, async (req, r
     if (!owner) return res.status(404).json({ error: 'NotFound', message: 'Owner not found' });
 
     // Fetch all active homestays for this owner
-    const properties = await Property.find({ ownerId, deleted: false }).select('_id name propertyId city state address paymentSettings');
+    const filter = await getOwnerPropertyFilter(ownerId);
+    const properties = await Property.find(filter).select('_id name propertyId city state address paymentSettings');
 
     // Determine which property to read settings for
     const reqPropId = req.query.propertyId;
@@ -14873,7 +15037,8 @@ router.get('/homestay-owner/guests', authenticateToken, async (req, res) => {
     const ownerId = req.user._id || req.user.id;
     const { propertyId, month, year, startDate, endDate, search } = req.query;
 
-    const properties = await Property.find({ ownerId, deleted: false }).select('_id name');
+    const filter = await getOwnerPropertyFilter(ownerId);
+    const properties = await Property.find(filter).select('_id name');
     const propertyIds = properties.map(p => p._id);
 
     let propFilter = { $in: propertyIds };
@@ -15520,7 +15685,8 @@ router.get('/homestay-owner/revenue', authenticateToken, async (req, res) => {
     const ownerId = req.user._id || req.user.id;
     const { propertyId, timeframe = 'Day-wise', year = new Date().getFullYear(), month = (new Date().getMonth() + 1), day, week } = req.query;
 
-    const properties = await Property.find({ ownerId, deleted: false }).select('_id name');
+    const filter = await getOwnerPropertyFilter(ownerId);
+    const properties = await Property.find(filter).select('_id name');
     const allPropIds = properties.map(p => p._id);
 
     let propFilter = { $in: allPropIds };
@@ -15707,7 +15873,8 @@ router.get('/homestay-owner/dashboard', authenticateToken, async (req, res) => {
     const { propertyId, timeframe = 'Day-wise', year, month, day, week } = req.query;
 
     const owner = await HomestayOwner.findById(ownerId).select('firstName lastName email profilePhoto');
-    const properties = await Property.find({ ownerId, deleted: false }).select('_id name city state');
+    const filter = await getOwnerPropertyFilter(ownerId);
+    const properties = await Property.find(filter).select('_id name city state');
     const allPropIds = properties.map(p => p._id);
 
     let propFilter = { $in: allPropIds };

@@ -23,7 +23,8 @@ import {
   Receipt,
   Sparkles,
   AlertCircle,
-  Tag
+  Tag,
+  Mail
 } from 'lucide-react';
 
 const getApiUrl = (path) => {

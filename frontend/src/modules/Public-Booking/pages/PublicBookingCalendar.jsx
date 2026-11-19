@@ -45,7 +45,8 @@ import {
   Flame,
   Waves,
   Coffee,
-  Tag
+  Tag,
+  ExternalLink
 } from 'lucide-react';
 import { generatePdfFromElement } from '../../../utils/pdfExporter';
 

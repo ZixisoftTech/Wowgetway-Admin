@@ -1250,8 +1250,10 @@ const PropertySchema = new mongoose.Schema({
     designation: { type: String, default: '' },
     stampImage: { type: String, default: '' },
     signatureImage: { type: String, default: '' }
-  }
-}, { timestamps: true });
+  },
+  allowedMealPlans: { type: [String], default: ['EP', 'CP', 'MAP', 'AP'] },
+  termsAndConditions: { type: String, default: '' }
+}, { timestamps: true, strict: false });
 
 // Ensure unique property name per owner (ignoring blank names and deleted homestays)
 PropertySchema.index(

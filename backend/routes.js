@@ -15084,7 +15084,7 @@ router.put('/homestay-owner/properties/:id/allowed-meal-plans', authenticateToke
     }
     const prop = await Property.findByIdAndUpdate(id, { allowedMealPlans: sanitizedPlans }, { new: true });
     if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
-    res.json({ success: true, allowedMealPlans: prop.allowedMealPlans, message: 'Meal plan restrictions applied successfully.' });
+    res.json({ success: true, allowedMealPlans: prop.allowedMealPlans || sanitizedPlans, message: 'Meal plan restrictions applied successfully.' });
   } catch (err) {
     res.status(500).json({ error: 'ServerError', message: err.message });
   }
@@ -15114,9 +15114,10 @@ router.put('/homestay-owner/properties/:id/terms', authenticateToken, async (req
   try {
     const { id } = req.params;
     const { termsAndConditions } = req.body;
-    const prop = await Property.findByIdAndUpdate(id, { termsAndConditions: String(termsAndConditions || '').trim() }, { new: true });
+    const cleanedTerms = String(termsAndConditions || '').trim();
+    const prop = await Property.findByIdAndUpdate(id, { termsAndConditions: cleanedTerms }, { new: true });
     if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found' });
-    res.json({ success: true, termsAndConditions: prop.termsAndConditions, message: 'Terms & Conditions saved successfully.' });
+    res.json({ success: true, termsAndConditions: prop.termsAndConditions || cleanedTerms, message: 'Terms & Conditions saved successfully.' });
   } catch (err) {
     res.status(500).json({ error: 'ServerError', message: err.message });
   }

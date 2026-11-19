@@ -28,6 +28,7 @@ import StaffManagement from '../modules/Homestay-Owner-Admin/pages/StaffManageme
 import Notifications from '../modules/Homestay-Owner-Admin/pages/Notifications.jsx';
 import ManageSubscription from '../modules/Homestay-Owner-Admin/pages/ManageSubscription.jsx';
 import SignaturesStamps from '../modules/Homestay-Owner-Admin/pages/SignaturesStamps.jsx';
+import TermsAndConditions from '../modules/Homestay-Owner-Admin/pages/TermsAndConditions.jsx';
 import { HomestayOwnerProtectedRoute } from './routeGuards.jsx';
 
 export const getHomestayOwnerRoutes = () => (
@@ -74,6 +75,8 @@ export const getHomestayOwnerRoutes = () => (
     <Route path="notifications" element={<Notifications />} />
     <Route path="signatures-stamps" element={<SignaturesStamps />} />
     <Route path="coupons" element={<Coupons />} />
+    <Route path="terms" element={<TermsAndConditions />} />
+    <Route path="terms-and-conditions" element={<TermsAndConditions />} />
     <Route path="subscription" element={<ManageSubscription />} />
 
     {/* Inventory Sub-routes */}

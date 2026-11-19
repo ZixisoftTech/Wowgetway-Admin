@@ -187,7 +187,7 @@ export default function ManageHomestays() {
       const response = await axios.get(`${API_HOMESTAYS_URL}/${selectedId}`);
       return response.data;
     },
-    enabled: !!selectedId && (viewMode === 'details' || viewMode === 'edit')
+    enabled: !!selectedId && (viewMode === 'details' || viewMode === 'edit' || viewMode === 'review')
   });
 
   // 4. Fetch Owners list (needed for owner select dropdown)
@@ -1003,9 +1003,9 @@ export default function ManageHomestays() {
                               )}
                               {(prop.status === 'Pending Approval' || prop.rawStatus === 'Submitted For Review') && (
                                 <button
-                                  onClick={() => { setSelectedId(prop._id); setViewMode('details'); }}
-                                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm"
-                                  title="Review property submission"
+                                  onClick={() => { setSelectedId(prop._id); setViewMode('review'); }}
+                                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm animate-pulse hover:animate-none"
+                                  title="Review property submission and documents"
                                 >
                                   Review
                                 </button>
@@ -1211,9 +1211,117 @@ export default function ManageHomestays() {
         />
       )}
 
-      {/* 3. PROPERTY DETAILS VIEW */}
-      {viewMode === 'details' && selectedId && propertyDetails && (
+      {/* LOADING STATE FOR DETAILS / REVIEW VIEW */}
+      {(viewMode === 'details' || viewMode === 'review') && detailsLoading && (
+        <div className="bg-white rounded-3xl p-16 text-center shadow-xs border border-slate-100 flex flex-col items-center justify-center space-y-3">
+          <div className="w-10 h-10 border-3 border-[#D80032] border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Loading Property Details & Documents...</span>
+        </div>
+      )}
+
+      {/* 3. PROPERTY DETAILS & REVIEW VIEW */}
+      {(viewMode === 'details' || viewMode === 'review') && selectedId && propertyDetails && (
         <motion.div variants={pageVariants} initial="hidden" animate="show" className="space-y-6">
+          
+          {/* Dedicated Review Mode Action Banner (Change 3) */}
+          {viewMode === 'review' && (
+            <div className="bg-linear-to-r from-slate-900 to-slate-800 text-white rounded-3xl p-6 sm:p-7 shadow-lg border border-slate-700 space-y-5">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-700/80 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center shrink-0">
+                    <ShieldAlert size={20} />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-rose-400">Super Admin Review Console</span>
+                    <h2 className="text-lg font-black text-white m-0 flex items-center gap-2">
+                      <span>Verifying: {propertyDetails.name}</span>
+                      <span className="text-xs font-mono font-normal text-slate-400">({propertyDetails.propertyId || `#${propertyDetails._id.slice(-6)}`})</span>
+                    </h2>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                    propertyDetails.status === 'Approved' || propertyDetails.status === 'Active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                    'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  }`}>
+                    Current Status: {propertyDetails.status}
+                  </span>
+                </div>
+              </div>
+
+              {/* Review Checklist Summary Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div className="bg-slate-800/60 border border-slate-700/60 p-3 rounded-2xl">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Host / Owner</span>
+                  <p className="font-extrabold text-white mt-1 m-0 truncate">{propertyDetails.ownerName || 'Unassigned'}</p>
+                  <span className="text-[10px] text-slate-400">{propertyDetails.ownerMobile || 'No phone'}</span>
+                </div>
+                <div className="bg-slate-800/60 border border-slate-700/60 p-3 rounded-2xl">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Location</span>
+                  <p className="font-extrabold text-white mt-1 m-0 truncate">{propertyDetails.city || '—'}, {propertyDetails.state || propertyDetails.region || '—'}</p>
+                  <span className="text-[10px] text-slate-400">{propertyDetails.type || 'Homestay'}</span>
+                </div>
+                <div className="bg-slate-800/60 border border-slate-700/60 p-3 rounded-2xl">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Inventory</span>
+                  <p className="font-extrabold text-white mt-1 m-0">{propertyDetails.rooms?.length || 0} Categories</p>
+                  <span className="text-[10px] text-slate-400">{propertyDetails.rooms?.reduce((acc, c) => acc + (c.numberOfRooms || 0), 0) || propertyDetails.totalRooms || 0} Total Rooms</span>
+                </div>
+                <div className="bg-slate-800/60 border border-slate-700/60 p-3 rounded-2xl">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Official KYC</span>
+                  <p className="font-extrabold text-white mt-1 m-0 truncate">
+                    {propertyDetails.businessDetails?.gstNumber || propertyDetails.gstNumber ? 'GST Provided' : 'No GST'}
+                  </p>
+                  <span className="text-[10px] text-slate-400">
+                    {propertyDetails.businessDetails?.stampImage || propertyDetails.businessDetails?.signatureImage ? 'Stamp/Signature Attached' : 'No Stamp'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Review Comment and Actions */}
+              <div className="space-y-3 pt-2">
+                <label className="text-[10px] font-bold text-slate-300 uppercase block">
+                  Review Decision Feedback / Audit Note (Required for Rejection or Requesting Changes):
+                </label>
+                <textarea
+                  rows={2}
+                  value={reviewComment}
+                  onChange={(e) => setReviewComment(e.target.value)}
+                  placeholder="Type verification notes, missing document requirements, or approval remarks..."
+                  className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-2xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:border-rose-500"
+                />
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                  <span className="text-[11px] text-slate-400">
+                    Check all submitted details below before publishing live.
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleReviewAction('Changes Requested')}
+                      className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition-all shadow-sm"
+                    >
+                      Request Changes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleReviewAction('Rejected')}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition-all shadow-sm"
+                    >
+                      Reject Submission
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleReviewAction('Approved')}
+                      className="px-5 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition-all shadow-md"
+                    >
+                      ✓ Approve & Publish Live
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* Header Metadata Navigation Row */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-150">
@@ -1574,10 +1682,26 @@ export default function ManageHomestays() {
                       // Group rates by Category and Season
                       const grouped = {};
                       propertyDetails.rates.forEach(r => {
-                        const key = `${r.roomCategory} | ${r.season}`;
+                        const key = `${r.roomCategory || 'Standard'} | ${r.season || 'Regular Season'}`;
                         if (!grouped[key]) grouped[key] = [];
                         grouped[key].push(r);
                       });
+
+                      const formatRateValue = (val) => {
+                        if (val === undefined || val === null || val === '') return '—';
+                        const num = Number(val);
+                        if (isNaN(num) || num === 0) return '—';
+                        return `₹${num.toLocaleString('en-IN')}`;
+                      };
+
+                      const isPlanConfigured = (pRates) => {
+                        if (!pRates) return false;
+                        const b2b = Number(pRates.b2bRate || 0);
+                        const b2c = Number(pRates.b2cRate || 0);
+                        const extraB2b = Number(pRates.b2bExtraPerson || 0);
+                        const extraB2c = Number(pRates.b2cExtraPerson || 0);
+                        return b2b > 0 || b2c > 0 || extraB2b > 0 || extraB2c > 0;
+                      };
 
                       return Object.keys(grouped).map(key => {
                         const ratesList = grouped[key];
@@ -1590,31 +1714,36 @@ export default function ManageHomestays() {
                             <div className="overflow-x-auto">
                               <table className="w-full text-[11px] text-left border-collapse">
                                 <thead>
-                                  <tr className="bg-slate-100/30 text-[9px] font-extrabold text-slate-400 border-b border-slate-200">
-                                    <th className="p-2">Occupancy</th>
-                                    <th className="p-2">Plan</th>
-                                    <th className="p-2 text-center">B2B Rate</th>
-                                    <th className="p-2 text-center">B2C Rate</th>
-                                    <th className="p-2 text-center">Extra B2B</th>
-                                    <th className="p-2 text-center">Extra B2C</th>
+                                  <tr className="bg-slate-100/50 text-[9px] font-extrabold text-slate-400 border-b border-slate-200">
+                                    <th className="p-2.5">Occupancy</th>
+                                    <th className="p-2.5">Plan</th>
+                                    <th className="p-2.5 text-center">B2B Rate</th>
+                                    <th className="p-2.5 text-center">B2C Rate</th>
+                                    <th className="p-2.5 text-center">Extra B2B</th>
+                                    <th className="p-2.5 text-center">Extra B2C</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                                  {ratesList.map(r => (
-                                    ['EP', 'CP', 'MAP', 'AP'].map(plan => {
+                                  {ratesList.map(r => {
+                                    const allPlans = ['EP', 'CP', 'MAP', 'AP'];
+                                    const activePlans = allPlans.filter(p => isPlanConfigured(r.planRates?.[p]));
+                                    // If no plan configured for this row, show EP with dashes instead of 4 blank zero rows
+                                    const plansToRender = activePlans.length > 0 ? activePlans : ['EP'];
+
+                                    return plansToRender.map(plan => {
                                       const pRates = r.planRates?.[plan] || {};
                                       return (
                                         <tr key={`${r.occupancy}-${plan}`} className="hover:bg-slate-50/50">
-                                          <td className="p-2 font-bold">{r.occupancy.split(' ')[0]}</td>
-                                          <td className="p-2 font-extrabold text-blue-600">{plan}</td>
-                                          <td className="p-2 text-center font-mono">₹{pRates.b2bRate || 0}</td>
-                                          <td className="p-2 text-center font-mono">₹{pRates.b2cRate || 0}</td>
-                                          <td className="p-2 text-center font-mono text-slate-450">₹{pRates.b2bExtraPerson || 0}</td>
-                                          <td className="p-2 text-center font-mono text-slate-450">₹{pRates.b2cExtraPerson || 0}</td>
+                                          <td className="p-2.5 font-bold">{r.occupancy ? r.occupancy.split(' ')[0] : 'Standard'}</td>
+                                          <td className="p-2.5 font-extrabold text-blue-600">{plan}</td>
+                                          <td className="p-2.5 text-center font-mono">{formatRateValue(pRates.b2bRate)}</td>
+                                          <td className="p-2.5 text-center font-mono">{formatRateValue(pRates.b2cRate)}</td>
+                                          <td className="p-2.5 text-center font-mono text-slate-400">{formatRateValue(pRates.b2bExtraPerson)}</td>
+                                          <td className="p-2.5 text-center font-mono text-slate-400">{formatRateValue(pRates.b2cExtraPerson)}</td>
                                         </tr>
                                       );
-                                    })
-                                  ))}
+                                    });
+                                  })}
                                 </tbody>
                               </table>
                             </div>

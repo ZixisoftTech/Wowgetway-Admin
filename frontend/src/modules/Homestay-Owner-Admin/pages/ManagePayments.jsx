@@ -63,6 +63,10 @@ export default function ManagePayments() {
   const [advanceType, setAdvanceType] = useState('percent'); // percent / fixed
   const [advanceAmount, setAdvanceAmount] = useState(0);
 
+  // Flat Tax Rates for B2B & B2C (HO-3 matching Reference 3A)
+  const [b2bTaxRate, setB2bTaxRate] = useState(5);
+  const [b2cTaxRate, setB2cTaxRate] = useState(12);
+
   // Modals
   const [showBankModal, setShowBankModal] = useState(false);
   const [showUpiModal, setShowUpiModal] = useState(false);
@@ -116,6 +120,9 @@ export default function ManagePayments() {
         setAdvancePercent(ps.advancePercent !== undefined ? ps.advancePercent : 30);
         setAdvanceType(ps.advanceType || 'percent');
         setAdvanceAmount(ps.advanceAmount || 0);
+
+        setB2bTaxRate(ps.b2bTaxRate !== undefined ? ps.b2bTaxRate : 5);
+        setB2cTaxRate(ps.b2cTaxRate !== undefined ? ps.b2cTaxRate : 12);
       }
     } catch (err) {
       console.error('Failed to load payment settings:', err);
@@ -141,6 +148,8 @@ export default function ManagePayments() {
         advancePercent,
         advanceType,
         advanceAmount,
+        b2bTaxRate,
+        b2cTaxRate,
         ...dataToUpdate
       };
 
@@ -266,7 +275,7 @@ export default function ManagePayments() {
   };
 
   const handleSaveAdvanceSettings = async () => {
-    await saveSettingsToBackend({ advancePercent, advanceType, advanceAmount });
+    await saveSettingsToBackend({ advancePercent, advanceType, advanceAmount, b2bTaxRate, b2cTaxRate });
   };
 
   // Dynamic QR Code link when no custom uploaded QR image
@@ -614,6 +623,111 @@ export default function ManagePayments() {
                 placeholder="e.g. 2000"
               />
               <span className="text-xs font-bold text-slate-400">Flat Fee</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Flat Tax Rate (Under Total Cost) - HO-3 matching Reference 3A */}
+        <div className="border-t border-slate-100 pt-5 space-y-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-black text-xs shrink-0">
+              %
+            </div>
+            <div>
+              <span className="text-xs font-black text-slate-800 uppercase tracking-wider block">
+                FLAT TAX RATE (Under Total Cost)
+              </span>
+              <span className="text-[10px] text-slate-400 font-semibold block">
+                Set a flat tax percentage that will be added to the Total Cost for B2B and B2C bookings.
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* B2B Tax Rate Card */}
+            <div className="p-4 rounded-2xl border border-slate-200 bg-white flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center text-rose-600 shrink-0">
+                  <Users size={16} />
+                </div>
+                <div>
+                  <span className="text-xs font-black text-slate-900 block leading-tight">B2B Tax Rate</span>
+                  <span className="text-[10px] text-slate-400 font-medium block leading-tight mt-0.5">
+                    Additional tax % to be added for B2B bookings.
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 border border-slate-200 rounded-xl p-1 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => setB2bTaxRate(prev => Math.max(0, prev - 1))}
+                  className="w-7 h-7 rounded-lg bg-white hover:bg-slate-200 flex items-center justify-center text-slate-700 font-black text-xs cursor-pointer border-none shadow-2xs"
+                >
+                  –
+                </button>
+                <div className="flex items-center px-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={b2bTaxRate}
+                    onChange={(e) => setB2bTaxRate(Math.max(0, Math.min(100, Number(e.target.value))))}
+                    className="w-8 text-center text-xs font-black text-slate-900 border-none bg-transparent focus:outline-none"
+                  />
+                  <span className="text-xs font-bold text-slate-500">%</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setB2bTaxRate(prev => Math.min(100, prev + 1))}
+                  className="w-7 h-7 rounded-lg bg-white hover:bg-slate-200 flex items-center justify-center text-slate-700 font-black text-xs cursor-pointer border-none shadow-2xs"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            {/* B2C Tax Rate Card */}
+            <div className="p-4 rounded-2xl border border-slate-200 bg-white flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center text-rose-600 shrink-0">
+                  <User size={16} />
+                </div>
+                <div>
+                  <span className="text-xs font-black text-slate-900 block leading-tight">B2C Tax Rate</span>
+                  <span className="text-[10px] text-slate-400 font-medium block leading-tight mt-0.5">
+                    Additional tax % to be added for B2C bookings.
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 border border-slate-200 rounded-xl p-1 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => setB2cTaxRate(prev => Math.max(0, prev - 1))}
+                  className="w-7 h-7 rounded-lg bg-white hover:bg-slate-200 flex items-center justify-center text-slate-700 font-black text-xs cursor-pointer border-none shadow-2xs"
+                >
+                  –
+                </button>
+                <div className="flex items-center px-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={b2cTaxRate}
+                    onChange={(e) => setB2cTaxRate(Math.max(0, Math.min(100, Number(e.target.value))))}
+                    className="w-8 text-center text-xs font-black text-slate-900 border-none bg-transparent focus:outline-none"
+                  />
+                  <span className="text-xs font-bold text-slate-500">%</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setB2cTaxRate(prev => Math.min(100, prev + 1))}
+                  className="w-7 h-7 rounded-lg bg-white hover:bg-slate-200 flex items-center justify-center text-slate-700 font-black text-xs cursor-pointer border-none shadow-2xs"
+                >
+                  +
+                </button>
+              </div>
             </div>
           </div>
         </div>

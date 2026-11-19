@@ -11,6 +11,7 @@ import OwnerResetPassword from '../modules/Homestay-Owner-Admin/pages/ResetPassw
 import { getSuperAdminRoutes } from './superAdminRoutes.jsx';
 import { getHomestayOwnerRoutes } from './homestayOwnerRoutes.jsx';
 import PublicBookingCalendar from '../modules/Public-Booking/pages/PublicBookingCalendar.jsx';
+import PublicPropertyTerms from '../modules/Public-Booking/pages/PublicPropertyTerms.jsx';
 import BookingQuotation from '../modules/Homestay-Owner-Admin/pages/BookingQuotation.jsx';
 import BookingConfirmationSlip from '../modules/Homestay-Owner-Admin/pages/BookingConfirmationSlip.jsx';
 import BookingTaxInvoice from '../modules/Homestay-Owner-Admin/pages/BookingTaxInvoice.jsx';
@@ -69,6 +70,7 @@ export default function AppRouter() {
         {/* Public / Standalone Booking Routes (NO LOGIN, NO SIDEBAR) */}
         <Route path="/book/:token" element={<PublicBookingCalendar />} />
         <Route path="/book/property/:propertyId" element={<PublicBookingCalendar />} />
+        <Route path="/terms/:propertyId" element={<PublicPropertyTerms />} />
         <Route path="/quotation/:requestId" element={<BookingQuotation />} />
         <Route path="/confirmation-slip/:requestId" element={<BookingConfirmationSlip />} />
         <Route path="/invoice/:requestId" element={<BookingTaxInvoice />} />

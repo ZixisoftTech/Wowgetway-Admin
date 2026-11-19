@@ -1612,18 +1612,26 @@ export default function PublicBookingCalendar() {
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          {/* Meal Plan */}
+                          {/* Meal Plan (HO-1 & HO-6: Clean names, restricted by allowedMealPlans) */}
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 block uppercase mb-1">Meal Plan</label>
                             <select
-                              value={rm.mealPlan || 'EP'}
+                              value={rm.mealPlan || (property?.allowedMealPlans?.[0] || 'EP')}
                               onChange={(e) => updateRoomMealPlan(idx, e.target.value)}
-                              className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
                             >
-                              <option value="EP">EP — Room Only</option>
-                              <option value="CP">CP — Breakfast (+₹500)</option>
-                              <option value="MAP">MAP — Breakfast & Dinner (+₹800)</option>
-                              <option value="AP">AP — All Meals (+₹1,200)</option>
+                              {(!property?.allowedMealPlans || property.allowedMealPlans.includes('EP')) && (
+                                <option value="EP">EP — Room Only</option>
+                              )}
+                              {(!property?.allowedMealPlans || property.allowedMealPlans.includes('CP')) && (
+                                <option value="CP">CP — Breakfast Only</option>
+                              )}
+                              {(!property?.allowedMealPlans || property.allowedMealPlans.includes('MAP')) && (
+                                <option value="MAP">MAP — Breakfast & Dinner</option>
+                              )}
+                              {(!property?.allowedMealPlans || property.allowedMealPlans.includes('AP')) && (
+                                <option value="AP">AP — All Meals</option>
+                              )}
                             </select>
                           </div>
 
@@ -1942,12 +1950,6 @@ export default function PublicBookingCalendar() {
                       {selectedRooms.length ? `${selectedRooms.length} Room(s)` : 'None'}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Pricing Tier:</span>
-                    <span className="font-bold text-slate-800">
-                      {linkType === 'agent' ? 'B2B Partner' : 'B2C Direct'}
-                    </span>
-                  </div>
                 </div>
 
                 {/* Coupon / Promo Code Section */}
@@ -2050,7 +2052,7 @@ export default function PublicBookingCalendar() {
                     </div>
                   )}
                   <div className="flex justify-between">
-                    <span className="text-slate-500 font-medium">GST / Taxes (12%):</span>
+                    <span className="text-slate-500 font-medium">Taxes / Fees ({calculatedPricing.taxRate || (linkType === 'agent' ? 5 : 12)}%):</span>
                     <span className="font-bold text-slate-800">₹{Number(calculatedPricing.tax).toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between pt-2 border-t border-slate-200 text-sm font-black text-slate-900">
@@ -2066,6 +2068,21 @@ export default function PublicBookingCalendar() {
                     <span>₹{Number(remainingBalance).toLocaleString()}</span>
                   </div>
                 </div>
+
+                {/* Terms and Conditions Link (HO-4) */}
+                {property?._id && (
+                  <div className="pt-2 text-center">
+                    <a
+                      href={`/terms/${property._id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:underline inline-flex items-center gap-1"
+                    >
+                      <span>Read Homestay Terms & Conditions</span>
+                      <ExternalLink size={11} />
+                    </a>
+                  </div>
+                )}
 
                 {/* CONFIRM & SUBMIT REQUEST BUTTON */}
                 <div className="pt-2">
@@ -2138,93 +2155,131 @@ export default function PublicBookingCalendar() {
               </div>
             </div>
 
-            {/* Slip Printable Content */}
-            <div ref={slipPrintRef} className="p-4 sm:p-6 bg-white border border-slate-200 rounded-2xl space-y-6 text-slate-900 text-xs">
+            {/* Slip Printable Content (HO-7: Fixed layout and typography) */}
+            <div 
+              ref={slipPrintRef} 
+              className="printable-document p-6 sm:p-7 bg-white border border-slate-200 rounded-2xl space-y-5 text-slate-900 text-xs"
+              style={{ 
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif', 
+                letterSpacing: 'normal', 
+                wordSpacing: 'normal' 
+              }}
+            >
               
               {/* Slip Header */}
-              <div className="flex justify-between items-start border-b border-slate-200 pb-4">
-                <div>
-                  <h2 className="text-base font-black text-slate-900 uppercase tracking-tight">{property?.name}</h2>
-                  <p className="text-[11px] text-slate-500 font-medium">{property?.address}, {property?.city}, {property?.state}</p>
+              <div className="flex justify-between items-start border-b border-slate-200 pb-4 gap-4">
+                <div className="space-y-1">
+                  <h2 className="text-base font-black text-slate-900 uppercase tracking-tight m-0">
+                    {property?.name}
+                  </h2>
+                  <p className="text-[11px] text-slate-500 font-medium m-0">
+                    {[property?.address, property?.city, property?.state].filter(Boolean).join(', ')}
+                  </p>
                 </div>
-                <div className="text-right">
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
+                <div className="text-right shrink-0">
+                  <span className="inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
                     Pending Verification
                   </span>
-                  <span className="block font-mono text-xs font-black text-rose-600 mt-1">{submittedBooking.bookingId}</span>
+                  <span className="block font-mono text-xs font-black text-rose-600 mt-1">
+                    {submittedBooking.bookingId}
+                  </span>
                 </div>
               </div>
 
               {/* Guest & Stay Grid */}
-              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl">
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Guest Information</span>
-                  <p className="font-bold text-slate-900">{submittedBooking.customer?.name}</p>
-                  <p className="text-slate-600 font-medium">{submittedBooking.customer?.mobile}</p>
-                  {submittedBooking.customer?.email && <p className="text-slate-600 font-medium">{submittedBooking.customer?.email}</p>}
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <div className="space-y-1 text-left">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Guest Information</span>
+                  <p className="font-bold text-slate-900 m-0">{submittedBooking.customer?.name}</p>
+                  <p className="text-slate-600 font-medium m-0">{submittedBooking.customer?.mobile}</p>
+                  {submittedBooking.customer?.email && (
+                    <p className="text-slate-600 font-medium m-0">{submittedBooking.customer?.email}</p>
+                  )}
                 </div>
                 <div className="space-y-1 text-right">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Stay Dates</span>
-                  <p className="font-bold text-slate-900">Check-in: {checkInDate}</p>
-                  <p className="font-bold text-slate-900">Check-out: {checkOutDate}</p>
-                  <p className="text-slate-600 font-medium">{calcNights} Night(s)</p>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Stay Dates</span>
+                  <p className="font-bold text-slate-900 m-0">Check-in: {checkInDate}</p>
+                  <p className="font-bold text-slate-900 m-0">Check-out: {checkOutDate}</p>
+                  <p className="text-slate-600 font-medium m-0">{calcNights} Night(s)</p>
                 </div>
               </div>
 
               {/* Room Breakdown Table */}
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase">
-                    <th className="py-2">Room</th>
-                    <th className="py-2">Category</th>
-                    <th className="py-2">Meal Plan</th>
-                    <th className="py-2 text-right">Price</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-medium">
-                  {selectedRooms.map((r, i) => (
-                    <tr key={i}>
-                      <td className="py-2 font-bold text-slate-800">Room {r.roomNumber}</td>
-                      <td className="py-2">{r.categoryName}</td>
-                      <td className="py-2">{r.mealPlan || 'EP'}</td>
-                      <td className="py-2 text-right font-bold">₹{Number(r.price * calcNights).toLocaleString()}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase bg-slate-50/50">
+                      <th className="py-2.5 px-3">Room</th>
+                      <th className="py-2.5 px-3">Category</th>
+                      <th className="py-2.5 px-3">Meal Plan</th>
+                      <th className="py-2.5 px-3 text-right">Price</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* Advance Payment Details */}
-              <div className="border-t border-slate-200 pt-3 space-y-1.5 text-xs">
-                <div className="flex justify-between text-slate-600">
-                  <span>Room Tariff:</span>
-                  <span className="font-bold">₹{Number(calculatedPricing.roomCost).toLocaleString()}</span>
-                </div>
-                {Number(calculatedPricing.discount) > 0 && (
-                  <div className="flex justify-between text-emerald-700 font-bold">
-                    <span>Discount ({appliedCoupon?.code || submittedBooking.couponCode || 'Coupon'}):</span>
-                    <span>-₹{Number(calculatedPricing.discount).toLocaleString()}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-slate-600">
-                  <span>Total Stay Cost:</span>
-                  <span className="font-bold">₹{Number(calculatedPricing.finalAmount).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-emerald-700 font-bold">
-                  <span>Advance Paid:</span>
-                  <span>₹{Number(advanceAmount).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>Transaction UTR:</span>
-                  <span className="font-mono font-bold">{transactionId}</span>
-                </div>
-                <div className="flex justify-between text-rose-700 font-bold pt-1 border-t border-slate-100">
-                  <span>Balance Due at Check-in:</span>
-                  <span>₹{Number(remainingBalance).toLocaleString()}</span>
-                </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium">
+                    {selectedRooms.map((r, i) => (
+                      <tr key={i}>
+                        <td className="py-2.5 px-3 font-bold text-slate-800">Room {r.roomNumber}</td>
+                        <td className="py-2.5 px-3">{r.categoryName}</td>
+                        <td className="py-2.5 px-3">{r.mealPlan || 'EP'}</td>
+                        <td className="py-2.5 px-3 text-right font-bold">₹{Number(r.price * calcNights).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
+              {/* Advance Payment Details */}
+              <div className="border-t border-slate-200 pt-3 space-y-2 text-xs">
+                <table className="w-full border-collapse">
+                  <tbody>
+                    <tr>
+                      <td className="py-1 text-slate-600">Room Tariff:</td>
+                      <td className="py-1 text-right font-bold text-slate-900">₹{Number(calculatedPricing.roomCost).toLocaleString()}</td>
+                    </tr>
+                    {Number(calculatedPricing.discount) > 0 && (
+                      <tr className="text-emerald-700 font-bold">
+                        <td className="py-1">Discount ({appliedCoupon?.code || submittedBooking.couponCode || 'Coupon'}):</td>
+                        <td className="py-1 text-right">-₹{Number(calculatedPricing.discount).toLocaleString()}</td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td className="py-1 text-slate-600">Total Stay Cost:</td>
+                      <td className="py-1 text-right font-bold text-slate-900">₹{Number(calculatedPricing.finalAmount).toLocaleString()}</td>
+                    </tr>
+                    <tr className="text-emerald-700 font-bold">
+                      <td className="py-1">Advance Paid:</td>
+                      <td className="py-1 text-right">₹{Number(advanceAmount).toLocaleString()}</td>
+                    </tr>
+                    {transactionId && (
+                      <tr>
+                        <td className="py-1 text-slate-600">Transaction UTR:</td>
+                        <td className="py-1 text-right font-mono font-bold text-slate-900">{transactionId}</td>
+                      </tr>
+                    )}
+                    <tr className="border-t border-slate-200 font-black text-rose-700">
+                      <td className="py-1.5 text-sm">Balance Due at Check-in:</td>
+                      <td className="py-1.5 text-right text-sm">₹{Number(remainingBalance).toLocaleString()}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Terms & Conditions Link (HO-4) */}
+              {property?._id && (
+                <div className="border-t border-slate-100 pt-3 text-center">
+                  <a
+                    href={`/terms/${property._id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] font-bold text-rose-600 hover:underline"
+                  >
+                    Read Homestay Terms & Conditions
+                  </a>
+                </div>
+              )}
+
               {/* Footer Note */}
-              <div className="border-t border-slate-100 pt-3 text-[10px] text-slate-400 text-center">
+              <div className="border-t border-slate-100 pt-3 text-[10px] text-slate-400 text-center leading-relaxed">
                 Your dates are held and blocked on the availability schedule. The homestay host will verify your payment receipt and confirm your stay.
               </div>
 

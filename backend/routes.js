@@ -1912,7 +1912,18 @@ router.get(['/superadmin', '/super-admin-overview'], async (req, res) => {
         if (expiryDate && expiryDate >= now && expiryDate <= thirtyDaysFromNow) {
           expiringSoon++;
           const daysLeft = Math.max(1, Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24)));
-          const primaryPropName = o.properties?.[0]?.propertyName || 'Floala Inn';
+          
+          // Accurately map homestay/property to this owner
+          const linkedProp = properties.find(p => 
+            p.ownerId?.toString() === o._id.toString() ||
+            o.properties?.some(op => (op._id && p._id && op._id.toString() === p._id.toString()) || (op.propertyId && p.propertyId && op.propertyId === p.propertyId))
+          ) || properties.find(p => 
+            p.ownerName && ownerName && p.ownerName.trim().toLowerCase() === ownerName.trim().toLowerCase()
+          );
+
+          const primaryPropName = linkedProp?.name || linkedProp?.propertyName || linkedProp?.title ||
+            o.properties?.[0]?.propertyName || o.properties?.[0]?.name || o.homestayName || '—';
+
           subscriptionsExpiringSoon.push({
             id: o._id,
             rank: expiringSoon,
@@ -13378,7 +13389,12 @@ router.get('/homestay-owner/availability', authenticateToken, async (req, res) =
         name: property.name,
         city: property.city,
         state: property.state,
-        status: property.status
+        status: property.status,
+        allowedMealPlans: (Array.isArray(property.allowedMealPlans) && property.allowedMealPlans.length > 0) 
+          ? property.allowedMealPlans 
+          : ['EP', 'CP', 'MAP', 'AP'],
+        termsAndConditions: property.termsAndConditions || '',
+        paymentSettings: property.paymentSettings || {}
       },
       allProperties: allOwnerProperties,
       viewMode,
@@ -13653,13 +13669,19 @@ router.post('/homestay-owner/bookings/calculate-price', authenticateToken, async
       totalRoomCost += ((baseRatePerNight + mealSupplement + extraGuestCost) * nights);
     }
 
-    const totalTax = Math.round(totalRoomCost * 0.12);
+    const propDoc = await Property.findById(propertyId).select('paymentSettings');
+    const isB2B = bookingType === 'agent' || bookingType === 'b2b';
+    const taxRate = isB2B 
+      ? (propDoc?.paymentSettings?.b2bTaxRate !== undefined ? Number(propDoc.paymentSettings.b2bTaxRate) : 5)
+      : (propDoc?.paymentSettings?.b2cTaxRate !== undefined ? Number(propDoc.paymentSettings.b2cTaxRate) : 12);
+    const totalTax = Math.round(totalRoomCost * (taxRate / 100));
     const finalAmount = totalRoomCost + totalTax;
 
     res.json({
       nights,
       roomCost: totalRoomCost,
       tax: totalTax,
+      taxRate,
       addOns: 0,
       discount: 0,
       finalAmount,
@@ -13823,8 +13845,13 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
       authoritativeDiscount = Number(pricing.discount);
     }
 
+    const isB2B = bookingMode === 'Travel Agent' || bookingMode === 'B2B';
+    const b2bTaxRate = property.paymentSettings?.b2bTaxRate !== undefined ? Number(property.paymentSettings.b2bTaxRate) : 5;
+    const b2cTaxRate = property.paymentSettings?.b2cTaxRate !== undefined ? Number(property.paymentSettings.b2cTaxRate) : 12;
+    const activeTaxRate = isB2B ? b2bTaxRate : b2cTaxRate;
+
     const netTaxableCost = Math.max(0, roomCost - authoritativeDiscount);
-    let tax = Math.round(netTaxableCost * 0.12);
+    let tax = Math.round(netTaxableCost * (activeTaxRate / 100));
     const addOns = Number(pricing.addOns) || 0;
     let finalAmount = netTaxableCost + tax + addOns;
 
@@ -13857,14 +13884,16 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
       checkOutDate: outDate,
       propertyId: property._id,
       ownerId: property.ownerId,
-      bookingMode: bookingMode === 'Travel Agent' ? 'Travel Agent' : 'Guest',
+      bookingMode: isB2B ? 'Travel Agent' : 'Guest',
       holdExpiresAt,
       customer: {
         name: guestName.trim(),
         mobile: guestMobile.trim(),
-        email: customer?.email || '',
+        email: customer?.email || req.body.guestEmail || '',
         address: customer?.address || ''
       },
+      specialRequests: customer?.specialRequests || req.body.specialRequests || notes || '',
+      remarks: customer?.specialRequests || req.body.specialRequests || notes || '',
       guests: {
         total: totalAdults + totalChildren,
         adults: totalAdults,
@@ -13897,6 +13926,7 @@ router.post('/homestay-owner/bookings', authenticateToken, async (req, res) => {
         discount: authoritativeDiscount,
         couponCode: validatedCoupon ? validatedCoupon.code : '',
         tax,
+        taxRate: activeTaxRate,
         addOns,
         addOnsRemark: pricing.addOnsRemark || '',
         paidAmount: advAmount,
@@ -14912,6 +14942,8 @@ router.get('/homestay-owner/settings/payments', authenticateToken, async (req, r
     const advancePercent = propPay.advancePercent !== undefined ? propPay.advancePercent : (owner.advancePercent !== undefined ? owner.advancePercent : 30);
     const advanceType = propPay.advanceType || owner.advanceType || 'percent';
     const advanceAmount = propPay.advanceAmount || owner.advanceAmount || 0;
+    const b2bTaxRate = propPay.b2bTaxRate !== undefined ? propPay.b2bTaxRate : (owner.b2bTaxRate !== undefined ? owner.b2bTaxRate : 5);
+    const b2cTaxRate = propPay.b2cTaxRate !== undefined ? propPay.b2cTaxRate : (owner.b2cTaxRate !== undefined ? owner.b2cTaxRate : 12);
 
     const paymentSettings = {
       accountHolderName,
@@ -14923,7 +14955,9 @@ router.get('/homestay-owner/settings/payments', authenticateToken, async (req, r
       upiQrCode,
       advancePercent,
       advanceType,
-      advanceAmount
+      advanceAmount,
+      b2bTaxRate,
+      b2cTaxRate
     };
 
     res.json({
@@ -14961,7 +14995,9 @@ router.put('/homestay-owner/settings/payments', authenticateToken, async (req, r
       upiQrCode, 
       advancePercent, 
       advanceType,
-      advanceAmount
+      advanceAmount,
+      b2bTaxRate,
+      b2cTaxRate
     } = req.body;
 
     const owner = await HomestayOwner.findById(ownerId);
@@ -14984,6 +15020,8 @@ router.put('/homestay-owner/settings/payments', authenticateToken, async (req, r
         if (advancePercent !== undefined) targetProperty.paymentSettings.advancePercent = Number(advancePercent);
         if (advanceType !== undefined) targetProperty.paymentSettings.advanceType = advanceType;
         if (advanceAmount !== undefined) targetProperty.paymentSettings.advanceAmount = Number(advanceAmount);
+        if (b2bTaxRate !== undefined) targetProperty.paymentSettings.b2bTaxRate = Number(b2bTaxRate);
+        if (b2cTaxRate !== undefined) targetProperty.paymentSettings.b2cTaxRate = Number(b2cTaxRate);
         await targetProperty.save();
       }
     }
@@ -14999,6 +15037,8 @@ router.put('/homestay-owner/settings/payments', authenticateToken, async (req, r
     if (advancePercent !== undefined) owner.advancePercent = Number(advancePercent);
     if (advanceType !== undefined) owner.advanceType = advanceType;
     if (advanceAmount !== undefined) owner.advanceAmount = Number(advanceAmount);
+    if (b2bTaxRate !== undefined) owner.b2bTaxRate = Number(b2bTaxRate);
+    if (b2cTaxRate !== undefined) owner.b2cTaxRate = Number(b2cTaxRate);
 
     await owner.save();
 
@@ -15012,7 +15052,9 @@ router.put('/homestay-owner/settings/payments', authenticateToken, async (req, r
       upiQrCode: owner.upiQrCode,
       advancePercent: owner.advancePercent,
       advanceType: owner.advanceType,
-      advanceAmount: owner.advanceAmount
+      advanceAmount: owner.advanceAmount,
+      b2bTaxRate: owner.b2bTaxRate !== undefined ? owner.b2bTaxRate : 5,
+      b2cTaxRate: owner.b2cTaxRate !== undefined ? owner.b2cTaxRate : 12
     };
 
     res.json({
@@ -15022,6 +15064,59 @@ router.put('/homestay-owner/settings/payments', authenticateToken, async (req, r
       paymentSettings: currentPay,
       ...currentPay
     });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// PUT /api/homestay-owner/properties/:id/allowed-meal-plans
+router.put('/homestay-owner/properties/:id/allowed-meal-plans', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { allowedMealPlans } = req.body;
+    if (!Array.isArray(allowedMealPlans) || allowedMealPlans.length === 0) {
+      return res.status(400).json({ error: 'ValidationError', message: 'At least one meal plan must be selected.' });
+    }
+    const validPlans = ['EP', 'CP', 'MAP', 'AP'];
+    const sanitizedPlans = allowedMealPlans.filter(p => validPlans.includes(p));
+    if (sanitizedPlans.length === 0) {
+      return res.status(400).json({ error: 'ValidationError', message: 'Please select valid meal plans (EP, CP, MAP, AP).' });
+    }
+    const prop = await Property.findByIdAndUpdate(id, { allowedMealPlans: sanitizedPlans }, { new: true });
+    if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found.' });
+    res.json({ success: true, allowedMealPlans: prop.allowedMealPlans, message: 'Meal plan restrictions applied successfully.' });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// GET /api/homestay-owner/properties/:id/terms
+router.get(['/homestay-owner/properties/:id/terms', '/public/properties/:id/terms'], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const prop = await Property.findById(id).select('name propertyId termsAndConditions policies');
+    if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found' });
+    const terms = prop.termsAndConditions || prop.policies?.termsAndConditions || [
+      '1. Standard check-in time is 02:00 PM and check-out time is 11:00 AM.',
+      '2. Guests must present valid government photo identification upon check-in.',
+      '3. Smoking and loud music are strictly restricted in guest rooms as per homestay policy.',
+      '4. Any damage to property fixtures or amenities will be charged directly to the guest before departure.',
+      '5. Cancellations and refunds are processed strictly per the homestay’s published cancellation policy.'
+    ].join('\n\n');
+    res.json({ success: true, propertyName: prop.name, propertyId: prop.propertyId, termsAndConditions: terms });
+  } catch (err) {
+    res.status(500).json({ error: 'ServerError', message: err.message });
+  }
+});
+
+// PUT /api/homestay-owner/properties/:id/terms
+router.put('/homestay-owner/properties/:id/terms', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { termsAndConditions } = req.body;
+    const prop = await Property.findByIdAndUpdate(id, { termsAndConditions: String(termsAndConditions || '').trim() }, { new: true });
+    if (!prop) return res.status(404).json({ error: 'NotFound', message: 'Property not found' });
+    res.json({ success: true, termsAndConditions: prop.termsAndConditions, message: 'Terms & Conditions saved successfully.' });
   } catch (err) {
     res.status(500).json({ error: 'ServerError', message: err.message });
   }
@@ -16157,7 +16252,14 @@ router.get('/public/booking-link/:token', async (req, res) => {
         houseRules: prop.houseRules,
         images: Array.from(new Set(allImages.filter(Boolean))),
         amenities: resolvedAmenities.map(a => a.name),
-        resolvedAmenities
+        resolvedAmenities,
+        allowedMealPlans: (Array.isArray(prop.allowedMealPlans) && prop.allowedMealPlans.length > 0) 
+          ? prop.allowedMealPlans 
+          : ['EP', 'CP', 'MAP', 'AP'],
+        termsAndConditions: prop.termsAndConditions || '',
+        paymentSettings: prop.paymentSettings || {},
+        b2bTaxRate: prop.paymentSettings?.b2bTaxRate !== undefined ? prop.paymentSettings.b2bTaxRate : 5,
+        b2cTaxRate: prop.paymentSettings?.b2cTaxRate !== undefined ? prop.paymentSettings.b2cTaxRate : 12
       };
     };
 
@@ -17024,8 +17126,19 @@ router.post('/public/calculate-price', async (req, res) => {
       }
     }
 
+    const propForTax = await Property.findOne({
+      $or: [
+        { _id: mongoose.Types.ObjectId.isValid(propertyId) ? propertyId : null },
+        { propertyId: propertyId }
+      ].filter(Boolean)
+    }).select('paymentSettings');
+    const isB2B = bookingType === 'agent' || bookingType === 'b2b';
+    const taxRate = isB2B 
+      ? (propForTax?.paymentSettings?.b2bTaxRate !== undefined ? Number(propForTax.paymentSettings.b2bTaxRate) : 5)
+      : (propForTax?.paymentSettings?.b2cTaxRate !== undefined ? Number(propForTax.paymentSettings.b2cTaxRate) : 12);
+
     const discountedCost = Math.max(0, totalRoomCost - discountAmount);
-    const totalTax = Math.round(discountedCost * 0.12);
+    const totalTax = Math.round(discountedCost * (taxRate / 100));
     const finalAmount = discountedCost + totalTax;
 
     res.json({
@@ -17035,6 +17148,7 @@ router.post('/public/calculate-price', async (req, res) => {
       appliedCoupon: appliedCouponInfo,
       discountedRoomCost: discountedCost,
       tax: totalTax,
+      taxRate,
       addOns: 0,
       finalAmount,
       balanceAmount: finalAmount
@@ -17178,8 +17292,12 @@ router.post('/public/create-booking', async (req, res) => {
       }
     }
 
+    const isB2B = bookingType === 'agent' || bookingType === 'b2b';
+    const taxRate = isB2B
+      ? (property.paymentSettings?.b2bTaxRate !== undefined ? Number(property.paymentSettings.b2bTaxRate) : 5)
+      : (property.paymentSettings?.b2cTaxRate !== undefined ? Number(property.paymentSettings.b2cTaxRate) : 12);
     const discountedCost = Math.max(0, totalRoomCost - discountAmount);
-    const totalTax = Math.round(discountedCost * 0.12);
+    const totalTax = Math.round(discountedCost * (taxRate / 100));
     const finalAmount = discountedCost + totalTax;
 
     // Fetch owner to determine advance percentage or fixed amount
@@ -17232,12 +17350,15 @@ router.post('/public/create-booking', async (req, res) => {
       pricing: {
         basePrice: totalRoomCost,
         tax: totalTax,
+        taxRate,
         addOns: 0,
         discount: discountAmount,
         finalAmount,
         paidAmount: paidAdv,
         pendingAmount: Math.max(0, finalAmount - paidAdv)
       },
+      specialRequests: specialRequests || '',
+      remarks: specialRequests || '',
       couponCode: appliedCouponDoc?.code || '',
       paymentStatus: 'Pending',
       paymentDetails: {

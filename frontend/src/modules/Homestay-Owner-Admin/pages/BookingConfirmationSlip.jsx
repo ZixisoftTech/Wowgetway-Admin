@@ -99,24 +99,24 @@ export default function BookingConfirmationSlip() {
   const property = booking?.propertyId || {};
   const business = property?.businessDetails || booking?.businessDetails || {};
 
-  const bookingIdDisplay = booking?.bookingId || (requestId?.startsWith('WG') ? requestId : `WG-BK-${requestId?.slice(-5) || '01034'}`);
+  const bookingIdDisplay = booking?.bookingId || (requestId?.startsWith('WG') ? requestId : `WG-BK-${requestId?.slice(-5) || ''}`);
   const shareableSlipUrl = `${window.location.origin}/confirmation-slip/${requestId || booking?._id || booking?.bookingId}`;
 
-  const rawPropName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'Pandim Homestay';
+  const rawPropName = business?.homestayName || property?.name || booking?.propertyDetails?.propertyName || 'Homestay';
   const propertyName = formatHomestayName(rawPropName);
   const propertyAddress = business?.fullAddress || [
     property?.address,
     property?.city,
     property?.state
-  ].filter(Boolean).join(', ') || 'Plot 42, Apple Orchard Way, Old Manali, HP - 175131';
-  const propertyContact = business?.contactNumber || property?.ownerMobile || property?.phone || '+91 98765 43210';
-  const propertyEmail = business?.emailId || property?.ownerEmail || 'official@homestaywow.in';
-  const propertyGstin = business?.gstNumber || property?.gstNumber || '02AABCT1332F1Z8';
+  ].filter(Boolean).join(', ') || '';
+  const propertyContact = business?.contactNumber || property?.ownerMobile || property?.phone || '';
+  const propertyEmail = business?.emailId || property?.ownerEmail || '';
+  const propertyGstin = business?.gstNumber || property?.gstNumber || '';
 
-  const guestName = booking?.customer?.name || booking?.guestDetails?.fullName || 'Aditya Joshi';
-  const rawPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '9855667788';
+  const guestName = booking?.customer?.name || booking?.guestDetails?.fullName || '-';
+  const rawPhone = booking?.customer?.mobile || booking?.customer?.phone || booking?.guestDetails?.phone || '';
   const guestPhone = formatPhoneWithCountryCode(rawPhone);
-  const guestEmail = booking?.customer?.email || booking?.guestDetails?.email || 'adityajoshi@example.com';
+  const guestEmail = booking?.customer?.email || booking?.guestDetails?.email || '';
 
   const rawIn = booking?.checkInDate || booking?.dates?.checkIn;
   const rawOut = booking?.checkOutDate || booking?.dates?.checkOut;
@@ -133,22 +133,22 @@ export default function BookingConfirmationSlip() {
   }
   if (booking?.dates?.nights) totalNights = booking.dates.nights;
 
-  const adults = booking?.guests?.adults || booking?.occupancy?.adults || 2;
+  const adults = booking?.guests?.adults || booking?.occupancy?.adults || 1;
   const children5To9 = booking?.occupancy?.children5To9 || 0;
   const children0To4 = booking?.occupancy?.children0To4 || 0;
 
   const roomCount = booking?.bookedRooms?.length || 1;
-  const roomNumbers = booking?.bookedRooms?.map(r => r.roomNumber).filter(Boolean).join(', ') || '103';
-  const roomCategoryName = booking?.bookedRooms?.[0]?.roomCategoryName || 'Deluxe';
-  const roomTypeDisplay = `Room ${roomNumbers} (${roomCategoryName})`;
+  const roomNumbers = booking?.bookedRooms?.map(r => r.roomNumber).filter(Boolean).join(', ') || '-';
+  const roomCategoryName = booking?.bookedRooms?.[0]?.roomCategoryName || 'Standard';
+  const roomTypeDisplay = roomNumbers !== '-' ? `Room ${roomNumbers} (${roomCategoryName})` : roomCategoryName;
 
   // Financials
-  const totalAmount = Number(booking?.pricing?.finalAmount || booking?.amount || booking?.pricing?.totalAmount || 12960);
-  const advancePaid = Number(booking?.pricing?.paidAmount !== undefined ? booking.pricing.paidAmount : (booking?.pricing?.advancePaid || 12960));
+  const totalAmount = Number(booking?.pricing?.finalAmount || booking?.amount || booking?.pricing?.totalAmount || 0);
+  const advancePaid = Number(booking?.pricing?.paidAmount !== undefined ? booking.pricing.paidAmount : (booking?.pricing?.advancePaid || 0));
   const balanceDue = booking?.pricing?.pendingAmount !== undefined ? Number(booking.pricing.pendingAmount) : Math.max(0, totalAmount - advancePaid);
-  const tax = Number(booking?.pricing?.tax !== undefined ? booking.pricing.tax : 1260);
-  const addOns = Number(booking?.pricing?.addOns || (booking?.pricing?.tax !== undefined ? 0 : 1200));
-  const addOnsRemark = booking?.pricing?.addOnsRemark || (addOns > 0 ? 'Bonfire & Guided Orchard Trek' : '');
+  const tax = Number(booking?.pricing?.tax !== undefined ? booking.pricing.tax : 0);
+  const addOns = Number(booking?.pricing?.addOns || 0);
+  const addOnsRemark = booking?.pricing?.addOnsRemark || '';
   const extraBed = Number(booking?.pricing?.extraBed || 0);
 
   const subtotal = Number(booking?.pricing?.bookingAmount || Math.max(0, totalAmount - tax));
@@ -159,17 +159,20 @@ export default function BookingConfirmationSlip() {
   const isPaid = balanceDue <= 0;
 
   // Meal Plan & Notes
-  const mealPlanDisplay = booking?.mealPlan || booking?.bookedRooms?.[0]?.mealPlan || 'CP';
-  const specialRequestsDisplay = booking?.specialRequests || booking?.remarks || addOnsRemark || 'Bonfire & Guided Orchard Trek';
+  const mealPlanDisplay = booking?.mealPlan || booking?.bookedRooms?.[0]?.mealPlan || 'EP';
+  const specialRequestsDisplay = booking?.specialRequests || booking?.remarks || addOnsRemark || '';
 
   // Payment method & txn
-  const paymentMode = booking?.paymentMethod || booking?.paymentMode || 'UPI';
-  const transactionId = booking?.transactionId || (booking?.bankVerification?.utrNumber) || 'UPI-401051-20';
+  const paymentMode = booking?.paymentMethod || booking?.paymentMode || '-';
+  const transactionId = booking?.transactionId || (booking?.bankVerification?.utrNumber) || '-';
 
-  // Signatory
-  const signatoryName = business?.authorizedSignatoryName || property?.ownerName || 'Rajeshwar Sharma';
-  const signatoryDesignation = business?.designation || 'Managing Partner & Host';
+  // Signatory & Branding
+  const signatoryName = business?.authorizedSignatoryName || property?.ownerName || '';
+  const signatoryDesignation = business?.designation || (signatoryName ? 'Authorized Signatory' : '');
   const signatureImage = business?.signatureImage || '';
+  const stampImage = business?.stampImage || '';
+  const propertyLogo = business?.logo || property?.logo || '';
+  const propertyId = property?._id || property?.id || booking?.propertyId?._id || booking?.propertyId;
 
   const handlePrint = () => {
     const prevTitle = document.title;
@@ -240,28 +243,43 @@ export default function BookingConfirmationSlip() {
       >
         {/* Document Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-1">
-          {/* Header Left: Brand Logo */}
-          <div className="space-y-0.5">
+          {/* Header Left: Brand Logo + Property Logo */}
+          <div className="flex items-center gap-3">
+            {propertyLogo && (
+              <img 
+                src={getImageUrl(propertyLogo)} 
+                alt={propertyName} 
+                className="h-10 w-auto max-w-[120px] object-contain rounded"
+              />
+            )}
             <WowGatewaysLogo size="small" />
           </div>
 
           {/* Header Right: Homestay Contact Details */}
           <div className="sm:text-right space-y-0.5 text-[10.5px]">
             <h2 className="text-sm font-bold text-slate-900 leading-tight">{propertyName}</h2>
-            <p className="text-[10px] text-slate-600 max-w-sm sm:ml-auto leading-tight">{propertyAddress}</p>
-            <div className="flex flex-wrap sm:justify-end items-center gap-x-3 text-[10px] text-slate-600">
-              <span className="flex items-center gap-1">
-                <Phone size={10} className="text-slate-400" />
-                <span>{propertyContact}</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <Mail size={10} className="text-slate-400" />
-                <span>{propertyEmail}</span>
-              </span>
-            </div>
-            <p className="text-[10px] font-bold text-slate-800">
-              GSTIN: <span className="font-mono text-slate-900">{propertyGstin}</span>
-            </p>
+            {propertyAddress && <p className="text-[10px] text-slate-600 max-w-sm sm:ml-auto leading-tight">{propertyAddress}</p>}
+            {(propertyContact || propertyEmail) && (
+              <div className="flex flex-wrap sm:justify-end items-center gap-x-3 text-[10px] text-slate-600">
+                {propertyContact && (
+                  <span className="flex items-center gap-1">
+                    <Phone size={10} className="text-slate-400" />
+                    <span>{propertyContact}</span>
+                  </span>
+                )}
+                {propertyEmail && (
+                  <span className="flex items-center gap-1">
+                    <Mail size={10} className="text-slate-400" />
+                    <span>{propertyEmail}</span>
+                  </span>
+                )}
+              </div>
+            )}
+            {propertyGstin && (
+              <p className="text-[10px] font-bold text-slate-800">
+                GSTIN: <span className="font-mono text-slate-900">{propertyGstin}</span>
+              </p>
+            )}
           </div>
         </div>
 
@@ -332,7 +350,7 @@ export default function BookingConfirmationSlip() {
               <div className="grid grid-cols-[135px_10px_1fr]">
                 <span>Email Address</span>
                 <span className="text-slate-400">:</span>
-                <strong className="text-slate-900 break-all">{guestEmail}</strong>
+                <strong className="text-slate-900 break-all">{guestEmail || '-'}</strong>
               </div>
               <div className="grid grid-cols-[135px_10px_1fr]">
                 <span>No. of Adults</span>
@@ -614,36 +632,62 @@ export default function BookingConfirmationSlip() {
             </div>
             <div className="p-2.5">
               <p className="text-[10.5px] text-slate-700 leading-snug">
-                {specialRequestsDisplay}
+                {specialRequestsDisplay || 'None'}
               </p>
             </div>
           </div>
         </div>
 
-        {/* Signatory Area */}
-        <div className="pt-1 flex justify-end">
-          <div className="text-right min-w-[170px]">
-            <span className="text-[10px] font-bold text-slate-800 block">
-              For {propertyName}
-            </span>
-            <div className="h-6 flex items-end justify-end my-0.5">
-              {signatureImage ? (
+        {/* Signatory Area & Stamp */}
+        <div className="pt-1 flex flex-col sm:flex-row justify-between items-end gap-3">
+          {/* Homestay Terms & Conditions Link */}
+          <div className="text-left text-[9.5px] text-slate-500 max-w-[320px]">
+            <span>This confirmation is governed by the homestay&apos;s policies. </span>
+            {propertyId && (
+              <a 
+                href={`/terms/${propertyId}`} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="text-[#e11d48] font-bold underline hover:text-rose-700 inline-block mt-0.5"
+              >
+                Read Homestay Terms & Conditions &rarr;
+              </a>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3 text-right ml-auto">
+            {stampImage && (
+              <div className="shrink-0">
                 <img 
-                  src={getImageUrl(signatureImage)} 
-                  alt="Authorized Signature" 
-                  className="h-6 object-contain"
+                  src={getImageUrl(stampImage)} 
+                  alt="Homestay Stamp" 
+                  className="w-14 h-14 object-contain opacity-90"
                 />
-              ) : (
-                <span className="font-serif italic text-base text-slate-800 pr-2">
-                  {signatoryName.split(' ')[0] || 'Rajeshwar'}
-                </span>
-              )}
-            </div>
-            <div style={{ borderTop: '1px solid #cbd5e1' }} className="pt-0.5 inline-block min-w-[140px]">
-              <strong className="block text-[10.5px] text-slate-900">{signatoryName}</strong>
-              <span className="text-[9px] text-slate-500 font-medium block">
-                {signatoryDesignation}
+              </div>
+            )}
+            <div className="text-right min-w-[150px]">
+              <span className="text-[10px] font-bold text-slate-800 block">
+                For {propertyName}
               </span>
+              <div className="h-7 flex items-end justify-end my-0.5">
+                {signatureImage ? (
+                  <img 
+                    src={getImageUrl(signatureImage)} 
+                    alt="Authorized Signature" 
+                    className="h-7 object-contain"
+                  />
+                ) : (
+                  <div className="h-5 w-24 border-b border-dashed border-slate-300 ml-auto" />
+                )}
+              </div>
+              <div style={{ borderTop: '1px solid #cbd5e1' }} className="pt-0.5 inline-block min-w-[130px]">
+                {signatoryName && <strong className="block text-[10.5px] text-slate-900">{signatoryName}</strong>}
+                {signatoryDesignation && (
+                  <span className="text-[9px] text-slate-500 font-medium block">
+                    {signatoryDesignation}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         </div>

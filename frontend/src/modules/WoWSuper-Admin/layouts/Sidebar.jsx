@@ -27,11 +27,7 @@ const menuItems = [
   { name: 'Dashboard', icon: LayoutGrid, path: '/dashboard' },
   { name: 'Homestays / Hotels', icon: Home, path: '/homestays' },
   { name: 'Homestay Owners', icon: UserCheck, path: '/homestay-owners' },
-  { name: 'Bookings', icon: Calendar, path: '/bookings' },
-  { name: 'Guests', icon: Users, path: '/users' },
   { name: 'Subscriptions', icon: CreditCard, path: '/subscription-plans' },
-  { name: 'Payments', icon: Wallet, path: '/payments' },
-  { name: 'Reports', icon: Clock, path: '/reports' },
   { name: 'Settings', icon: Settings, path: '/settings' },
   { name: 'Recycle Bin', icon: Trash2, path: '/recycle-bin' },
 ];

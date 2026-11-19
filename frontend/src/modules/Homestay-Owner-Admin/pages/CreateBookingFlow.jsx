@@ -57,6 +57,7 @@ export default function CreateBookingFlow() {
   const [phoneCountryCode, setPhoneCountryCode] = useState('+91');
   const [guestMobile, setGuestMobile] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
+  const [specialRequests, setSpecialRequests] = useState('');
 
   // Total Number of Rooms Required (1-5) - Default to 1 Room
   const [roomCount, setRoomCount] = useState(1);
@@ -462,8 +463,8 @@ export default function CreateBookingFlow() {
       });
 
       if (!isCustomPriceEdited) {
-        setTotalCost(res.data.roomCost || 6000);
-        setTotalTax(res.data.tax || 720);
+        setTotalCost(res.data.roomCost !== undefined ? res.data.roomCost : 0);
+        setTotalTax(res.data.tax !== undefined ? res.data.tax : 0);
       }
     } catch (err) {
       console.error('Error calculating pricing:', err);
@@ -621,8 +622,12 @@ export default function CreateBookingFlow() {
         customer: {
           name: guestName.trim(),
           mobile: `${phoneCountryCode} ${cleanMobile}`,
-          email: guestEmail
+          email: guestEmail.trim()
         },
+        guestEmail: guestEmail.trim(),
+        specialRequests: specialRequests.trim(),
+        remarks: specialRequests.trim(),
+        notes: specialRequests.trim(),
         checkInDate,
         checkOutDate,
         bookingMode,
@@ -928,6 +933,21 @@ export default function CreateBookingFlow() {
               </div>
             </div>
 
+            {/* Email ID (Optional) - HO-2 matching Reference 2B */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">EMAIL ID (Optional)</label>
+              <div className="relative">
+                <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="email"
+                  value={guestEmail}
+                  onChange={(e) => setGuestEmail(e.target.value)}
+                  placeholder="Enter email ID"
+                  className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition-all"
+                />
+              </div>
+            </div>
+
             {/* Total Rooms Required Dropdown */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Number of Rooms Required *</label>
@@ -951,6 +971,18 @@ export default function CreateBookingFlow() {
             <div className="p-3.5 bg-slate-50 border border-slate-100 text-slate-500 rounded-xl text-xs font-medium flex items-center gap-2">
               <Info size={14} className="text-slate-400 shrink-0" />
               <span>Add guest details, select number of rooms and click on "Select Rooms & Dates" to continue.</span>
+            </div>
+
+            {/* Special Request / Note (Optional) - HO-2 matching Reference 2B */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">SPECIAL REQUEST / NOTE (Optional)</label>
+              <textarea
+                rows={2}
+                value={specialRequests}
+                onChange={(e) => setSpecialRequests(e.target.value)}
+                placeholder="e.g. Early check-in, extra bed, mountain view, anniversary, etc."
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition-all resize-y"
+              />
             </div>
           </div>
 
@@ -1543,18 +1575,26 @@ export default function CreateBookingFlow() {
                         </select>
                       </div>
 
-                      {/* Meal Plan */}
+                      {/* Meal Plan (HO-1 restriction) */}
                       <div className="space-y-1">
                         <label className="text-[9px] font-black text-slate-400 uppercase">Meal Plan</label>
                         <select
-                          value={currentSlot.mealPlan || 'EP'}
+                          value={currentSlot.mealPlan || (selectedProperty?.allowedMealPlans?.[0] || 'EP')}
                           onChange={(e) => handleMealPlanChange(idx, e.target.value)}
                           className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
                         >
-                          <option value="EP">EP (Room Only)</option>
-                          <option value="CP">CP (With Breakfast)</option>
-                          <option value="MAP">MAP (Breakfast + Dinner)</option>
-                          <option value="AP">AP (All Meals)</option>
+                          {(!selectedProperty?.allowedMealPlans || selectedProperty.allowedMealPlans.includes('EP')) && (
+                            <option value="EP">EP (Room Only)</option>
+                          )}
+                          {(!selectedProperty?.allowedMealPlans || selectedProperty.allowedMealPlans.includes('CP')) && (
+                            <option value="CP">CP (With Breakfast)</option>
+                          )}
+                          {(!selectedProperty?.allowedMealPlans || selectedProperty.allowedMealPlans.includes('MAP')) && (
+                            <option value="MAP">MAP (Breakfast + Dinner)</option>
+                          )}
+                          {(!selectedProperty?.allowedMealPlans || selectedProperty.allowedMealPlans.includes('AP')) && (
+                            <option value="AP">AP (All Meals)</option>
+                          )}
                         </select>
                       </div>
                     </div>

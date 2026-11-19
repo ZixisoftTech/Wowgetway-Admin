@@ -226,7 +226,7 @@ export function formatDocStayDate(rawDate, defaultTime = '') {
  * Format telephone with +91 if needed
  */
 export function formatPhoneWithCountryCode(rawPhone) {
-  if (!rawPhone) return '+91 9855667788';
+  if (!rawPhone) return '-';
   const clean = String(rawPhone).trim();
   if (clean.startsWith('+')) return clean;
   if (clean.length === 10) return `+91 ${clean}`;
@@ -237,14 +237,13 @@ export function formatPhoneWithCountryCode(rawPhone) {
  * Format homestay name with Title Case
  */
 export function formatHomestayName(name) {
-  if (!name) return 'Pandim Homestay';
+  if (!name) return '';
   const trimmed = name.trim();
-  if (trimmed.toLowerCase() === 'pandim') return 'Pandim Homestay';
   return trimmed.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
 /**
- * Calculate dynamic GST breakdown
+ * Calculate dynamic tax breakdown (Flat tax without separate CGST/SGST lines)
  */
 export function calculateGstBreakdown(subtotal, tax) {
   const numSubtotal = Number(subtotal) || 0;
@@ -255,18 +254,17 @@ export function calculateGstBreakdown(subtotal, tax) {
       gstPercent: 0,
       cgstPercent: '0',
       sgstPercent: '0',
-      label: 'GST @ 0% (CGST 0% + SGST 0%)'
+      label: 'Taxes & Fees (0%)'
     };
   }
 
   const rawPercent = (numTax / numSubtotal) * 100;
   const roundedPercent = Math.round(rawPercent);
-  const halfPercent = (roundedPercent / 2).toFixed(roundedPercent % 2 === 0 ? 0 : 1);
 
   return {
     gstPercent: roundedPercent,
-    cgstPercent: halfPercent,
-    sgstPercent: halfPercent,
-    label: `GST @ ${roundedPercent}% (CGST ${halfPercent}% + SGST ${halfPercent}%)`
+    cgstPercent: String(roundedPercent / 2),
+    sgstPercent: String(roundedPercent / 2),
+    label: `Taxes & Fees (${roundedPercent}%)`
   };
 }

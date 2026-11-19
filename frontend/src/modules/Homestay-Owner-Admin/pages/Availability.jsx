@@ -40,7 +40,8 @@ import {
   Download,
   User,
   Briefcase,
-  ShieldCheck
+  ShieldCheck,
+  Utensils
 } from 'lucide-react';
 
 const getApiUrl = (path) => {
@@ -81,6 +82,10 @@ export default function Availability() {
   // Property selection state
   const [propertiesList, setPropertiesList] = useState([]);
   const [currentPropertyId, setCurrentPropertyId] = useState(null);
+
+  // Meal Plan Restrictions (HO-1)
+  const [allowedPlans, setAllowedPlans] = useState(['EP', 'CP', 'MAP', 'AP']);
+  const [isSavingPlans, setIsSavingPlans] = useState(false);
 
   // Calendar data from backend
   const [availabilityData, setAvailabilityData] = useState(null);
@@ -365,6 +370,9 @@ export default function Availability() {
         const pId = res.data.property.id || res.data.property._id;
         setCurrentPropertyId(pId);
         localStorage.setItem('wow_homestay_selected_property', pId);
+        if (Array.isArray(res.data.property.allowedMealPlans) && res.data.property.allowedMealPlans.length > 0) {
+          setAllowedPlans(res.data.property.allowedMealPlans);
+        }
       } else if (res.data.allProperties && res.data.allProperties.length > 0) {
         const first = res.data.allProperties[0];
         const fId = first._id || first.id || first.propertyId;
@@ -401,6 +409,56 @@ export default function Availability() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTogglePlan = (plan) => {
+    setAllowedPlans(prev => {
+      if (prev.includes(plan)) {
+        if (prev.length === 1) {
+          Swal.fire({
+            icon: 'warning',
+            title: 'Minimum One Plan Required',
+            text: 'At least one meal plan must remain enabled for bookings.',
+            confirmButtonColor: '#e11d48'
+          });
+          return prev;
+        }
+        return prev.filter(p => p !== plan);
+      } else {
+        return [...prev, plan];
+      }
+    });
+  };
+
+  const handleApplyMealPlans = async () => {
+    if (!currentPropertyId) {
+      Swal.fire('Notice', 'Please select a homestay first.', 'info');
+      return;
+    }
+    try {
+      setIsSavingPlans(true);
+      const token = getAuthToken();
+      await axios.put(
+        getApiUrl(`/api/homestay-owner/properties/${currentPropertyId}/allowed-meal-plans`),
+        { allowedMealPlans: allowedPlans },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      Swal.fire({
+        icon: 'success',
+        title: 'Meal Plans Updated',
+        text: 'Allowed booking meal plans have been updated successfully.',
+        timer: 2000,
+        showConfirmButton: false
+      });
+    } catch (err) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Failed to Save',
+        text: err.response?.data?.message || 'Could not update meal plans.'
+      });
+    } finally {
+      setIsSavingPlans(false);
     }
   };
 
@@ -1155,6 +1213,98 @@ export default function Availability() {
             <Calendar size={13} className="text-rose-600" />
             <span>Go to Today</span>
           </button>
+        </div>
+      </div>
+
+      {/* 2B. MEAL PLAN RESTRICTIONS SELECTOR (Change HO-1, matching Reference 1B) */}
+      <div className="bg-white border border-slate-200/90 p-4 sm:p-5 rounded-2xl shadow-sm space-y-3">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          {/* Title & Description */}
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+              <Utensils size={17} className="stroke-[2.5]" />
+            </div>
+            <div>
+              <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider m-0 leading-tight">
+                Take Booking in (Meal Plan)
+              </h3>
+              <p className="text-[11px] text-slate-400 font-semibold m-0 mt-0.5">
+                Select the meal plan(s) in which you want to take bookings.
+              </p>
+            </div>
+          </div>
+
+          {/* Meal Plan Checkboxes */}
+          <div className="flex flex-wrap items-center gap-3 sm:gap-6">
+            {/* EP Plan */}
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={allowedPlans.includes('EP')}
+                onChange={() => handleTogglePlan('EP')}
+                className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer accent-rose-600"
+              />
+              <div className="text-left">
+                <span className="text-xs font-black text-slate-800 block leading-tight">EP Plan</span>
+                <span className="text-[10px] text-slate-400 font-bold block leading-tight">(Room Only)</span>
+              </div>
+            </label>
+
+            {/* CP Plan */}
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={allowedPlans.includes('CP')}
+                onChange={() => handleTogglePlan('CP')}
+                className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer accent-rose-600"
+              />
+              <div className="text-left">
+                <span className="text-xs font-black text-slate-800 block leading-tight">CP Plan</span>
+                <span className="text-[10px] text-slate-400 font-bold block leading-tight">(Breakfast Only)</span>
+              </div>
+            </label>
+
+            {/* MAP Plan */}
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={allowedPlans.includes('MAP')}
+                onChange={() => handleTogglePlan('MAP')}
+                className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer accent-rose-600"
+              />
+              <div className="text-left">
+                <span className="text-xs font-black text-slate-800 block leading-tight">MAP Plan</span>
+                <span className="text-[10px] text-slate-400 font-bold block leading-tight">(Breakfast + Lunch + Dinner)</span>
+              </div>
+            </label>
+
+            {/* AP Plan */}
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={allowedPlans.includes('AP')}
+                onChange={() => handleTogglePlan('AP')}
+                className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer accent-rose-600"
+              />
+              <div className="text-left">
+                <span className="text-xs font-black text-slate-800 block leading-tight">AP Plan</span>
+                <span className="text-[10px] text-slate-400 font-bold block leading-tight">(All Meals)</span>
+              </div>
+            </label>
+          </div>
+
+          {/* Apply Change Button */}
+          <div className="self-end xl:self-center">
+            <button
+              type="button"
+              onClick={handleApplyMealPlans}
+              disabled={isSavingPlans}
+              className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer border-none shadow-sm flex items-center gap-1.5 transition-all"
+            >
+              <Check size={14} className="stroke-[3]" />
+              <span>{isSavingPlans ? 'Applying...' : 'Apply Change'}</span>
+            </button>
+          </div>
         </div>
       </div>
 

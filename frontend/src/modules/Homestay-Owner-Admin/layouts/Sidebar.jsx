@@ -15,6 +15,7 @@ import {
   Tag,
   CreditCard,
   Crown,
+  ScrollText,
   LogOut
 } from 'lucide-react';
 import { logout } from '../store/homestayOwnerAuthSlice.js';
@@ -46,6 +47,7 @@ export default function Sidebar() {
     { name: 'Signatures / Stamps / Logo', icon: Stamp, path: '/homestay-owner/signatures-stamps' },
     { name: 'Offers / Coupon', icon: Tag, path: '/homestay-owner/coupons' },
     { name: 'Manage Payments', icon: CreditCard, path: '/homestay-owner/settings/payments' },
+    { name: 'Terms & Conditions', icon: ScrollText, path: '/homestay-owner/terms' },
     { name: 'Manage Subscription', icon: Crown, path: '/homestay-owner/subscription' },
   ];
 
